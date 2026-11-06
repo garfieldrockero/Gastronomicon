@@ -1,0 +1,40 @@
+# Gradle y compilación
+.gradle/
+build/
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+
+# Sistema
+.DS_Store
+Thumbs.db
+*~
+
+# Instrucciones locales de IA
+CLAUDE.md
+AGENTS.md
+opencode.json
+.claude/
+.opencode/
+
+# Claves de firma: nunca en el repositorio (viven en los secretos de GitHub)
+*.jks
+*.keystore
+*.p12
+keystore.properties
+
+# Tokens y datos del servidor Mealie: nunca en el repositorio
+.env
+.env.*
+*.token
+token.txt
+
+# Logs de GitHub Actions descargados para revisarlos
+logs_*.zip
+
+# APK descargadas de Actions
+*.apk
+mealie-app-apk*.zip
