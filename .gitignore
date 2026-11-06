@@ -19,6 +19,8 @@ AGENTS.md
 opencode.json
 .claude/
 .opencode/
+# Memoria interna del proyecto: no se publica, igual que las reglas de IA
+docs/CONTEXTO.md
 
 # Claves de firma: nunca en el repositorio (viven en los secretos de GitHub)
 *.jks
@@ -38,3 +40,6 @@ logs_*.zip
 # APK descargadas de Actions
 *.apk
 mealie-app-apk*.zip
+
+# Informes de revisión para pasar entre agentes
+revision-*.md
