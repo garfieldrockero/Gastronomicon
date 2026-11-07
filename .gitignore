@@ -41,5 +41,5 @@ logs_*.zip
 *.apk
 mealie-app-apk*.zip
 
-# Informes de revisión para pasar entre agentes
-revision-*.md
+# Informes de revisión para pasar entre agentes (no se versionan)
+revisiones/
