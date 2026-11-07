@@ -2,10 +2,11 @@
 // toca servir: así una dependencia no puede colarse desde el repositorio que no es.
 pluginManagement {
     repositories {
-        google {
-            content {
+        // AndroidX y Android solo desde Google; si no está ahí, no se busca en Central.
+        exclusiveContent {
+            forRepository { google() }
+            filter {
                 includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
                 includeGroupByRegex("androidx.*")
             }
         }
@@ -22,13 +23,14 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google {
-            content {
+        exclusiveContent {
+            forRepository { google() }
+            filter {
                 includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
                 includeGroupByRegex("androidx.*")
             }
         }
+        // El resto (incluido com.google.*) viene de Maven Central.
         mavenCentral()
     }
 }
