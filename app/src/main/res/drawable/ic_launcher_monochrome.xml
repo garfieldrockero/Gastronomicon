@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Versión de un solo color para los iconos temáticos de Android 13+: el sistema solo
+     usa la forma y la tiñe él. El tenedor y la cuchara quedan como huecos en la tapa
+     (evenOdd), y los cantos de las hojas, como una escuadra separada. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Reducido un 8 % para que el libro no roce el borde de la máscara redonda. -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.92"
+        android:scaleY="0.92">
+        <path
+            android:fillColor="#FF000000"
+            android:fillType="evenOdd"
+            android:pathData="M36,28H71a2,2 0,0 1,2 2V75a2,2 0,0 1,-2 2H36a4,4 0,0 1,-4 -4V32a4,4 0,0 1,4 -4Z
+                M44.5,34h2v9h1.5v-9h2v9h1.5v-9h2v10q0,4 -3,5v20.5a1.5,1.5 0,0 1,-3 0V49q-3,-1 -3,-5Z
+                M60.5,46.63A4.5,6.5 0,1 1,63.5 46.63V69.5a1.5,1.5 0,0 1,-3 0Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M74.5,31H75a1,1 0,0 1,1 1V78a2,2 0,0 1,-2 2H39V78.5H74.5Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M63,78.5h4v5.5l-2,-2l-2,2Z" />
+    </group>
+</vector>
