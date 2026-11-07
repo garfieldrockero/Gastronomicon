@@ -1,0 +1,49 @@
+# Genera gradle/verification-metadata.xml para fijar las dependencias.
+# Es manual y no escribe en el repositorio: deja el archivo como artefacto para
+# que la persona lo revise y lo commitee.
+name: Verificación de dependencias
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadatos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar Java 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+          check-latest: true
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: '9.8.1'
+          # Sin caché: hay que resolver todo para que las sumas sean completas.
+          cache-disabled: true
+
+      - name: Generar los metadatos de verificación
+        run: |
+          gradle --no-daemon --refresh-dependencies \
+            --write-verification-metadata sha256 \
+            :core:test :app:assembleDebug :app:assembleRelease \
+            :app:testDebugUnitTest :app:testReleaseUnitTest
+
+      - name: Guardar los metadatos como artefacto
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verification-metadata
+          path: gradle/verification-metadata.xml
+          if-no-files-found: error
+          retention-days: 14
