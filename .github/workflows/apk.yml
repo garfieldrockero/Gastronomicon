@@ -4,7 +4,7 @@
 #
 # Tres jobs para no mezclar secretos con las pull requests:
 #   - pruebas: en todo, sin secretos.
-#   - apk-depuracion: en PRs y ramas que no son main, con clave de depuración.
+#   - apk-depuracion: en PRs y ejecuciones manuales que no son main, con clave de depuración.
 #   - apk-firma: solo en main, con el environment «firma» y la clave fija.
 name: APK
 
@@ -17,7 +17,8 @@ on:
 # Una ejecución por rama: si se sube otro commit, la anterior ya no interesa.
 concurrency:
   group: apk-${{ github.ref }}
-  cancel-in-progress: true
+  # No se cancela una firma de main a medias; en PR y ramas sí interesa la última.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Solo lectura: este workflow compila, no escribe nada en el repositorio.
 permissions:
@@ -55,8 +56,19 @@ jobs:
       - name: Pruebas del núcleo
         run: gradle --no-daemon :core:test
 
-  # APK de prueba para PRs y ramas que no son main. Sin secretos y con la clave de
-  # depuración: sirve para probar cambios, no para actualizar la app instalada.
+      # Si fallan, el informe HTML queda como artefacto para no tener que adivinar.
+      - name: Guardar el informe de pruebas si fallan
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pruebas-fallidas
+          path: core/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # APK de prueba para PRs y ejecuciones manuales que no son main. Sin secretos y
+  # con la clave de depuración: sirve para probar cambios, no para actualizar la app
+  # instalada.
   apk-depuracion:
     if: github.ref != 'refs/heads/main'
     needs: pruebas
@@ -82,6 +94,9 @@ jobs:
 
       - name: Compilar la APK de prueba
         run: gradle --no-daemon assembleRelease
+
+      - name: Comprobar manifiesto y configuración de red
+        run: bash .github/scripts/comprobar-manifiesto.sh
 
       - name: Guardar la APK de prueba como artefacto
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -135,9 +150,15 @@ jobs:
             echo "::error::Falta alguno de los secretos FIRMA_* del environment «firma»."
             exit 1
           fi
-          printf '%s' "$FIRMA_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/firma.jks"
+          printf '%s' "$FIRMA_KEYSTORE_BASE64" | base64 --decode --ignore-garbage > "$RUNNER_TEMP/firma.jks"
           if [ ! -s "$RUNNER_TEMP/firma.jks" ]; then
             echo "::error::El secreto FIRMA_KEYSTORE_BASE64 no produce un almacén de claves válido."
+            exit 1
+          fi
+          # Validación temprana: si la contraseña no abre el keystore, mejor saberlo
+          # aquí que en un error opaco de Gradle.
+          if ! keytool -list -keystore "$RUNNER_TEMP/firma.jks" -storepass:env FIRMA_KEYSTORE_PASSWORD >/dev/null 2>&1; then
+            echo "::error::FIRMA_KEYSTORE_PASSWORD no abre el keystore o el archivo está dañado."
             exit 1
           fi
           echo "FIRMA_KEYSTORE_PATH=$RUNNER_TEMP/firma.jks" >> "$GITHUB_ENV"
@@ -152,112 +173,9 @@ jobs:
           FIRMA_KEY_PASSWORD: ${{ secrets.FIRMA_KEY_PASSWORD }}
         run: gradle --no-daemon assembleRelease
 
-      # La app solo debe poder hablar con el servidor Mealie que configure cada persona.
-      # Si una dependencia nueva mete permisos de más, si se pierde la configuración de
-      # red o si alguien activa el tráfico en claro, falla.
-      - name: Comprobar permisos y red del manifiesto final
-        shell: bash
-        run: |
-          m=$(find app/build/intermediates -path '*merged_manifest*' -path '*elease*' -name AndroidManifest.xml | head -n 1)
-          if [ -z "$m" ]; then
-            echo "::error::No se encuentra el manifiesto final del release."
-            exit 1
-          fi
-          echo "Manifiesto final: $m"
-
-          # Se juntan las líneas porque el manifiesto combinado puede partir un elemento.
-          permisos=$(tr '\n' ' ' < "$m" | grep -oE '<uses-permission[^>]*>' | sed -E 's/.*android:name="([^"]+)".*/\1/' | sort -u || true)
-          echo "Permisos declarados:"
-          if [ -z "$permisos" ]; then
-            echo "  (ninguno)"
-          else
-            echo "$permisos" | sed 's/^/  /'
-          fi
-
-          # Solo estos permisos están aprobados. DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
-          # la añade AndroidX Core al manifiesto final: es un permiso signature de la
-          # propia app para sus receptores no exportados y no da acceso a nada externo.
-          # Si algún día se aprueban las notificaciones, hay que añadir aquí
-          # android.permission.POST_NOTIFICATIONS a propósito.
-          permitidos="android.permission.INTERNET android.permission.ACCESS_NETWORK_STATE io.github.garfieldrockero.gastronomicon.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-          while IFS= read -r p; do
-            [ -z "$p" ] && continue
-            case " $permitidos " in
-              *" $p "*) ;;
-              *)
-                echo "::error::Permiso no aprobado en el manifiesto: $p"
-                exit 1
-                ;;
-            esac
-          done <<< "$permisos"
-
-          if grep -qE "android:usesCleartextTraffic=['\"]true['\"]" "$m"; then
-            echo "::error::El manifiesto activa el tráfico HTTP en claro para toda la app."
-            exit 1
-          fi
-
-          if ! grep -qE "android:networkSecurityConfig=['\"]@xml/seguridad_red['\"]" "$m"; then
-            echo "::error::Falta android:networkSecurityConfig=\"@xml/seguridad_red\" en el manifiesto."
-            exit 1
-          fi
-
-          if grep -qE "android:debuggable=['\"]true['\"]" "$m"; then
-            echo "::error::El manifiesto de release permite depurar la app."
-            exit 1
-          fi
-
-          # allowBackup=false no basta en Android 12+: la transferencia directa a otro
-          # móvil se controla con dataExtractionRules, y esta app no debe exportar nada.
-          if ! grep -qE "android:allowBackup=['\"]false['\"]" "$m"; then
-            echo "::error::El manifiesto no desactiva las copias de seguridad."
-            exit 1
-          fi
-          if ! grep -qE "android:dataExtractionRules=['\"]@xml/extraccion_datos['\"]" "$m"; then
-            echo "::error::Falta android:dataExtractionRules=\"@xml/extraccion_datos\" en el manifiesto."
-            exit 1
-          fi
-
-          # Solo el launcher y el receptor de perfil de AndroidX pueden estar exportados.
-          componentes=$(tr '\n' ' ' < "$m" | grep -oE '<(activity|activity-alias|service|receiver|provider)[^>]*>' || true)
-          while IFS= read -r c; do
-            [ -z "$c" ] && continue
-            if printf '%s' "$c" | grep -qE "android:exported=['\"]true['\"]"; then
-              nombre=$(printf '%s' "$c" | sed -nE 's/.*android:name="([^"]+)".*/\1/p')
-              case "$nombre" in
-                ".MainActivity"|"io.github.garfieldrockero.gastronomicon.MainActivity"|"androidx.profileinstaller.ProfileInstallReceiver") ;;
-                *)
-                  echo "::error::Componente exportado no aprobado: ${nombre:-desconocido}"
-                  exit 1
-                  ;;
-              esac
-            fi
-          done <<< "$componentes"
-
-          # Defensa en profundidad: además del manifiesto, la configuración de red no
-          # puede habilitar HTTP ni confiar en certificados instalados por el usuario.
-          red=app/src/main/res/xml/seguridad_red.xml
-          if [ ! -f "$red" ]; then
-            echo "::error::No se encuentra $red."
-            exit 1
-          fi
-          if grep -qE "cleartextTrafficPermitted=['\"]true['\"]" "$red"; then
-            echo "::error::seguridad_red.xml permite tráfico HTTP en claro."
-            exit 1
-          fi
-          if grep -qE "src=['\"]user['\"]" "$red"; then
-            echo "::error::seguridad_red.xml confía en certificados de usuario."
-            exit 1
-          fi
-
-          # La regla de extracción de datos también debe estar en el código, no solo
-          # referenciada en el manifiesto.
-          extraccion=app/src/main/res/xml/extraccion_datos.xml
-          if [ ! -f "$extraccion" ]; then
-            echo "::error::No se encuentra $extraccion."
-            exit 1
-          fi
-
-          echo "Manifiesto correcto: permisos aprobados, sin tráfico en claro, sin depuración, sin copias y con la configuración de red."
+      # Manifiesto, permisos, copias, componentes exportados y configuración de red.
+      - name: Comprobar manifiesto y configuración de red
+        run: bash .github/scripts/comprobar-manifiesto.sh
 
       # La clave se borra siempre, aunque la compilación falle a medias.
       - name: Borrar la clave de firma

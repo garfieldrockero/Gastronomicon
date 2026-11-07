@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+
 // Núcleo en Kotlin puro: sin Android, para poder probarlo con JUnit sin emulador.
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -18,6 +20,8 @@ tasks.test {
     testLogging {
         events("failed")
         showStandardStreams = false
+        // En CI interesa la traza completa, no solo el nombre de la prueba.
+        exceptionFormat = TestExceptionFormat.FULL
     }
     // Resumen al final: sin él, el log de CI no dice cuántas pruebas se ejecutaron.
     afterSuite(
