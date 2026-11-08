@@ -428,7 +428,7 @@ class HtmlSanitizerTest {
 
     @Test(timeout = 10_000)
     fun `anidado profundo de miles de niveles`() {
-        val n = 20_000
+        val n = 15_000 // "<div>" * n + texto debe caber en MAX_INPUT_LENGTH
         for (tag in listOf("div", "b", "ul", "span")) {
             val result = HtmlSanitizer.sanitize("<$tag>".repeat(n) + "texto")
             assertTrue(tag, result.truncated)
