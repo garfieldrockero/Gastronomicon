@@ -13,7 +13,10 @@ import io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTranspo
 import io.github.garfieldrockero.gastronomicon.core.network.toConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.recipes.Page
 import io.github.garfieldrockero.gastronomicon.core.recipes.Recipe
+import io.github.garfieldrockero.gastronomicon.core.recipes.ImageSize
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeImage
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListQuery
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListSource
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlug
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummary
 import io.github.garfieldrockero.gastronomicon.core.session.Session
@@ -51,7 +54,12 @@ class MealieClient(
      * `/api/users/self` en [checkConnection]. Por defecto es [transport].
      */
     private val selfTransport: HttpTransport = transport,
-) {
+    /**
+     * Transporte con token y con el límite de [MAX_IMAGE_BYTES], solo para
+     * [fetchImage]. Por defecto es [transport] (y entonces manda su límite).
+     */
+    private val imageTransport: HttpTransport = transport,
+) : RecipeListSource {
 
     /**
      * Dos pasos: `GET /api/app/about` sin token (¿es un Mealie?) y después
@@ -97,7 +105,7 @@ class MealieClient(
      * podrían abrir sin riesgo), así que una página puede traer menos filas
      * que `perPage`.
      */
-    fun listRecipes(query: RecipeListQuery): Page<RecipeSummary> {
+    override fun listRecipes(query: RecipeListQuery): Page<RecipeSummary> {
         val dto = decode(RecipePageDto.serializer(), transport.execute(query.toRequest()))
         val items = dto.items.orEmpty().asSequence()
             .filterNotNull()
@@ -125,7 +133,46 @@ class MealieClient(
         return RecipeMapper.recipe(decode(RecipeDto.serializer(), response), checked)
     }
 
+    /**
+     * La imagen de una receta, por su **id** (no el slug), con el transporte
+     * autenticado. No lanza por red: todo desenlace es un [ImageResult].
+     *
+     * - Un id que no es un UUID da [ImageResult.NotFound] sin enviar nada.
+     * - 404 es [ImageResult.NotFound]; 401 y 403, [ImageResult.Unauthorized].
+     * - Solo `image/webp`, `image/jpeg` e `image/png`, y además los primeros
+     *   bytes tienen que ser de ese mismo formato (nunca SVG ni otro): si no,
+     *   [ImageResult.InvalidImage]. Un cuerpo vacío también lo es.
+     * - Más de [MAX_IMAGE_BYTES] es [ImageResult.TooLarge], lo corte el
+     *   transporte o este método.
+     * - El resultado no lleva ni token, ni URL del servidor, ni cuerpos de error.
+     */
+    fun fetchImage(recipeId: String?, size: ImageSize = ImageSize.Min): ImageResult {
+        val request = RecipeImage.request(recipeId, size) ?: return ImageResult.NotFound
+        val response = try {
+            imageTransport.execute(request)
+        } catch (error: NetworkError) {
+            return imageFailure(error)
+        }
+        val body = response.body
+        if (body.isEmpty()) return ImageResult.InvalidImage
+        if (body.size > MAX_IMAGE_BYTES) return ImageResult.TooLarge
+        val declared = ImageTypes.fromContentType(response.header("content-type"))
+            ?: return ImageResult.InvalidImage
+        val real = ImageTypes.fromMagic(body) ?: return ImageResult.InvalidImage
+        if (declared != real) return ImageResult.InvalidImage
+        return ImageResult.Success(body, real)
+    }
+
     // ------------------------------------------------------------- privados
+
+    private fun imageFailure(error: NetworkError): ImageResult =
+        when {
+            error is NetworkError.HttpError && error.statusCode == 404 -> ImageResult.NotFound
+            error is NetworkError.HttpError && (error.statusCode == 401 || error.statusCode == 403) ->
+                ImageResult.Unauthorized
+            error === NetworkError.ResponseTooLarge -> ImageResult.TooLarge
+            else -> ImageResult.Failure(error.toConnectionProblem())
+        }
 
     /**
      * La versión si la respuesta tiene forma de `AppInfo`; null si no la
@@ -187,6 +234,9 @@ class MealieClient(
         /** `users/self` se descarta; 64 KiB sobra para un `UserOut` aun con muchos tokens. */
         const val SELF_MAX_RESPONSE_BYTES = 64L * 1024
 
+        /** Tope de una imagen de receta: una foto de móvil recodificada cabe de sobra. */
+        const val MAX_IMAGE_BYTES = 5L * 1024 * 1024
+
         /**
          * Cliente para la sesión guardada, con el transporte real. Las
          * políticas de URL, de HTTP local y de redirecciones son las de
@@ -211,6 +261,13 @@ class MealieClient(
                 allowLocalHttp = allowLocalHttp,
                 activeNetwork = activeNetwork,
                 maxResponseBytes = SELF_MAX_RESPONSE_BYTES,
+            ),
+            imageTransport = UrlConnectionTransport.create(
+                serverUrl = session.serverUrl,
+                token = session.token,
+                allowLocalHttp = allowLocalHttp,
+                activeNetwork = activeNetwork,
+                maxResponseBytes = MAX_IMAGE_BYTES,
             ),
             anonymousTransport = UrlConnectionTransport.createWithoutToken(
                 serverUrl = session.serverUrl,

@@ -28,6 +28,8 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.network.CoreJsonTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListQueryTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientImageTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailViewTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlugTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeImageTest
   io.github.garfieldrockero.gastronomicon.core.html.SafeUrlTest

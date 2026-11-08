@@ -39,7 +39,14 @@ object RecipeImage {
         return "/api/media/recipes/$id/images/${size.fileName}"
     }
 
+    /**
+     * Lo único que la app acepta como imagen; va en `Accept` para que el
+     * servidor no mande otra cosa (el transporte pone `application/json` si
+     * no hay ninguna). La comprobación real se hace al recibirla.
+     */
+    const val ACCEPT = "image/webp,image/jpeg,image/png"
+
     /** La petición lista para el transporte autenticado, o null si no hay id válido. */
     fun request(recipeId: String?, size: ImageSize = ImageSize.Min): HttpRequest? =
-        path(recipeId, size)?.let { HttpRequest(HttpMethod.GET, it) }
+        path(recipeId, size)?.let { HttpRequest(HttpMethod.GET, it, headers = mapOf("Accept" to ACCEPT)) }
 }

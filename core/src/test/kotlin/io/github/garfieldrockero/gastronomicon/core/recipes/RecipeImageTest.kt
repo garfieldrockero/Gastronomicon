@@ -36,4 +36,10 @@ class RecipeImageTest {
         assertEquals("/api/media/recipes/$id/images/min-original.webp", request.path)
         assertNull(request.query)
     }
+
+    @Test
+    fun `la peticion pide solo imagenes permitidas`() {
+        val accept = RecipeImage.request(id)!!.headers["Accept"]!!
+        assertEquals("image/webp,image/jpeg,image/png", accept)
+    }
 }
