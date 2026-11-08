@@ -4,6 +4,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
 
 /** Preferencia de tema que se guardará en Ajustes. */
 enum class ThemeMode {
@@ -12,23 +13,30 @@ enum class ThemeMode {
     DARK,
 }
 
+/** Si el modo elegido se ve oscuro ahora: el del sistema solo cuando se elige «Sistema». */
+@Composable
+fun ThemeMode.isDark(): Boolean = when (this) {
+    ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    ThemeMode.LIGHT -> false
+    ThemeMode.DARK -> true
+}
+
+/** Fondo del esquema efectivo, para pintar también el fondo de la ventana (ver MainActivity). */
+fun themeBackground(dark: Boolean): Color = if (dark) DarkColors.background else LightColors.background
+
 /**
  * Tema de Gastronomicón. Los colores viven en Colors.kt y la tipografía en
  * Type.kt; este archivo solo decide qué esquema toca según el modo elegido.
+ * La raíz (MainActivity) sincroniza con ese modo el fondo de la ventana y la
+ * apariencia de las barras del sistema, que los colors.xml y el tema XML solo
+ * ligan al modo del sistema.
  */
-// TODO(ajustes): al permitir Claro/Oscuro manual en Ajustes, sincronizar el
-// fondo de ventana (los colors.xml siguen al modo del sistema, no al elegido)
-// y la apariencia de las barras del sistema con el tema efectivo.
 @Composable
 fun GastronomiconTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
     content: @Composable () -> Unit,
 ) {
-    val dark = when (mode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-    }
+    val dark = mode.isDark()
     CompositionLocalProvider(
         LocalExtendedColors provides if (dark) DarkExtendedColors else LightExtendedColors,
     ) {

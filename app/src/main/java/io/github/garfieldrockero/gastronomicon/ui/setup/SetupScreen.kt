@@ -3,49 +3,42 @@ package io.github.garfieldrockero.gastronomicon.ui.setup
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import io.github.garfieldrockero.gastronomicon.R
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
+import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
+import io.github.garfieldrockero.gastronomicon.ui.components.LocalHttpSwitch
 import io.github.garfieldrockero.gastronomicon.ui.components.SecureWindowEffect
+import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
+import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
+import io.github.garfieldrockero.gastronomicon.ui.components.fieldError
+import io.github.garfieldrockero.gastronomicon.ui.components.maskedServer
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.LocalExtendedColors
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
@@ -89,34 +82,15 @@ data class SetupUiState(
             "allowLocalHttp=$allowLocalHttp, canSave=$canSave, status=$status)"
 }
 
-/**
- * Deja del servidor solo el último dominio («mealie.example.com» → «***.com»);
- * con una IP, nada («192.168.1.50» → «***»).
- * No es un dato para mostrar: existe únicamente para que un log diga de qué
- * servidor se hablaba sin publicar la dirección completa de la persona.
- */
-private fun maskedServer(server: String): String {
-    val host = server.trim()
-        .substringAfter("://", server.trim())
-        .substringBefore('/')
-        .substringBefore(':')
-    if (host.isEmpty()) return ""
-    val domain = host.substringAfterLast('.', "")
-    // Con una IP (v4 o v6) el último tramo es un número del propio equipo de
-    // la persona: no se enseña nada. Con un nombre, solo su último dominio.
-    // Un último tramo que empieza por dígito (también con basura detrás, como
-    // «192.168.1.50?x») es de una IP, no de un dominio: ninguno acaba en cifra.
-    val isIp = host.startsWith("[") || domain.firstOrNull()?.isDigit() == true ||
-        host.all { it.isDigit() || it == '.' }
-    return if (domain.isEmpty() || isIp) "***" else "***.$domain"
-}
-
 /** Marcha de la pantalla de configuración. */
 sealed interface SetupStatus {
     data object Idle : SetupStatus
     data object Testing : SetupStatus
     data object Success : SetupStatus
     data object Saving : SetupStatus
+
+    /** Sesión guardada: quien navega debe llevar a la pantalla de Recetas. */
+    data object Saved : SetupStatus
 
     /**
      * Fallo de la última acción. [problem] es un motivo cerrado, no un texto:
@@ -125,6 +99,12 @@ sealed interface SetupStatus {
      * del servidor ni nada de lo que escribió la persona.
      */
     data class Error(val problem: ConnectionProblem) : SetupStatus
+
+    /** «Guardar» no ha guardado: [problem] es el motivo, distinto del aviso de «Probar». */
+    data class SaveFailed(val problem: ConnectionProblem) : SetupStatus
+
+    /** El almacén seguro del móvil ha fallado al guardar. */
+    data object StorageError : SetupStatus
 }
 
 /**
@@ -152,10 +132,15 @@ fun SetupScreen(
     // token escrito aquí.
     SecureWindowEffect()
 
-    val busy = state.status == SetupStatus.Testing || state.status == SetupStatus.Saving
+    val busy = state.status == SetupStatus.Testing || state.status == SetupStatus.Saving ||
+        state.status == SetupStatus.Saved
     // Solo señala dónde mirar; el motivo lo ha decidido ya el núcleo y el
     // mensaje va en el aviso de abajo.
-    val problem = (state.status as? SetupStatus.Error)?.problem
+    val problem = when (val status = state.status) {
+        is SetupStatus.Error -> status.problem
+        is SetupStatus.SaveFailed -> status.problem
+        else -> null
+    }
     // NotLocalAddress marca servidor y puerto como InvalidAddress; en cambio
     // LocalHttpNeedsHomeNetwork no marca nada: la dirección está bien, falla la red.
     val addressHasError = problem == ConnectionProblem.InvalidAddress ||
@@ -285,12 +270,13 @@ fun SetupScreen(
                 ),
             )
 
-            // Botones a lo ancho y apilados: «Probar conexión» es el paso
-            // opcional y «Guardar», el objetivo, queda más abajo, al alcance
-            // del pulgar de quien usa el móvil con una sola mano.
+            // Botones a lo ancho y apilados. «Probar conexión» solo comprueba;
+            // «Guardar» también prueba antes de guardar, y como es el objetivo
+            // queda más abajo, al alcance del pulgar de quien usa el móvil con
+            // una sola mano.
             OutlinedButton(
                 onClick = onTestConnection,
-                enabled = !busy,
+                enabled = !busy && state.canSave,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = Sizes.MinTouchTarget),
@@ -325,91 +311,7 @@ fun SetupScreen(
     }
 }
 
-/**
- * Interruptor del modo de red local. La fila entera es el objetivo táctil y el
- * `Switch` va sin su propio `onCheckedChange` para que TalkBack vea un solo
- * nodo («interruptor, activado») y no dos.
- *
- * El aviso usa `errorContainer`/`onErrorContainer` (contraste AA con holgura)
- * en un contenedor y no solo texto rojo: avisa de un riesgo asumido, no de un
- * campo mal rellenado, y no debe confundirse con un error de validación.
- */
-@Composable
-private fun LocalHttpSwitch(
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = Sizes.MinTouchTarget)
-                .toggleable(
-                    value = checked,
-                    enabled = enabled,
-                    role = Role.Switch,
-                    onValueChange = onCheckedChange,
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.medium),
-        ) {
-            Text(
-                text = stringResource(R.string.setup_local_http_label),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            Switch(checked = checked, onCheckedChange = null, enabled = enabled)
-        }
-        if (checked) {
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    text = stringResource(R.string.setup_local_http_warning),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier
-                        .padding(Spacing.medium)
-                        .semantics { liveRegion = LiveRegionMode.Polite },
-                )
-            }
-        }
-    }
-}
-
-/** Indicador de progreso dentro de un botón ocupado. */
-@Composable
-private fun BusyIndicator() {
-    // Color primario porque el botón, al deshabilitarse, pierde su tinte y el
-    // indicador tendría poco contraste con el color de contenido apagado.
-    CircularProgressIndicator(
-        modifier = Modifier.size(BusyIndicatorSize),
-        color = MaterialTheme.colorScheme.primary,
-        strokeWidth = BusyIndicatorStroke,
-    )
-    Spacer(Modifier.width(Spacing.small))
-}
-
-// Más pequeño que el texto del botón para que no lo empuje ni lo tape.
-private val BusyIndicatorSize = 18.dp
-private val BusyIndicatorStroke = 2.dp
-
-/**
- * Añade al campo la frase de error que lee TalkBack, solo si hay error: sin
- * error no debe quedar ninguna semántica de error colgando.
- */
-private fun Modifier.fieldError(hasError: Boolean, message: String): Modifier =
-    if (hasError) this.semantics { error(message) } else this
-
-/**
- * Aviso de marcha o resultado. El contenedor existe siempre y solo cambia el
- * texto: así el liveRegion se mantiene estable y el lector de pantalla
- * anuncia los cambios en vez de ver nacer y morir nodos.
- */
+/** Aviso de marcha o resultado de la primera configuración. */
 @Composable
 private fun StatusMessage(status: SetupStatus, canSave: Boolean) {
     val text = when (status) {
@@ -417,47 +319,21 @@ private fun StatusMessage(status: SetupStatus, canSave: Boolean) {
         SetupStatus.Saving -> stringResource(R.string.setup_status_saving)
         SetupStatus.Success -> stringResource(R.string.setup_result_success)
         is SetupStatus.Error -> stringResource(errorTextRes(status.problem))
+        is SetupStatus.SaveFailed ->
+            stringResource(R.string.save_failed_format, stringResource(errorTextRes(status.problem)))
+        SetupStatus.StorageError -> stringResource(R.string.settings_error_storage)
         // En reposo con «Guardar» apagado se dice qué falta; si ya se puede
         // guardar, no hay nada que avisar.
         SetupStatus.Idle -> if (canSave) "" else stringResource(R.string.setup_hint_fill_fields)
+        // Ya guardado: quien navega se lleva a la persona a la pantalla siguiente.
+        SetupStatus.Saved -> ""
     }
     val color = when (status) {
         SetupStatus.Success -> LocalExtendedColors.current.success
-        is SetupStatus.Error -> MaterialTheme.colorScheme.error
+        is SetupStatus.Error, is SetupStatus.SaveFailed, SetupStatus.StorageError -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = color,
-        // Una línea reservada aunque no haya aviso, medida con el propio
-        // estilo: escala con el texto del sistema y «Guardar» no salta al
-        // aparecer una línea. Con dos, «Guardar» sí baja, y es lo correcto:
-        // manda el aviso.
-        minLines = 1,
-        modifier = Modifier
-            .fillMaxWidth()
-            .semantics { liveRegion = LiveRegionMode.Polite },
-    )
-}
-
-/**
- * El núcleo decide el motivo y aquí solo se le pone texto. Los textos viven en
- * `strings.xml` y no en el estado: así no puede colarse una excepción, la
- * respuesta cruda del servidor ni nada de lo que escribió la persona en un
- * mensaje que acaba en pantalla, en un log o en una captura. Sin «else» a
- * propósito: un motivo nuevo en el núcleo no compila hasta tener su texto.
- */
-private fun errorTextRes(problem: ConnectionProblem): Int = when (problem) {
-    ConnectionProblem.NoNetwork -> R.string.setup_error_no_network
-    ConnectionProblem.Unauthorized -> R.string.setup_error_unauthorized
-    ConnectionProblem.ServerError -> R.string.setup_error_server
-    ConnectionProblem.InvalidAddress -> R.string.setup_error_invalid_address
-    ConnectionProblem.NotLocalAddress -> R.string.setup_error_not_local_address
-    ConnectionProblem.LocalHttpNeedsHomeNetwork -> R.string.setup_error_local_http_needs_home_network
-    ConnectionProblem.SecureConnectionFailed -> R.string.setup_error_secure_connection
-    ConnectionProblem.InvalidToken -> R.string.setup_error_invalid_token
-    ConnectionProblem.Unknown -> R.string.setup_error_unknown
+    StatusText(text = text, color = color)
 }
 
 // Datos de ejemplo para las previews: servidor y token falsos y reconocibles,
@@ -571,6 +447,23 @@ private fun SetupScreenPreviewInvalidToken() {
             ExampleState.copy(status = SetupStatus.Error(ConnectionProblem.InvalidToken))
         )
     }
+}
+
+// «Guardar» ha fallado: el servidor no contesta.
+@Preview(showBackground = true)
+@Composable
+private fun SetupScreenPreviewSaveFailed() {
+    GastronomiconTheme {
+        ExampleSetupScreen(
+            ExampleState.copy(status = SetupStatus.SaveFailed(ConnectionProblem.ServerNotResponding))
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun SetupScreenPreviewStorageError() {
+    GastronomiconTheme { ExampleSetupScreen(ExampleState.copy(status = SetupStatus.StorageError)) }
 }
 
 @Preview(showBackground = true)

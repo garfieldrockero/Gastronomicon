@@ -93,18 +93,36 @@ class KeystoreSessionStore(context: Context) : SessionStore {
 
     override fun toString(): String = "KeystoreSessionStore"
 
+    /**
+     * Datos irrecuperables en [load]: se quita el blob y la clave. Si la clave se
+     * confirma borrada se devuelve null aunque el blob siga ahí: sin clave es
+     * inerte y el siguiente `save` lo sobrescribe con una clave nueva. Solo se
+     * lanza si no se quitó ni el blob ni la clave (todavía podría haber algo
+     * recuperable o se seguiría leyendo).
+     */
     private fun failAndWipe(): Session? {
-        wipe()
+        val blobRemoved = removeBlob()
+        val keyDeleted = deleteKey()
+        if (!blobRemoved && !keyDeleted) throw SessionStorageException()
         return null
     }
 
+    /**
+     * Borra el blob y la clave. Se intenta borrar la clave aunque el blob no se
+     * haya podido quitar (sin clave el blob ya no descifra), pero si `commit()`
+     * dice que no se escribió se lanza [SessionStorageException] (mensaje fijo,
+     * sin datos): no se puede decir «sesión borrada» si el blob sigue en disco.
+     */
     private fun wipe() {
-        try {
-            prefs.edit().remove(KEY_BLOB).commit()
-        } catch (ignored: Exception) {
-            // Se sigue intentando borrar la clave.
-        }
+        val removed = removeBlob()
         deleteKey()
+        if (!removed) throw SessionStorageException()
+    }
+
+    private fun removeBlob(): Boolean = try {
+        prefs.edit().remove(KEY_BLOB).commit()
+    } catch (ignored: Exception) {
+        false
     }
 
     private fun encryptToEnvelope(plain: ByteArray): String {
@@ -188,13 +206,14 @@ class KeystoreSessionStore(context: Context) : SessionStore {
         return false
     }
 
-    private fun deleteKey() {
-        try {
-            val ks = keyStore()
-            if (ks.containsAlias(KEY_ALIAS)) ks.deleteEntry(KEY_ALIAS)
-        } catch (ignored: Exception) {
-            // Si el Keystore no responde no hay más que hacer; los datos ya no están.
-        }
+    /** Borra la clave; true solo si, tras borrar, el alias ya no existe. */
+    private fun deleteKey(): Boolean = try {
+        val ks = keyStore()
+        if (ks.containsAlias(KEY_ALIAS)) ks.deleteEntry(KEY_ALIAS)
+        !ks.containsAlias(KEY_ALIAS)
+    } catch (ignored: Exception) {
+        // Si el Keystore no responde no se puede confirmar el borrado.
+        false
     }
 
     private companion object {

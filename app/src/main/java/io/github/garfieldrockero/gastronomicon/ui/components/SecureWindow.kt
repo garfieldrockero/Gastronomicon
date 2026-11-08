@@ -3,11 +3,13 @@ package io.github.garfieldrockero.gastronomicon.ui.components
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.view.Window
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
+import java.util.WeakHashMap
 
 /**
  * Prohíbe capturar o grabar la ventana de la actividad mientras este
@@ -20,8 +22,11 @@ import androidx.compose.ui.platform.LocalInspectionMode
  * lo que nunca se llega a componer en forma de imagen.
  *
  * El efecto se retira al salir del composable, así que no afecta al resto de la
- * app. Cuando Ajustes también escriba el token, las dos pantallas lo pedirán:
- * hoy solo hay una, y por eso basta con poner y quitar la marca.
+ * app. Primera configuración y Ajustes escriben el token y pueden coincidir un
+ * instante en una transición (una entra antes de que la otra salga), así que
+ * hay un contador por ventana: la marca se pone con la primera petición y solo
+ * se quita cuando se va la última. Sin contador, la pantalla que sale
+ * destaparía la ventana de la que acaba de entrar.
  */
 @Composable
 fun SecureWindowEffect() {
@@ -30,10 +35,32 @@ fun SecureWindowEffect() {
     val preview = LocalInspectionMode.current
     DisposableEffect(context, preview) {
         val window = if (preview) null else context.findActivity()?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (window != null) acquireSecure(window)
         onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            if (window != null) releaseSecure(window)
         }
+    }
+}
+
+// Peticiones activas por ventana. Por ventana y no global: al girar el móvil la
+// actividad nueva puede componer antes de que la vieja libere, y un contador
+// único dejaría la ventana nueva sin marca. Solo se toca desde el hilo
+// principal (efectos de Compose) y las ventanas se sueltan solas al morir.
+private val secureRequests = WeakHashMap<Window, Int>()
+
+private fun acquireSecure(window: Window) {
+    val count = secureRequests[window] ?: 0
+    secureRequests[window] = count + 1
+    if (count == 0) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+}
+
+private fun releaseSecure(window: Window) {
+    val count = secureRequests[window] ?: return
+    if (count <= 1) {
+        secureRequests.remove(window)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    } else {
+        secureRequests[window] = count - 1
     }
 }
 
