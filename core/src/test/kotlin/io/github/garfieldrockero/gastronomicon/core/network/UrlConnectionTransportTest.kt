@@ -80,6 +80,20 @@ class UrlConnectionTransportTest {
     // ---------------------------------------------------------------- básicos
 
     @Test
+    fun `la consulta de la peticion llega tal cual al servidor`() {
+        var rawQuery: String? = null
+        routes["/consulta"] = { e ->
+            rawQuery = e.requestURI.rawQuery
+            respond(e, 200, "{}".toByteArray())
+        }
+        val response = newTransport().execute(
+            HttpRequest(HttpMethod.GET, "/consulta", query = "page=2&search=a%26b%20c"),
+        )
+        assertEquals(200, response.statusCode)
+        assertEquals("page=2&search=a%26b%20c", rawQuery)
+    }
+
+    @Test
     fun `la peticion lleva el token en Authorization y pide json`() {
         var authorization: String? = null
         var accept: String? = null

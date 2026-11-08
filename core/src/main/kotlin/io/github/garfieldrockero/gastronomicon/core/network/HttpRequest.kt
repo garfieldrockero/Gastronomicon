@@ -16,6 +16,13 @@ class HttpRequest(
     val path: String,
     val headers: Map<String, String> = emptyMap(),
     val body: ByteArray? = null,
+    /**
+     * Consulta ya codificada, sin el «?» inicial. Va aparte de la ruta para
+     * poder validarla por separado: solo se admiten caracteres sin reservar,
+     * «=» y «&» como estructura y escapes «%XX» bien formados. Quien la
+     * construye (por ejemplo `RecipeListQuery`) codifica los valores.
+     */
+    val query: String? = null,
 ) {
     init {
         // Un GET no puede llevar cuerpo: en HttpURLConnection, poner
@@ -30,8 +37,8 @@ class HttpRequest(
         if (!path.startsWith("/")) {
             throw IllegalArgumentException("La ruta de la petición tiene que empezar por «/».")
         }
-        // La consulta llegará como campo propio cuando se verifique la API de
-        // Mealie; mientras, mejor rechazarla a que alguien la pegue a mano.
+        // La consulta tiene su propio campo (`query`); pegarla a mano en la
+        // ruta la dejaría sin validar.
         if ('?' in path || '#' in path) {
             throw IllegalArgumentException(
                 "La ruta de la petición no puede llevar consulta («?») ni fragmento («#»).",
@@ -62,6 +69,7 @@ class HttpRequest(
                 throw IllegalArgumentException("La ruta no puede llevar «.» ni «/» escapados.")
             }
         }
+        if (query != null) validateQuery(query)
         for ((name, value) in headers) {
             if (!HEADER_NAME.matches(name)) {
                 throw IllegalArgumentException("El nombre de una cabecera de la petición no es válido.")
@@ -81,6 +89,9 @@ class HttpRequest(
     }
 
     companion object {
+        /** Tope de la consulta ya codificada; los servidores y proxies suelen cortar cerca de 8 KB. */
+        const val MAX_QUERY_LENGTH = 2048
+
         private val PRINTABLE_ASCII_WITH_SPACE = 0x20..0x7E
 
         /** Nombres de cabecera según RFC 7230 (token). */
@@ -94,6 +105,50 @@ class HttpRequest(
             "host",
             "connection",
         )
+
+        /**
+         * Comprueba la consulta carácter a carácter. Se deja fuera «;», «+» y
+         * «,» a propósito: algunos servidores y proxies los tratan como
+         * separador o como espacio, y quien codifica ya los escribe como «%XX».
+         */
+        private fun validateQuery(query: String) {
+            // Una consulta vacía enviaría un «?» suelto; quien no tiene
+            // parámetros debe pasar null, y así no hay dos formas de decir «nada».
+            if (query.isEmpty()) {
+                throw IllegalArgumentException("La consulta no puede estar vacía: usa null si no hay parámetros.")
+            }
+            if (query.length > MAX_QUERY_LENGTH) {
+                throw IllegalArgumentException("La consulta supera los $MAX_QUERY_LENGTH caracteres.")
+            }
+            var index = 0
+            while (index < query.length) {
+                val current = query[index]
+                if (current == '%') {
+                    val high = if (index + 2 < query.length) hexValue(query[index + 1]) else -1
+                    val low = if (index + 2 < query.length) hexValue(query[index + 2]) else -1
+                    if (high < 0 || low < 0) {
+                        throw IllegalArgumentException(
+                            "La consulta lleva un «%» sin dos dígitos hexadecimales detrás.",
+                        )
+                    }
+                    val value = high * 16 + low
+                    if (value <= 0x1F || value == 0x7F) {
+                        throw IllegalArgumentException("La consulta lleva un escape de control.")
+                    }
+                    index += 3
+                    continue
+                }
+                val allowed = current in 'a'..'z' || current in 'A'..'Z' || current in '0'..'9' ||
+                    current == '-' || current == '.' || current == '_' || current == '~' ||
+                    current == '=' || current == '&'
+                if (!allowed) {
+                    throw IllegalArgumentException(
+                        "La consulta lleva un carácter sin codificar: usa percent-encoding.",
+                    )
+                }
+                index++
+            }
+        }
 
         /**
          * Recorre la ruta comprobando «pchar» del RFC 3986 más «/», con los

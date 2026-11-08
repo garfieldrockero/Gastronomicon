@@ -138,10 +138,11 @@ class UrlConnectionTransport internal constructor(
         // Concatenar (y no «resolve») conserva la subruta de la base, que es
         // como se despliega Mealie cuando no está en la raíz del dominio.
         var target = try {
-            URI(baseUri.toString().trimEnd('/') + request.path)
+            URI(baseUri.toString().trimEnd('/') + request.path +
+                (request.query?.let { "?$it" } ?: ""))
         } catch (ignored: URISyntaxException) {
             // Inalcanzable: HttpRequest solo admite «pchar» y escapes «%XX» bien
-            // formados, así que la concatenación con la base siempre parsea. Si
+            // formados (en la ruta y también en la consulta, que se valida igual), así que la concatenación con la base siempre parsea. Si
             // algún día dejara de serlo, no se propaga la excepción (lleva la
             // URL entera en el mensaje) ni se culpa al servidor: el problema
             // está en la dirección que se iba a pedir.

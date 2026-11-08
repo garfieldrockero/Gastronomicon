@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Exige que las pruebas de la frontera del HTTP local SE HAYAN EJECUTADO y pasado, no
+# Exige que las pruebas de las fronteras de seguridad del núcleo (HTTP local, token,
+# sesión y saneado de HTML) SE HAYAN EJECUTADO y pasado, no
 # solo que existan los archivos: lee los informes JUnit XML que deja «gradle :core:test»
 # y, para cada clase de la lista, pide que el informe exista, tests > 0, failures = 0,
 # errors = 0 y skipped = 0 (un @Ignore o una suposición fallida cuentan como skipped y
@@ -23,6 +24,13 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblemTest
   io.github.garfieldrockero.gastronomicon.core.network.NetworkKindTest
   io.github.garfieldrockero.gastronomicon.core.network.NetworkErrorTest
+  io.github.garfieldrockero.gastronomicon.core.network.HttpRequestQueryTest
+  io.github.garfieldrockero.gastronomicon.core.network.CoreJsonTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListQueryTest
+  io.github.garfieldrockero.gastronomicon.core.html.HtmlSanitizerTest
+  io.github.garfieldrockero.gastronomicon.core.html.PlainTextSanitizerTest
+  io.github.garfieldrockero.gastronomicon.core.session.SessionTest
+  io.github.garfieldrockero.gastronomicon.core.session.SessionPayloadFormatTest
 )
 
 # Valor numérico del atributo $1 en la etiqueta de apertura $2 (comillas dobles o
@@ -36,7 +44,7 @@ fallos=0
 for clase in "${clases[@]}"; do
   informe="$directorio/TEST-$clase.xml"
   if [ ! -f "$informe" ]; then
-    echo "::error::No hay informe de pruebas de $clase ($informe): la prueba de la frontera del HTTP local no se ha ejecutado."
+    echo "::error::No hay informe de pruebas de $clase ($informe): esta prueba de seguridad del núcleo no se ha ejecutado."
     fallos=1
     continue
   fi
@@ -64,7 +72,9 @@ for clase in "${clases[@]}"; do
   fi
 
   # Los contadores no deben contradecir a los <testcase> reales del archivo.
-  casos=$(tr '\n\r' '  ' < "$informe" | grep -oE '<testcase[[:space:]]' | wc -l | tr -d ' ')
+  # «|| true» dentro del grupo: con 0 <testcase> grep -o sale 1 y pipefail + set -e
+  # abortarían el script antes de emitir el ::error:: (el recuento 0 se trata abajo).
+  casos=$( { tr '\n\r' '  ' < "$informe" | grep -oE '<testcase[[:space:]]' || true; } | wc -l | tr -d ' ')
   echo "$clase: tests=$tests failures=$failures errors=$errors skipped=$skipped (testcase=$casos)"
 
   # 10# evita que «08» se lea como octal.
@@ -81,13 +91,13 @@ for clase in "${clases[@]}"; do
     fallos=1
   fi
   if [ "$((10#$skipped))" -ne 0 ]; then
-    echo "::error::$clase tiene pruebas omitidas (skipped=$skipped): un @Ignore deja sin probar la frontera del HTTP local."
+    echo "::error::$clase tiene pruebas omitidas (skipped=$skipped): un @Ignore deja sin probar una frontera de seguridad."
     fallos=1
   fi
 done
 
 if [ "$fallos" -ne 0 ]; then
-  echo "::error::Las pruebas de la frontera del HTTP local no se han ejecutado y pasado al completo."
+  echo "::error::Las pruebas de seguridad del núcleo no se han ejecutado y pasado al completo."
   exit 1
 fi
-echo "Pruebas de la frontera del HTTP local ejecutadas y correctas."
+echo "Pruebas de seguridad del núcleo ejecutadas y correctas."
