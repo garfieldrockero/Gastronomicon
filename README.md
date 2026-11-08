@@ -24,7 +24,9 @@ La lista de la compra, el planificador y el modo sin conexión llegarán despué
 
 ## Seguridad
 
-- Solo **HTTPS**; no se admite tráfico HTTP en claro.
+- **HTTPS por defecto.** HTTP en claro solo si lo activas a propósito, hacia una **IP
+  privada de tu red local** (sin nombres ni `.local`), nunca con datos móviles y con un aviso
+  de que el token viaja sin cifrar.
 - El token se guarda cifrado con el **Keystore de Android** y no se registra en logs ni en
   copias de seguridad.
 - El HTML de las instrucciones se sanea y se renderiza de forma restringida: nunca en un

@@ -10,21 +10,38 @@ import java.util.Locale
  *
  * Esa URL es la base de todas las peticiones de la app y todas llevan el token
  * de API en la cabecera, así que aquí se fija la política de seguridad de la
- * dirección: solo HTTPS, sin usuario, contraseña, consulta o fragmento, y con
- * una forma canónica (host en minúsculas, sin barra ni punto finales y sin el
- * puerto 443, que es el de por defecto).
+ * dirección: HTTPS por defecto, sin usuario, contraseña, consulta o fragmento,
+ * y con una forma canónica (esquema y host en minúsculas, sin barra ni punto
+ * finales y sin el puerto por defecto del esquema: 443 en https, 80 en http).
+ *
+ * HTTP en claro solo pasa con allowLocalHttp y hacia una IP literal privada
+ * (ver [LocalNetwork]). La configuración de red de Android permite HTTP en
+ * general porque no sabe limitarlo por rangos de IP, así que esta función es
+ * la frontera real: no hay otro camino público hacia una URL «http://».
  * Es pura sintaxis: no se hace red ni se resuelve DNS.
  */
 object ServerUrl {
 
-    /** Único esquema admitido: el token viaja en cada petición y nunca en claro. */
-    private const val SCHEME = "https"
+    private const val HTTPS = "https"
+    private const val HTTP = "http"
+    private const val DEFAULT_HTTPS_PORT = 443
+    private const val DEFAULT_HTTP_PORT = 80
 
     /**
      * Devuelve la URL base normalizada o lanza [IllegalArgumentException] con un
      * mensaje en castellano pensado para mostrarse tal cual en la interfaz.
+     *
+     * Con [allowLocalHttp] a false (por defecto) solo se admite https. Con true
+     * se admite además http, pero solo hacia IP literales privadas (ver
+     * [LocalNetwork]); https sigue igual en los dos casos. El valor sale del
+     * interruptor de la pantalla, que está desactivado de inicio.
+     *
+     * Un http con la opción hacia un host que no es local lanza
+     * [NotLocalAddressException], que es una [IllegalArgumentException] más:
+     * va aparte para que la interfaz pueda explicar ese caso concreto (ver
+     * `addressProblemOf`) sin mirar el texto del mensaje.
      */
-    fun normalize(input: String): String {
+    fun normalize(input: String, allowLocalHttp: Boolean = false): String {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) {
             throw IllegalArgumentException("La URL del servidor está vacía.")
@@ -52,13 +69,20 @@ object ServerUrl {
         }
 
         // Primero el esquema, que es el error más común, y después lo demás.
-        val scheme = uri.scheme
+        val rawScheme = uri.scheme
             ?: throw IllegalArgumentException(
                 "Falta el esquema: la URL tiene que empezar por «https://».",
             )
-        if (!scheme.equals(SCHEME, ignoreCase = true)) {
+        val scheme = rawScheme.lowercase(Locale.ROOT)
+        if (scheme != HTTPS && scheme != HTTP) {
             throw IllegalArgumentException(
                 "Esquema no admitido: la URL tiene que empezar por «https://».",
+            )
+        }
+        if (scheme == HTTP && !allowLocalHttp) {
+            throw IllegalArgumentException(
+                "HTTP sin cifrar solo se admite activando la opción de servidor en la red " +
+                    "local. Si no, la URL tiene que empezar por «https://».",
             )
         }
 
@@ -66,7 +90,7 @@ object ServerUrl {
         // partir en host[:puerto] (un puerto con letras, por ejemplo).
         val host = uri.host?.takeIf { it.isNotEmpty() }
             ?: throw IllegalArgumentException(
-                "Falta o no se entiende el nombre del servidor: la parte entre «https://» " +
+                "Falta o no se entiende el nombre del servidor: la parte entre «://» " +
                     "y la primera barra, con el puerto si lo lleva.",
             )
         if (uri.userInfo != null) {
@@ -115,17 +139,28 @@ object ServerUrl {
             validateIpv4IfNeeded(hostWithoutDot)
             hostWithoutDot
         }
+        // Va después de validar la forma del host para que un host mal escrito
+        // reciba su mensaje concreto y no el de «no es local».
+        if (scheme == HTTP && !LocalNetwork.isLocalHost(hostWithoutDot)) {
+            throw NotLocalAddressException(
+                "Con HTTP solo se admiten IP de tu red local: 10.x, 172.16.x a 172.31.x, " +
+                    "192.168.x o IPv6 fc00::/7, escritas como números y no como nombre. " +
+                    "Para cualquier otro servidor usa «https://».",
+            )
+        }
 
         val path = normalizePath(uri.rawPath ?: "")
+        val defaultPort = if (scheme == HTTPS) DEFAULT_HTTPS_PORT else DEFAULT_HTTP_PORT
         val port = when {
-            // 443 es el puerto por defecto de HTTPS: la forma canónica no lo lleva.
-            uri.port == -1 || uri.port == 443 -> ""
+            // El puerto por defecto del esquema no se escribe en la forma
+            // canónica: así «:443» y nada (o «:80» y nada en http) dan la misma URL.
+            uri.port == -1 || uri.port == defaultPort -> ""
             uri.port !in 1..65535 -> throw IllegalArgumentException(
                 "El puerto de la URL no es válido: tiene que estar entre 1 y 65535.",
             )
             else -> ":${uri.port}"
         }
-        val output = "$SCHEME://$displayHost$port$path"
+        val output = "$scheme://$displayHost$port$path"
         // La salida debe ser ASCII imprimible: así no hay caracteres que puedan
         // cambiar de aspecto ni escapes ambiguos en lo que se muestra.
         if (output.any { it.code !in 0x21..0x7E }) {
@@ -232,3 +267,14 @@ object ServerUrl {
         return "/" + segments.joinToString("/")
     }
 }
+
+/**
+ * Rechazo de un http con la opción de red local activada porque el host no es
+ * una IP privada.
+ *
+ * Es una subclase y no un código de error aparte para que todo lo que ya
+ * captura [IllegalArgumentException] siga funcionando igual; quien quiera
+ * distinguir el caso lo hace por tipo, nunca por el texto. El mensaje es fijo
+ * y no repite la entrada: podría llevar pegado un token o una contraseña.
+ */
+class NotLocalAddressException(message: String) : IllegalArgumentException(message)

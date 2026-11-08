@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Solo HTTPS y solo los certificados del sistema. Sin excepciones para HTTP en
-     claro ni para certificados autofirmados: el servidor usa Let's Encrypt. -->
+<!-- HTTPS por defecto; HTTP en claro solo en la red local y a propósito.
+     El HTTP en claro está permitido aquí porque Android no deja limitarlo por
+     rangos de IP en esta configuración (los dominios son nombres o IP exactas, sin
+     rangos). La frontera real la impone el núcleo (core/LocalNetwork, ServerUrl y
+     UrlConnectionTransport, con sus pruebas): solo se acepta http:// hacia IP
+     literales privadas, nunca con datos móviles y solo con el interruptor de la
+     app activado; cualquier otro destino exige https://.
+     La confianza para HTTPS no cambia: solo los certificados del sistema, sin
+     certificados de usuario, sin pin-set y sin debug-overrides. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

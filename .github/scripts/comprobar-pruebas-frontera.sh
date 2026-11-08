@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Exige que las pruebas de la frontera del HTTP local SE HAYAN EJECUTADO y pasado, no
+# solo que existan los archivos: lee los informes JUnit XML que deja «gradle :core:test»
+# y, para cada clase de la lista, pide que el informe exista, tests > 0, failures = 0,
+# errors = 0 y skipped = 0 (un @Ignore o una suposición fallida cuentan como skipped y
+# hacen fallar). Si no puede leer un atributo del <testsuite>, también falla.
+# Uso: comprobar-pruebas-frontera.sh [directorio-de-informes]
+#   (por defecto core/build/test-results/test)
+set -euo pipefail
+
+# shellcheck source=herramientas-ci.sh
+. "$(dirname "${BASH_SOURCE[0]}")/herramientas-ci.sh"
+
+directorio="${1:-core/build/test-results/test}"
+clases=(
+  io.github.garfieldrockero.gastronomicon.core.LocalNetworkTest
+  io.github.garfieldrockero.gastronomicon.core.ServerUrlTest
+  io.github.garfieldrockero.gastronomicon.core.SecretRedactionTest
+  io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransportTest
+  io.github.garfieldrockero.gastronomicon.core.config.ServerAddressTest
+  io.github.garfieldrockero.gastronomicon.core.config.ApiTokenTest
+  io.github.garfieldrockero.gastronomicon.core.network.HttpRequestTest
+  io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblemTest
+  io.github.garfieldrockero.gastronomicon.core.network.NetworkKindTest
+  io.github.garfieldrockero.gastronomicon.core.network.NetworkErrorTest
+)
+
+# Valor numérico del atributo $1 en la etiqueta de apertura $2 (comillas dobles o
+# simples, cualquier orden). Vacío si falta o no es un entero. Se exige un espacio antes
+# del nombre para que «tests» no coincida con «skipped», «errors» con otro sufijo, etc.
+atributo() {
+  sed -nE "s/.*[[:space:]]$1[[:space:]]*=[[:space:]]*[\"']([0-9]+)[\"'].*/\1/p" <<< "$2" | head -n 1
+}
+
+fallos=0
+for clase in "${clases[@]}"; do
+  informe="$directorio/TEST-$clase.xml"
+  if [ ! -f "$informe" ]; then
+    echo "::error::No hay informe de pruebas de $clase ($informe): la prueba de la frontera del HTTP local no se ha ejecutado."
+    fallos=1
+    continue
+  fi
+
+  # La etiqueta puede ocupar varias líneas: se junta el archivo en una y se toma la
+  # primera apertura de <testsuite (con espacio detrás, para no confundirla con
+  # <testsuites>).
+  etiqueta=$(tr '\n\r' '  ' < "$informe" | grep -oE '<testsuite[[:space:]][^>]*>' | head -n 1 || true)
+  if [ -z "$etiqueta" ]; then
+    echo "::error::No se ha podido leer el <testsuite> de $informe. Contenido (primeras líneas):"
+    head -n 20 "$informe" | volcar_seguro
+    fallos=1
+    continue
+  fi
+
+  tests=$(atributo tests "$etiqueta")
+  failures=$(atributo failures "$etiqueta")
+  errors=$(atributo errors "$etiqueta")
+  skipped=$(atributo skipped "$etiqueta")
+  if [ -z "$tests" ] || [ -z "$failures" ] || [ -z "$errors" ] || [ -z "$skipped" ]; then
+    echo "::error::No se han podido leer tests/failures/errors/skipped del <testsuite> de $informe. Etiqueta recibida:"
+    volcar_seguro <<< "$etiqueta"
+    fallos=1
+    continue
+  fi
+
+  # Los contadores no deben contradecir a los <testcase> reales del archivo.
+  casos=$(tr '\n\r' '  ' < "$informe" | grep -oE '<testcase[[:space:]]' | wc -l | tr -d ' ')
+  echo "$clase: tests=$tests failures=$failures errors=$errors skipped=$skipped (testcase=$casos)"
+
+  # 10# evita que «08» se lea como octal.
+  if [ "$((10#$tests))" -le 0 ]; then
+    echo "::error::$clase no ha ejecutado ninguna prueba (tests=0)."
+    fallos=1
+  fi
+  if [ "$((10#$casos))" -ne "$((10#$tests))" ]; then
+    echo "::error::$clase: el informe declara tests=$tests pero contiene $casos <testcase>."
+    fallos=1
+  fi
+  if [ "$((10#$failures))" -ne 0 ] || [ "$((10#$errors))" -ne 0 ]; then
+    echo "::error::$clase tiene pruebas fallidas (failures=$failures, errors=$errors)."
+    fallos=1
+  fi
+  if [ "$((10#$skipped))" -ne 0 ]; then
+    echo "::error::$clase tiene pruebas omitidas (skipped=$skipped): un @Ignore deja sin probar la frontera del HTTP local."
+    fallos=1
+  fi
+done
+
+if [ "$fallos" -ne 0 ]; then
+  echo "::error::Las pruebas de la frontera del HTTP local no se han ejecutado y pasado al completo."
+  exit 1
+fi
+echo "Pruebas de la frontera del HTTP local ejecutadas y correctas."

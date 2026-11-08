@@ -170,8 +170,21 @@ class ServerUrlTest {
     // ---------------------------------------------------------------- rechaza
 
     @Test
-    fun `se rechaza http`() {
+    fun `se rechaza http sin la opción de red local`() {
         assertRejected("http://mealie.example.com")
+        // Ni siquiera hacia la red local: sin el interruptor no hay HTTP.
+        assertRejected("http://192.168.1.50:9000")
+        assertRejected("http://[fd00::5]:9000")
+        assertRejected("http://mealie.local")
+        assertRejected("HTTP://192.168.1.50")
+    }
+
+    @Test
+    fun `el rechazo de http sin la opción explica cómo activarla`() {
+        val message = rejectionMessage("http://192.168.1.50:9000")
+        assertTrue(message.contains("red local"))
+        assertFalse(message.contains("192.168.1.50"))
+        assertFalse(message.contains("9000"))
     }
 
     @Test
@@ -250,6 +263,198 @@ class ServerUrlTest {
 
         val malformada = rejectionMessage("https://usuario:secreto^x@mealie.example.com")
         assertFalse(malformada.contains("secreto"))
+    }
+
+    // ---------------------------------------------------------------- HTTP en la red local
+
+    @Test
+    fun `con la opción se acepta http hacia una IPv4 privada`() {
+        assertEquals("http://192.168.1.50:9000", ServerUrl.normalize("http://192.168.1.50:9000", allowLocalHttp = true))
+        assertEquals("http://10.0.0.2:9000", ServerUrl.normalize("http://10.0.0.2:9000/", allowLocalHttp = true))
+        assertEquals("http://172.16.0.1", ServerUrl.normalize("http://172.16.0.1", allowLocalHttp = true))
+        assertEquals("http://172.31.255.254", ServerUrl.normalize("http://172.31.255.254", allowLocalHttp = true))
+    }
+
+    @Test
+    fun `con la opción se acepta http hacia una IPv6 ULA`() {
+        assertEquals("http://[fd00::5]:9000", ServerUrl.normalize("http://[fd00::5]:9000", allowLocalHttp = true))
+        assertEquals("http://[fd00::5]:9000", ServerUrl.normalize("http://[FD00::5]:9000/", allowLocalHttp = true))
+        assertEquals("http://[fc00::1]", ServerUrl.normalize("http://[fc00::1]", allowLocalHttp = true))
+    }
+
+    @Test
+    fun `con la opción se rechaza http hacia un nombre local`() {
+        // Decidido el 7-11-2026: solo IP literales. Un nombre lo resuelve la red
+        // en la que esté el móvil, y fuera de casa puede llevar a cualquiera.
+        assertNotLocalRejection("http://mealie.local")
+        assertNotLocalRejection("http://mealie.local:9000/")
+        assertNotLocalRejection("HTTP://MEALIE.LOCAL./")
+        assertNotLocalRejection("http://cocina.casa.local")
+    }
+
+    @Test
+    fun `el rechazo por host no local es NotLocalAddressException`() {
+        assertNotLocalRejection("http://mealie.example.com")
+        assertNotLocalRejection("http://8.8.8.8:9000")
+        assertNotLocalRejection("http://127.0.0.1")
+        assertNotLocalRejection("http://localhost")
+        assertNotLocalRejection("http://[::ffff:192.168.1.1]")
+        assertNotLocalRejection("http://[2001:db8::1]")
+    }
+
+    @Test
+    fun `los demás rechazos no son NotLocalAddressException`() {
+        // Sin la opción, http es «activa la opción», no «no es local».
+        assertOtherRejection("http://mealie.example.com", allowLocalHttp = false)
+        assertOtherRejection("http://192.168.1.50", allowLocalHttp = false)
+        // Una forma mal escrita recibe su mensaje concreto, no el de «no es local».
+        assertOtherRejection("http://010.0.0.1", allowLocalHttp = true)
+        assertOtherRejection("http://192.168.1", allowLocalHttp = true)
+        assertOtherRejection("http://mi_host", allowLocalHttp = true)
+        assertOtherRejection("http://usuario:secreto@192.168.1.50", allowLocalHttp = true)
+        assertOtherRejection("ftp://192.168.1.50", allowLocalHttp = true)
+        assertOtherRejection("", allowLocalHttp = true)
+    }
+
+    @Test
+    fun `el mensaje de no local no menciona nombres local`() {
+        val message = rejectionMessage("http://mealie.local", allowLocalHttp = true)
+        assertTrue(message.contains("red local"))
+        assertFalse(message.contains(".local"))
+        assertFalse(message.contains("mealie"))
+    }
+
+    @Test
+    fun `con la opción se conserva la subruta en http`() {
+        assertEquals(
+            "http://192.168.1.50:9000/mealie",
+            ServerUrl.normalize("http://192.168.1.50:9000/mealie/", allowLocalHttp = true),
+        )
+    }
+
+    @Test
+    fun `con la opción se rechaza http hacia dominios públicos`() {
+        assertRejectedLocal("http://mealie.example.com")
+        assertRejectedLocal("http://mealie.example.com:9000")
+        assertRejectedLocal("http://mealie.local.evil.com")
+        assertRejectedLocal("http://mealielocal")
+        assertRejectedLocal("http://192.168.1.50.nip.io")
+        assertRejectedLocal("http://mealie.lan")
+        assertRejectedLocal("http://mealie.home.arpa")
+    }
+
+    @Test
+    fun `con la opción se rechaza http hacia IP públicas`() {
+        assertRejectedLocal("http://8.8.8.8")
+        assertRejectedLocal("http://172.32.0.1:9000")
+        assertRejectedLocal("http://192.169.0.1")
+        assertRejectedLocal("http://11.0.0.1")
+        assertRejectedLocal("http://[2001:db8::1]:9000")
+        assertRejectedLocal("http://[fe80::1]")
+    }
+
+    @Test
+    fun `con la opción se rechaza http hacia el propio móvil`() {
+        assertRejectedLocal("http://127.0.0.1")
+        assertRejectedLocal("http://127.0.0.1:9000")
+        assertRejectedLocal("http://localhost")
+        assertRejectedLocal("http://localhost:9000")
+        assertRejectedLocal("http://mealie.localhost")
+        assertRejectedLocal("http://[::1]:9000")
+        assertRejectedLocal("http://0.0.0.0")
+        assertRejectedLocal("http://169.254.1.1")
+    }
+
+    @Test
+    fun `con la opción se rechaza la IPv4 mapeada en IPv6`() {
+        assertRejectedLocal("http://[::ffff:192.168.1.1]")
+        assertRejectedLocal("http://[::ffff:c0a8:101]:9000")
+    }
+
+    @Test
+    fun `con la opción se rechazan las formas raras de IPv4 privada`() {
+        // Sin la forma decimal estricta, «012.0.0.1» o «3232235826» serían otras
+        // direcciones disfrazadas de privadas.
+        assertRejectedLocal("http://010.0.0.1")
+        assertRejectedLocal("http://192.168.01.50")
+        assertRejectedLocal("http://3232235826")
+        assertRejectedLocal("http://192.168.1")
+    }
+
+    @Test
+    fun `con la opción http sigue rechazando credenciales, consulta y fragmento`() {
+        assertRejectedLocal("http://usuario:secreto@192.168.1.50")
+        assertRejectedLocal("http://192.168.1.50/?a=1")
+        assertRejectedLocal("http://192.168.1.50/#a")
+        assertRejectedLocal("http://192.168.1.50/a/../b")
+        assertRejectedLocal("http://192.168.1.50:99999")
+        assertRejectedLocal("http://[fd00::1%25eth0]")
+        assertRejectedLocal("http://mealie\u200B.local")
+        assertRejectedLocal("http://192.168.1.50/café")
+    }
+
+    @Test
+    fun `con la opción el 80 se omite en http y el 443 se conserva`() {
+        assertEquals("http://192.168.1.50", ServerUrl.normalize("http://192.168.1.50:80", allowLocalHttp = true))
+        assertEquals("http://192.168.1.50", ServerUrl.normalize("http://192.168.1.50:80/", allowLocalHttp = true))
+        // 443 no es el por defecto de http: se conserva.
+        assertEquals("http://192.168.1.50:443", ServerUrl.normalize("http://192.168.1.50:443", allowLocalHttp = true))
+        // Y 80 no es el por defecto de https: se conserva.
+        assertEquals("https://mealie.example.com:80", ServerUrl.normalize("https://mealie.example.com:80"))
+    }
+
+    @Test
+    fun `https no cambia con la opción`() {
+        val cases = listOf(
+            "https://mealie.example.com/",
+            "HTTPS://MEALIE.Example.COM:8443/mealie/",
+            "https://mealie.example.com:443",
+            "https://[2001:db8::1]/",
+            "https://8.8.8.8/",
+            "https://192.168.1.50:9000",
+            "https://localhost",
+        )
+        for (input in cases) {
+            assertEquals(
+                "https cambia con la opción: $input",
+                ServerUrl.normalize(input),
+                ServerUrl.normalize(input, allowLocalHttp = true),
+            )
+        }
+    }
+
+    @Test
+    fun `con la opción se siguen rechazando los otros esquemas`() {
+        assertRejectedLocal("ftp://192.168.1.50")
+        assertRejectedLocal("ws://192.168.1.50")
+        assertRejectedLocal("192.168.1.50:9000")
+    }
+
+    @Test
+    fun `el rechazo por host no local no repite la entrada`() {
+        val message = rejectionMessage("http://mealie.example.com:9000/secreto", allowLocalHttp = true)
+        assertTrue(message.contains("red local"))
+        assertFalse(message.contains("mealie.example.com"))
+        assertFalse(message.contains("9000"))
+        assertFalse(message.contains("secreto"))
+
+        val token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJtZWFsaWUifQ.firma"
+        val withToken = rejectionMessage("http://8.8.8.8/$token", allowLocalHttp = true)
+        assertFalse(withToken.contains(token))
+        assertFalse(withToken.contains("8.8.8.8"))
+    }
+
+    @Test
+    fun `http local es idempotente`() {
+        val cases = listOf(
+            "http://192.168.1.50:9000/",
+            "HTTP://192.168.1.50:80/mealie/",
+            "http://[FD00::5]:9000",
+        )
+        for (input in cases) {
+            val once = ServerUrl.normalize(input, allowLocalHttp = true)
+            assertEquals("No es idempotente: $input", once, ServerUrl.normalize(once, allowLocalHttp = true))
+        }
     }
 
     // ---------------------------------------------------------------- forma canónica
@@ -361,10 +566,10 @@ class ServerUrlTest {
      * Comprueba que la entrada se rechaza y que el mensaje explica el motivo:
      * en Ajustes, un error sin texto no ayuda a corregir la URL.
      */
-    private fun assertRejected(entrada: String) {
+    private fun assertRejected(entrada: String, allowLocalHttp: Boolean = false) {
         var mensaje: String? = null
         try {
-            ServerUrl.normalize(entrada)
+            ServerUrl.normalize(entrada, allowLocalHttp)
         } catch (esperada: IllegalArgumentException) {
             mensaje = esperada.message
         }
@@ -375,9 +580,39 @@ class ServerUrlTest {
         )
     }
 
-    private fun rejectionMessage(entrada: String): String {
+    /** Rechazo con la opción activada y por el motivo concreto de «no es local». */
+    private fun assertNotLocalRejection(entrada: String) {
         try {
-            ServerUrl.normalize(entrada)
+            ServerUrl.normalize(entrada, allowLocalHttp = true)
+        } catch (esperada: NotLocalAddressException) {
+            assertFalse(esperada.message.isNullOrBlank())
+            return
+        } catch (otra: IllegalArgumentException) {
+            throw AssertionError("«$entrada» se ha rechazado por otro motivo: ${otra.message}")
+        }
+        throw AssertionError("Se esperaba que «$entrada» se rechazara")
+    }
+
+    /** Rechazo por un motivo que no es «no es local». */
+    private fun assertOtherRejection(entrada: String, allowLocalHttp: Boolean) {
+        try {
+            ServerUrl.normalize(entrada, allowLocalHttp)
+        } catch (esperada: IllegalArgumentException) {
+            assertFalse(
+                "«$entrada» no debería ser NotLocalAddressException",
+                esperada is NotLocalAddressException,
+            )
+            return
+        }
+        throw AssertionError("Se esperaba que «$entrada» se rechazara")
+    }
+
+    /** Igual que [assertRejected], pero con la opción de red local activada. */
+    private fun assertRejectedLocal(entrada: String) = assertRejected(entrada, allowLocalHttp = true)
+
+    private fun rejectionMessage(entrada: String, allowLocalHttp: Boolean = false): String {
+        try {
+            ServerUrl.normalize(entrada, allowLocalHttp)
         } catch (esperada: IllegalArgumentException) {
             return esperada.message.orEmpty()
         }

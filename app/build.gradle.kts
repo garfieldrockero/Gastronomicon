@@ -18,6 +18,10 @@ android {
     // Las bibliotecas de AndroidX actuales exigen compilar contra la API 37. targetSdk se
     // queda en 36: compilar contra una API nueva no cambia cómo se comporta la app.
     compileSdk = 37
+    // Fijada a propósito: es la que AGP 9.4 usa por defecto. Los scripts de CI leen este
+    // mismo valor para usar siempre las mismas herramientas de build-tools, en vez de
+    // la más alta que traiga el runner ese día.
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         // No cambiar nunca: es la identidad de la app en el móvil. Si cambia, se instala

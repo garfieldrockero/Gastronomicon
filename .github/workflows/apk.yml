@@ -56,6 +56,15 @@ jobs:
       - name: Pruebas del núcleo
         run: gradle --no-daemon :core:test
 
+      # Que las pruebas de la frontera del HTTP local se hayan ejecutado y pasado
+      # (tests > 0, sin fallos, errores ni omitidas), no solo que existan.
+      - name: Comprobar las pruebas de la frontera del HTTP local
+        run: bash .github/scripts/comprobar-pruebas-frontera.sh
+
+      # Solo UrlConnectionTransport puede abrir conexiones; no necesita compilar la app.
+      - name: Comprobar que solo el transporte abre conexiones
+        run: bash .github/scripts/comprobar-conexiones.sh
+
       # Si fallan, el informe HTML queda como artefacto para no tener que adivinar.
       - name: Guardar el informe de pruebas si fallan
         if: failure()
@@ -95,6 +104,7 @@ jobs:
       - name: Compilar la APK de prueba
         run: gradle --no-daemon assembleRelease
 
+      # Se comprueba la APK final con aapt2, no el manifiesto intermedio de Gradle.
       - name: Comprobar manifiesto y configuración de red
         run: bash .github/scripts/comprobar-manifiesto.sh
 
@@ -173,9 +183,19 @@ jobs:
           FIRMA_KEY_PASSWORD: ${{ secrets.FIRMA_KEY_PASSWORD }}
         run: gradle --no-daemon assembleRelease
 
-      # Manifiesto, permisos, copias, componentes exportados y configuración de red.
+      # Se comprueba la APK final (aapt2): permisos, manifiesto, copias, componentes
+      # exportados y configuración de red.
       - name: Comprobar manifiesto y configuración de red
         run: bash .github/scripts/comprobar-manifiesto.sh
+
+      # Huella SHA-256 del certificado: pública, va al log y al resumen. La variable de
+      # repositorio FIRMA_HUELLA_SHA256 es OBLIGATORIA: si falta, el paso falla, porque
+      # no comprobarla dejaría publicar una APK que Android no dejaría instalar encima
+      # de la anterior.
+      - name: Comprobar la huella de la firma
+        env:
+          HUELLA_ESPERADA: ${{ vars.FIRMA_HUELLA_SHA256 }}
+        run: bash .github/scripts/comprobar-firma.sh
 
       # La clave se borra siempre, aunque la compilación falle a medias.
       - name: Borrar la clave de firma
