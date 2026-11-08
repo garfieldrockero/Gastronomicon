@@ -190,8 +190,8 @@ class MealieClientTest {
         }
     }
 
+    @Test
     fun `sin servidor es ServerNotResponding por conexion rechazada`() {
-    fun `sin servidor es ServerNotResponding (conexión rechazada)`() {
         server.stop(0)
         assertEquals(ConnectionCheck.Failure(ConnectionProblem.ServerNotResponding), client().checkConnection())
     }
