@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fondo de ventana en modo oscuro. Copia «background» de DarkColors en
+     ui/theme/Colors.kt: mantener sincronizados para que no parpadee la pantalla
+     en blanco al abrir la app. -->
+<resources>
+    <color name="window_background">#1C1512</color>
+</resources>

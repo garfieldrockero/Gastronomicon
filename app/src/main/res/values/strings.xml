@@ -2,4 +2,50 @@
 <resources>
     <string name="app_name">Gastronomicón</string>
     <string name="home_subtitle">Tu libro de recetas.\nCliente no oficial de Mealie.</string>
+
+    <!-- Primera configuración: conectar con el servidor Mealie. -->
+    <string name="setup_title">Conecta con tu Mealie</string>
+    <string name="setup_subtitle">Indica dónde está tu servidor Mealie. Puedes cambiarlo después en Ajustes.</string>
+    <string name="setup_server_label">Servidor</string>
+    <!-- El «solo HTTPS» va en la ayuda del servidor y no en una nota aparte: es
+         donde se escribe la dirección, y TalkBack lo lee junto al campo. En
+         modo sin HTTPS (interruptor) la ayuda cambia y el aviso del token
+         sin cifrar va debajo del interruptor. Una IP con HTTPS casi nunca
+         tiene certificado válido, por eso el modo normal pide un dominio; sin
+         HTTPS solo se admite la IP numérica de casa, nunca un nombre. -->
+    <string name="setup_server_supporting">Dominio de tu Mealie; la conexión va cifrada por HTTPS. Por ejemplo: mealie.example.com</string>
+    <string name="setup_server_supporting_local">La IP de tu servidor en casa, en números. Por ejemplo: 192.168.1.50</string>
+    <string name="setup_port_label">Puerto</string>
+    <string name="setup_port_supporting">Déjalo en 443 si no lo has cambiado.</string>
+    <string name="setup_port_supporting_local">Mealie usa el 9000 si no lo has cambiado.</string>
+    <string name="setup_local_http_label">Conectar sin HTTPS (solo en la red de casa)</string>
+    <string name="setup_local_http_warning">Sin HTTPS, el token viaja sin cifrar y cualquiera conectado a la misma wifi podría verlo. Actívalo solo en la wifi de tu casa o con una VPN a ella. Con datos móviles y sin esa VPN no se conectará.</string>
+    <string name="setup_token_label">Token de API</string>
+    <string name="setup_token_supporting">En Mealie, abre tu perfil, crea un token de API y pégalo aquí.</string>
+    <string name="setup_test_connection">Probar conexión</string>
+    <string name="setup_save">Guardar</string>
+    <string name="setup_status_testing">Probando la conexión…</string>
+    <string name="setup_status_saving">Guardando…</string>
+    <string name="setup_hint_fill_fields">Rellena servidor, puerto y token para poder guardar.</string>
+    <string name="setup_result_success">Conexión correcta: tu Mealie responde.</string>
+
+    <!-- Motivos de fallo. Dicen qué pasa y qué hacer, y nunca repiten lo que
+         escribió la persona. -->
+    <string name="setup_error_no_network">No hay conexión. Revisa la wifi o los datos y vuelve a probar.</string>
+    <string name="setup_error_unauthorized">Mealie no acepta ese token. Crea uno nuevo en tu perfil y pégalo aquí.</string>
+    <string name="setup_error_server">El servidor ha respondido con un problema. Vuelve a probar en un rato.</string>
+    <string name="setup_error_invalid_address">Esa dirección no lleva a tu Mealie. Revisa el servidor y el puerto.</string>
+    <string name="setup_error_not_local_address">Sin HTTPS solo puedes usar la IP de tu servidor en casa, como 192.168.1.50. Si tu Mealie tiene dominio, desactiva «Conectar sin HTTPS».</string>
+    <string name="setup_error_local_http_needs_home_network">Sin HTTPS solo se conecta desde la wifi de casa o con una VPN a ella. Conéctate a una de las dos y vuelve a probar.</string>
+    <string name="setup_error_secure_connection">No se ha podido comprobar que la conexión sea segura. Si estás en una wifi pública, prueba con datos móviles.</string>
+    <string name="setup_error_invalid_token">Ese token no parece completo. Copia el que te da Mealie tal cual, sin espacios.</string>
+    <string name="setup_error_unknown">Algo ha fallado. Vuelve a probar.</string>
+    <!-- Lo que TalkBack dice del campo marcado; el motivo completo va en el aviso. -->
+    <string name="setup_field_error_address">Revisa el servidor y el puerto</string>
+    <string name="setup_field_error_token">Revisa el token</string>
+
+    <!-- Este aviso NO va en la primera pantalla (decisión del 7-11-2026): se
+         mostrará en Ajustes → «Acerca de», que aún no existe. No lo borres ni lo
+         muevas de vuelta a SetupScreen. -->
+    <string name="setup_notice">Gastronomicón es un cliente no oficial de Mealie. Solo se conecta sin cifrar si tú lo activas, y solo en tu red de casa o con una VPN a ella.</string>
 </resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Lo mismo que values-v31, en oscuro: @color/window_background ya
+         resuelve al color nocturno desde values-night/colors.xml, pero el
+         estilo se repite entero para conservar el windowBackground y el padre
+         oscuro del sistema. -->
+    <style name="Theme.Gastronomicon" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/window_background</item>
+    </style>
+</resources>

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Gastronomicon" parent="android:Theme.Material.NoActionBar" />
+    <!-- El fondo de ventana evita el destello blanco al arrancar; el color
+         vive en values-night/colors.xml y debe seguir sincronizado con
+         Colors.kt. -->
+    <style name="Theme.Gastronomicon" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
 </resources>

@@ -2,10 +2,8 @@ package io.github.garfieldrockero.gastronomicon.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.CompositionLocalProvider
 
 /** Preferencia de tema que se guardará en Ajustes. */
 enum class ThemeMode {
@@ -14,23 +12,13 @@ enum class ThemeMode {
     DARK,
 }
 
-// Paleta provisional de la fase 1, para no dejar nunca el morado de plantilla de
-// Material. La identidad visual definitiva se decide en la fase 3.
-private val Terracotta = Color(0xFF9C4A2F)
-private val TerracottaDark = Color(0xFFE8A587)
-
-private val LightColors = lightColorScheme(
-    primary = Terracotta,
-    secondary = Color(0xFF5F6B3B),
-    tertiary = Color(0xFF7A5636),
-)
-
-private val DarkColors = darkColorScheme(
-    primary = TerracottaDark,
-    secondary = Color(0xFFC0CBA0),
-    tertiary = Color(0xFFE0BFA2),
-)
-
+/**
+ * Tema de Gastronomicón. Los colores viven en Colors.kt y la tipografía en
+ * Type.kt; este archivo solo decide qué esquema toca según el modo elegido.
+ */
+// TODO(ajustes): al permitir Claro/Oscuro manual en Ajustes, sincronizar el
+// fondo de ventana (los colors.xml siguen al modo del sistema, no al elegido)
+// y la apariencia de las barras del sistema con el tema efectivo.
 @Composable
 fun GastronomiconTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
@@ -41,8 +29,13 @@ fun GastronomiconTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    MaterialTheme(
-        colorScheme = if (dark) DarkColors else LightColors,
-        content = content,
-    )
+    CompositionLocalProvider(
+        LocalExtendedColors provides if (dark) DarkExtendedColors else LightExtendedColors,
+    ) {
+        MaterialTheme(
+            colorScheme = if (dark) DarkColors else LightColors,
+            typography = GastronomiconTypography,
+            content = content,
+        )
+    }
 }

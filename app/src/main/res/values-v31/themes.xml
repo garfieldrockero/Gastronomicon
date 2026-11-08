@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12 y siguientes pintan su propia pantalla de arranque. Sin este
+         color, la primera impresión es un destello blanco de plantilla antes de
+         que Compose dibuje nada.
+         Una configuración más específica SUSTITUYE el estilo entero, no lo
+         completa: por eso se repite aquí el windowBackground de values/. -->
+    <style name="Theme.Gastronomicon" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/window_background</item>
+    </style>
+</resources>

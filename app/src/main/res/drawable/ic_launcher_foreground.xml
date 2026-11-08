@@ -2,7 +2,7 @@
 <!-- Primer plano del icono: un recetario cerrado con tenedor y cuchara en la tapa.
      Todo cabe en la zona segura de 66 dp (círculo de radio 33 centrado en 54,54), así
      que ninguna máscara del lanzador recorta el dibujo. Colores de la paleta provisional
-     de ui/theme/Theme.kt: si la paleta cambia, hay que cambiarlos aquí también. -->
+     de ui/theme/Colors.kt: si la paleta cambia, hay que cambiarlos aquí también. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
