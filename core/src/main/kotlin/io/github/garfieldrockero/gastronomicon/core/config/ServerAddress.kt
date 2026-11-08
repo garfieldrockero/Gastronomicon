@@ -134,6 +134,34 @@ object ServerAddress {
     }
 
     /**
+     * Parte la URL guardada en lo que se escribe en los campos «Servidor» y
+     * «Puerto» de la primera pantalla, con el puerto siempre explícito (443 en
+     * https y 80 en http si la URL no lo lleva). Devuelve null si la URL no es
+     * válida (la política es la de [ServerUrl], con http admitido porque aquí
+     * solo se lee algo ya guardado).
+     *
+     * [SplitAddress.server] no lleva esquema; sí la subruta si la hay, y el
+     * host IPv6 va entre corchetes. El esquema se devuelve aparte para que la
+     * interfaz sepa si la sesión era http (ver [SplitAddress.toUrl]).
+     */
+    fun split(url: String): SplitAddress? {
+        val canonical = try {
+            ServerUrl.normalize(url, allowLocalHttp = true)
+        } catch (ignored: IllegalArgumentException) {
+            return null
+        }
+        val uri = try {
+            URI(canonical)
+        } catch (ignored: URISyntaxException) {
+            return null
+        }
+        val scheme = uri.scheme ?: return null
+        val host = uri.host ?: return null
+        val port = if (uri.port != -1) uri.port else if (scheme == "https") DEFAULT_HTTPS_PORT else DEFAULT_HTTP_PORT
+        return SplitAddress(scheme = scheme, server = host + (uri.rawPath ?: ""), port = port)
+    }
+
+    /**
      * Añade el puerto del campo «puerto» justo después del servidor y antes de
      * la barra. Se hace sobre la cadena y no recomponiendo la URI porque la
      * subruta hay que conservarla tal cual la escribió la persona.
@@ -151,4 +179,24 @@ object ServerAddress {
         val tail = if (cut == -1) "" else rest.substring(cut)
         return base.substring(0, schemeEnd + 3) + authority + ":" + port + tail
     }
+}
+
+/**
+ * URL guardada partida en los dos campos de la pantalla.
+ *
+ * @property scheme «http» o «https».
+ * @property server host (IPv6 entre corchetes) más la subruta si la hay, sin esquema ni puerto.
+ * @property port siempre explícito, 1..65535.
+ */
+data class SplitAddress(val scheme: String, val server: String, val port: Int) {
+
+    /** Si la URL guardada era http, el interruptor de red local tiene que estar encendido para editarla. */
+    val isLocalHttp: Boolean get() = scheme == "http"
+
+    /**
+     * Vuelve a juntar los campos: `ServerAddress.split(x)!!.toUrl() == x` para
+     * toda URL canónica. Usa [isLocalHttp] como modo, no el interruptor de la
+     * pantalla, para que un https con el interruptor encendido no cambie de esquema.
+     */
+    fun toUrl(): String = ServerAddress.build(server, port, allowLocalHttp = isLocalHttp)
 }

@@ -17,6 +17,7 @@ class SecretRedactionTest {
     fun `every NetworkError variant redacts the decoy token from message and toString`() {
         val errors = listOf<NetworkError>(
             NetworkError.NoConnection,
+            NetworkError.ConnectionRefused,
             NetworkError.DnsFailure,
             NetworkError.TlsError,
             NetworkError.Timeout,

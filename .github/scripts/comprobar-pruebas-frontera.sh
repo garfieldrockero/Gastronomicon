@@ -27,6 +27,12 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.network.HttpRequestQueryTest
   io.github.garfieldrockero.gastronomicon.core.network.CoreJsonTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListQueryTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlugTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.RecipeImageTest
+  io.github.garfieldrockero.gastronomicon.core.html.SafeUrlTest
+  io.github.garfieldrockero.gastronomicon.core.config.ServerAddressSplitTest
+  io.github.garfieldrockero.gastronomicon.core.session.SaveSessionPolicyTest
   io.github.garfieldrockero.gastronomicon.core.html.HtmlSanitizerTest
   io.github.garfieldrockero.gastronomicon.core.html.PlainTextSanitizerTest
   io.github.garfieldrockero.gastronomicon.core.session.SessionTest

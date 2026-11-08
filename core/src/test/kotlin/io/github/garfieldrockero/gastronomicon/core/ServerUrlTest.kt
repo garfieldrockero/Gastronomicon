@@ -372,6 +372,30 @@ class ServerUrlTest {
     }
 
     @Test
+    fun `con la opción solo valen 10, 172_16, 192_168 y fc00 en IPv6`() {
+        // IPv4 mapeada en IPv6: pública o privada, no es una IP privada escrita
+        // como tal y no se acepta.
+        assertNotLocalRejection("http://[::ffff:8.8.8.8]")
+        assertNotLocalRejection("http://[::ffff:10.0.0.1]")
+        // 100.64/10 (CGNAT) es compartida del operador, no de casa.
+        assertNotLocalRejection("http://100.64.0.1")
+        // Prefijo NAT64: traduce a una IPv4 cualquiera (aquí 10.0.0.1).
+        assertNotLocalRejection("http://[64:ff9b::a00:1]")
+        assertRejectedLocal("http://[::ffff:8.8.8.8]")
+        assertRejectedLocal("http://[::ffff:10.0.0.1]")
+        assertRejectedLocal("http://100.64.0.1")
+        assertRejectedLocal("http://[64:ff9b::a00:1]")
+    }
+
+    @Test
+    fun `sin la opción también se rechazan esas direcciones`() {
+        assertRejected("http://[::ffff:8.8.8.8]")
+        assertRejected("http://[::ffff:10.0.0.1]")
+        assertRejected("http://100.64.0.1")
+        assertRejected("http://[64:ff9b::a00:1]")
+    }
+
+    @Test
     fun `con la opción se rechazan las formas raras de IPv4 privada`() {
         // Sin la forma decimal estricta, «012.0.0.1» o «3232235826» serían otras
         // direcciones disfrazadas de privadas.

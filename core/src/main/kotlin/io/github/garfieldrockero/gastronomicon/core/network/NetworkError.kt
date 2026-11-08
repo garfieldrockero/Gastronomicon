@@ -26,10 +26,20 @@ package io.github.garfieldrockero.gastronomicon.core.network
  */
 sealed class NetworkError(message: String) : Exception(message, null, false, false) {
 
-    /** No hay red, la conexión se ha rechazado o se ha cortado a mitad de petición. */
+    /** No hay ruta a la red o la conexión se ha cortado a mitad de petición. */
     object NoConnection : NetworkError(
         "No se ha podido conectar con el servidor o la conexión se ha cortado. " +
             "Comprueba la dirección y tu conexión.",
+    )
+
+    /**
+     * La máquina del servidor contesta pero nada escucha en ese puerto
+     * (ConnectException): lo habitual con Mealie apagado o con el puerto mal
+     * escrito. No es falta de red, y decirlo así mandaría a revisar la wifi.
+     */
+    object ConnectionRefused : NetworkError(
+        "El servidor ha rechazado la conexión. Comprueba que está encendido y que " +
+            "la dirección y el puerto son correctos.",
     )
 
     /** El nombre del servidor no resuelve. */

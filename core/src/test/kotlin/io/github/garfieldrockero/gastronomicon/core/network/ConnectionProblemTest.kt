@@ -4,6 +4,7 @@ import io.github.garfieldrockero.gastronomicon.core.NotLocalAddressException
 import io.github.garfieldrockero.gastronomicon.core.config.ServerAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
@@ -17,7 +18,8 @@ class ConnectionProblemTest {
     /** Cada subtipo «object» de NetworkError con el motivo que le toca. */
     private val objectCases: Map<NetworkError, ConnectionProblem> = mapOf(
         NetworkError.NoConnection to ConnectionProblem.NoNetwork,
-        NetworkError.Timeout to ConnectionProblem.NoNetwork,
+        NetworkError.Timeout to ConnectionProblem.ServerNotResponding,
+        NetworkError.ConnectionRefused to ConnectionProblem.ServerNotResponding,
         NetworkError.DnsFailure to ConnectionProblem.InvalidAddress,
         NetworkError.TlsError to ConnectionProblem.SecureConnectionFailed,
         NetworkError.InvalidRequest to ConnectionProblem.InvalidAddress,
@@ -33,6 +35,19 @@ class ConnectionProblemTest {
         for ((error, expected) in objectCases) {
             assertEquals("Motivo de ${error::class.java.simpleName}", expected, error.toConnectionProblem())
         }
+    }
+
+    @Test
+    fun `el tiempo agotado no se confunde con la falta de red`() {
+        assertEquals(ConnectionProblem.ServerNotResponding, NetworkError.Timeout.toConnectionProblem())
+        assertEquals(ConnectionProblem.NoNetwork, NetworkError.NoConnection.toConnectionProblem())
+        assertNotEquals(ConnectionProblem.NoNetwork, NetworkError.Timeout.toConnectionProblem())
+    }
+
+    @Test
+    fun `la conexion rechazada es servidor sin respuesta y no falta de red`() {
+        assertEquals(ConnectionProblem.ServerNotResponding, NetworkError.ConnectionRefused.toConnectionProblem())
+        assertNotEquals(ConnectionProblem.NoNetwork, NetworkError.ConnectionRefused.toConnectionProblem())
     }
 
     @Test

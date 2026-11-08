@@ -112,6 +112,74 @@ class UrlConnectionTransportTest {
     }
 
     @Test
+    fun `sin token la peticion no lleva Authorization ni siquiera tras una redireccion`() {
+        val received: MutableList<String?> = Collections.synchronizedList(mutableListOf())
+        routes["/anonimo"] = { e ->
+            received.add(e.requestHeaders.getFirst("Authorization"))
+            e.responseHeaders.add("Location", "/anonimo-destino")
+            respond(e, 302)
+        }
+        routes["/anonimo-destino"] = { e ->
+            received.add(e.requestHeaders.getFirst("Authorization"))
+            respond(e, 200, "{}".toByteArray())
+        }
+        val transport = UrlConnectionTransport(
+            baseUri = URI("http://127.0.0.1:${server.address.port}"),
+            token = null,
+            connectTimeoutMs = 5_000,
+            readTimeoutMs = 5_000,
+        )
+        assertEquals(200, transport.execute(HttpRequest(HttpMethod.GET, "/anonimo")).statusCode)
+        assertEquals(listOf<String?>(null, null), received.toList())
+    }
+
+    @Test
+    fun `createWithoutToken aplica la misma politica de URL que create`() {
+        // HTTP hacia un nombre o una IP pública: fuera, igual que con token.
+        for (url in listOf("http://ejemplo.org", "http://8.8.8.8", "http://servidor.local")) {
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                UrlConnectionTransport.createWithoutToken(
+                    url,
+                    allowLocalHttp = true,
+                    activeNetwork = ActiveNetworkProvider { NetworkKind.Wifi },
+                )
+            }
+        }
+        // HTTP sin el interruptor, o con él pero sin proveedor de red: también fuera.
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            UrlConnectionTransport.createWithoutToken("http://192.168.1.50")
+        }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            UrlConnectionTransport.createWithoutToken("http://192.168.1.50", allowLocalHttp = true)
+        }
+        // HTTPS sin más y HTTP a IP privada con interruptor y proveedor: se crean.
+        UrlConnectionTransport.createWithoutToken("https://mealie.ejemplo.org")
+        UrlConnectionTransport.createWithoutToken(
+            "http://192.168.1.50:9000",
+            allowLocalHttp = true,
+            activeNetwork = ActiveNetworkProvider { NetworkKind.Wifi },
+        )
+    }
+
+    @Test
+    fun `sin token y con http en datos moviles tampoco se envia nada`() {
+        val before = requestsToMain.get()
+        val transport = UrlConnectionTransport(
+            baseUri = URI("http://127.0.0.1:${server.address.port}"),
+            token = null,
+            activeNetwork = ActiveNetworkProvider { NetworkKind.Cellular },
+        )
+        val error = try {
+            transport.execute(HttpRequest(HttpMethod.GET, "/x"))
+            null
+        } catch (e: NetworkError) {
+            e
+        }
+        assertTrue(error === NetworkError.LocalHttpNotAllowedOnThisNetwork)
+        assertEquals(before, requestsToMain.get())
+    }
+
+    @Test
     fun `el metodo, las cabeceras propias y el cuerpo llegan al servidor`() {
         val received = mutableListOf<Triple<String, String, String>>()
         routes["/eco"] = { e ->
@@ -717,15 +785,15 @@ class UrlConnectionTransportTest {
     }
 
     @Test
-    fun `la conexion rechazada se mapea a sin conexion`() {
+    fun `la conexion rechazada se mapea a ConnectionRefused`() {
         // Se para el segundo servidor para tener un puerto cerrado con seguridad.
         val closedPort = otherServer.address.port
         otherServer.stop(0)
         val client = newTransport(base = URI("http://127.0.0.1:$closedPort"))
         try {
             client.execute(HttpRequest(HttpMethod.GET, "/"))
-            throw AssertionError("Se esperaba NetworkError.NoConnection")
-        } catch (expected: NetworkError.NoConnection) {
+            throw AssertionError("Se esperaba NetworkError.ConnectionRefused")
+        } catch (expected: NetworkError.ConnectionRefused) {
         }
     }
 

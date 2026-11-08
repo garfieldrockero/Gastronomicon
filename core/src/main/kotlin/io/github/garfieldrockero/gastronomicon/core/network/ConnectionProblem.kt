@@ -11,8 +11,15 @@ import io.github.garfieldrockero.gastronomicon.core.NotLocalAddressException
  * interfaz solo elige el texto de cada caso.
  */
 enum class ConnectionProblem {
-    /** Sin red, conexión cortada o el servidor no contesta a tiempo. */
+    /** Sin red o conexión cortada: el móvil no ha llegado a hablar con el servidor. */
     NoNetwork,
+
+    /**
+     * Se agotó el tiempo de conexión o de lectura. Va aparte de [NoNetwork]
+     * porque con la wifi bien y el servidor apagado o colgado decir «revisa la
+     * wifi» es falso: lo que toca es mirar si el servidor está en marcha.
+     */
+    ServerNotResponding,
 
     /** El servidor rechaza el token (401) o no le da permiso (403). */
     Unauthorized,
@@ -76,7 +83,8 @@ fun NetworkError.toConnectionProblem(): ConnectionProblem = when (this) {
         else -> ConnectionProblem.Unknown
     }
     NetworkError.NoConnection -> ConnectionProblem.NoNetwork
-    NetworkError.Timeout -> ConnectionProblem.NoNetwork
+    NetworkError.Timeout -> ConnectionProblem.ServerNotResponding
+    NetworkError.ConnectionRefused -> ConnectionProblem.ServerNotResponding
     NetworkError.DnsFailure -> ConnectionProblem.InvalidAddress
     NetworkError.TlsError -> ConnectionProblem.SecureConnectionFailed
     NetworkError.InvalidRequest -> ConnectionProblem.InvalidAddress

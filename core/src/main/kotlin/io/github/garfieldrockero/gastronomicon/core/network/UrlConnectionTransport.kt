@@ -5,6 +5,7 @@ import io.github.garfieldrockero.gastronomicon.core.config.ApiToken
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.ConnectException
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.URI
@@ -69,7 +70,9 @@ import javax.net.ssl.SSLException
  */
 class UrlConnectionTransport internal constructor(
     private val baseUri: URI,
-    private val token: ApiToken,
+    // Null solo para preguntar a una dirección si es un Mealie sin darle aún el
+    // token (ver createWithoutToken); todas las demás peticiones lo llevan.
+    private val token: ApiToken?,
     private val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
     private val maxResponseBytes: Long = DEFAULT_MAX_RESPONSE_BYTES,
@@ -249,7 +252,7 @@ class UrlConnectionTransport internal constructor(
 
             // Hasta aquí solo hay destinos del origen base: las redirecciones
             // a otro origen se han rechazado antes de abrir conexión.
-            connection.setRequestProperty("Authorization", token.authorizationHeaderValue())
+            token?.let { connection.setRequestProperty("Authorization", it.authorizationHeaderValue()) }
             if (headers.keys.none { it.equals("Accept", ignoreCase = true) }) {
                 connection.setRequestProperty("Accept", "application/json")
             }
@@ -459,7 +462,10 @@ class UrlConnectionTransport internal constructor(
         is SocketTimeoutException -> NetworkError.Timeout
         is UnknownHostException -> NetworkError.DnsFailure
         is SSLException -> NetworkError.TlsError
-        is SocketException -> NetworkError.NoConnection // incluye ConnectException
+        // Antes que SocketException: ConnectException es subclase suya y, sin este
+        // orden, la conexión rechazada se confundiría con falta de red.
+        is ConnectException -> NetworkError.ConnectionRefused
+        is SocketException -> NetworkError.NoConnection
         else -> NetworkError.InvalidResponse
     }
 
@@ -533,6 +539,39 @@ class UrlConnectionTransport internal constructor(
             readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
             maxResponseBytes: Long = DEFAULT_MAX_RESPONSE_BYTES,
             totalTimeoutMs: Long = DEFAULT_TOTAL_TIMEOUT_MS,
+        ): UrlConnectionTransport = build(
+            serverUrl, token, allowLocalHttp, activeNetwork,
+            connectTimeoutMs, readTimeoutMs, maxResponseBytes, totalTimeoutMs,
+        )
+
+        /**
+         * Igual que [create], pero la petición no lleva «Authorization». Sirve
+         * para preguntar a una dirección «¿eres un Mealie?» antes de darle el
+         * token: si no lo es, el secreto no ha salido del móvil. Misma política
+         * de URL, de red y de redirecciones que [create].
+         */
+        fun createWithoutToken(
+            serverUrl: String,
+            allowLocalHttp: Boolean = false,
+            activeNetwork: ActiveNetworkProvider? = null,
+            connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
+            readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
+            maxResponseBytes: Long = DEFAULT_MAX_RESPONSE_BYTES,
+            totalTimeoutMs: Long = DEFAULT_TOTAL_TIMEOUT_MS,
+        ): UrlConnectionTransport = build(
+            serverUrl, null, allowLocalHttp, activeNetwork,
+            connectTimeoutMs, readTimeoutMs, maxResponseBytes, totalTimeoutMs,
+        )
+
+        private fun build(
+            serverUrl: String,
+            token: ApiToken?,
+            allowLocalHttp: Boolean,
+            activeNetwork: ActiveNetworkProvider?,
+            connectTimeoutMs: Int,
+            readTimeoutMs: Int,
+            maxResponseBytes: Long,
+            totalTimeoutMs: Long,
         ): UrlConnectionTransport {
             if (allowLocalHttp && activeNetwork == null) {
                 throw IllegalArgumentException(
