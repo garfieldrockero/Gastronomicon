@@ -23,6 +23,13 @@ class HttpRequest(
      * construye (por ejemplo `RecipeListQuery`) codifica los valores.
      */
     val query: String? = null,
+    /**
+     * Pide al transporte que, si el servidor contesta 422, adjunte su cuerpo
+     * (acotado a [MAX_ERROR_BODY_BYTES]) a [NetworkError.HttpError]. Por
+     * defecto no se lee: solo el formulario de recetas necesita el detalle de
+     * validación, y el resto de errores se quedan en el código HTTP.
+     */
+    val readErrorBody: Boolean = false,
 ) {
     init {
         // Un GET no puede llevar cuerpo: en HttpURLConnection, poner
@@ -33,6 +40,11 @@ class HttpRequest(
             throw IllegalArgumentException(
                 "Una petición GET no puede llevar cuerpo: en la red se convertiría en POST.",
             )
+        }
+        // Tope del cuerpo que sale: una subida enorme por error (o un cuerpo
+        // hostil construido por otro módulo) no debe llegar a la red.
+        if (body != null && body.size > MAX_BODY_BYTES) {
+            throw IllegalArgumentException("El cuerpo de la petición supera los $MAX_BODY_BYTES bytes.")
         }
         if (!path.startsWith("/")) {
             throw IllegalArgumentException("La ruta de la petición tiene que empezar por «/».")
@@ -91,6 +103,40 @@ class HttpRequest(
     companion object {
         /** Tope de la consulta ya codificada; los servidores y proxies suelen cortar cerca de 8 KB. */
         const val MAX_QUERY_LENGTH = 2048
+
+        /** Tope del cuerpo de una petición: 5 MiB de imagen más el envoltorio multipart. */
+        const val MAX_BODY_BYTES = 6 * 1024 * 1024
+
+        /** Tope del cuerpo de error que se lee de un 422; el detalle útil son unos cientos de bytes. */
+        const val MAX_ERROR_BODY_BYTES = 16 * 1024
+
+        /** Petición con cuerpo JSON (UTF-8). [json] ya viene serializado por quien llama. */
+        fun json(
+            method: HttpMethod,
+            path: String,
+            json: String,
+            readErrorBody: Boolean = false,
+        ): HttpRequest = HttpRequest(
+            method = method,
+            path = path,
+            headers = mapOf("Content-Type" to "application/json"),
+            body = json.toByteArray(Charsets.UTF_8),
+            readErrorBody = readErrorBody,
+        )
+
+        /** Petición `multipart/form-data` con el cuerpo ya montado por [MultipartBody]. */
+        fun multipart(
+            method: HttpMethod,
+            path: String,
+            body: MultipartBody.Built,
+            readErrorBody: Boolean = false,
+        ): HttpRequest = HttpRequest(
+            method = method,
+            path = path,
+            headers = mapOf("Content-Type" to body.contentType),
+            body = body.bytes,
+            readErrorBody = readErrorBody,
+        )
 
         private val PRINTABLE_ASCII_WITH_SPACE = 0x20..0x7E
 

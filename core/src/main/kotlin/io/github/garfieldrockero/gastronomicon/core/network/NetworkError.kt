@@ -99,8 +99,16 @@ sealed class NetworkError(message: String) : Exception(message, null, false, fal
         "La respuesta del servidor no es válida.",
     )
 
-    /** El servidor ha contestado con un código de error HTTP. */
-    class HttpError(val statusCode: Int) : NetworkError(messageFor(statusCode))
+    /**
+     * El servidor ha contestado con un código de error HTTP.
+     *
+     * [body] es el cuerpo CRUDO del error y solo existe si la petición lo pidió
+     * ([HttpRequest.readErrorBody]) y el código era 422, acotado por el
+     * transporte. Es `internal` y no entra en el mensaje ni en `toString`: el
+     * único que lo lee es el cliente, que lo sanea y lo acota antes de
+     * entregar nada. Texto del servidor, nunca de fiar.
+     */
+    class HttpError(val statusCode: Int, internal val body: ByteArray? = null) : NetworkError(messageFor(statusCode))
 
     companion object {
         /**

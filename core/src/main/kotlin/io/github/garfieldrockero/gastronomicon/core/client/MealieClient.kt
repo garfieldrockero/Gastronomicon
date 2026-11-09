@@ -1,6 +1,7 @@
 package io.github.garfieldrockero.gastronomicon.core.client
 
 import io.github.garfieldrockero.gastronomicon.core.html.PlainTextSanitizer
+import io.github.garfieldrockero.gastronomicon.core.html.SafeUrl
 import io.github.garfieldrockero.gastronomicon.core.network.ActiveNetworkProvider
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.network.CoreJson
@@ -8,11 +9,18 @@ import io.github.garfieldrockero.gastronomicon.core.network.HttpMethod
 import io.github.garfieldrockero.gastronomicon.core.network.HttpRequest
 import io.github.garfieldrockero.gastronomicon.core.network.HttpResponse
 import io.github.garfieldrockero.gastronomicon.core.network.HttpTransport
+import io.github.garfieldrockero.gastronomicon.core.network.MultipartBody
 import io.github.garfieldrockero.gastronomicon.core.network.NetworkError
 import io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransport
 import io.github.garfieldrockero.gastronomicon.core.network.toConnectionProblem
+import io.github.garfieldrockero.gastronomicon.core.recipes.Organizer
+import io.github.garfieldrockero.gastronomicon.core.recipes.OrganizerKind
 import io.github.garfieldrockero.gastronomicon.core.recipes.Page
+import io.github.garfieldrockero.gastronomicon.core.recipes.PercentEncoding
 import io.github.garfieldrockero.gastronomicon.core.recipes.Recipe
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraft
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraftValidator
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftValidation
 import io.github.garfieldrockero.gastronomicon.core.recipes.ImageSize
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeImage
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailSource
@@ -22,6 +30,10 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlug
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummary
 import io.github.garfieldrockero.gastronomicon.core.session.Session
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import java.util.Locale
 
 /** Resultado de «Probar conexión»: o la versión del servidor, o el motivo ya reducido. */
 sealed interface ConnectionCheck {
@@ -44,8 +56,12 @@ sealed interface ConnectionCheck {
  * Errores: [checkConnection] nunca lanza por red, devuelve [ConnectionCheck].
  * El resto lanza [NetworkError] (código HTTP incluido: 401, 404, 422, 5xx) y
  * [NetworkError.InvalidResponse] si el cuerpo no es el JSON esperado. Esos
- * mensajes son fijos y no llevan token, URL ni cuerpo de la respuesta. El 422
- * no se lee: el detalle del formulario se decidió para la fase de escritura.
+ * mensajes son fijos y no llevan token, URL ni cuerpo de la respuesta.
+ *
+ * Las operaciones de escritura, importar, subir imagen y listar organizadores
+ * (más abajo) no lanzan por red: devuelven [ApiResult]. El cuerpo de un 422 se
+ * lee solo ahí, con límite de bytes, y se entrega saneado y acotado
+ * ([ValidationDetail]). Ninguna de las dos formas lleva token, URL ni cuerpo crudo.
  */
 class MealieClient(
     private val transport: HttpTransport,
@@ -60,6 +76,12 @@ class MealieClient(
      * [fetchImage]. Por defecto es [transport] (y entonces manda su límite).
      */
     private val imageTransport: HttpTransport = transport,
+    /**
+     * Transporte con token y plazos más largos, solo para [importFromUrl]: el
+     * servidor descarga y analiza la página antes de contestar. Por defecto
+     * es [transport].
+     */
+    private val importTransport: HttpTransport = transport,
 ) : RecipeListSource, RecipeDetailSource {
 
     /**
@@ -164,7 +186,276 @@ class MealieClient(
         return ImageResult.Success(body, real)
     }
 
+    // ------------------------------------------------------------ escritura
+
+    /**
+     * `POST /api/recipes`: crea una receta vacía con ese nombre y devuelve su
+     * slug (ya validado con la lista blanca; si el servidor manda otro, es
+     * [ApiResult.Failure] con [ConnectionProblem.Unknown]). El nombre se sanea
+     * y se valida igual que el del borrador.
+     */
+    fun createRecipe(name: String): ApiResult<String> {
+        val (clean, errors) = RecipeDraftValidator.validateName(name)
+        if (clean == null) return ApiResult.DraftInvalid(errors)
+        return guarded {
+            val body = JsonObject(mapOf("name" to JsonPrimitive(clean)))
+            val response = transport.execute(
+                HttpRequest.json(HttpMethod.POST, RECIPES_PATH, encode(body), readErrorBody = true),
+            )
+            ApiResult.Success(readSlug(response))
+        }
+    }
+
+    /**
+     * Borrador para el formulario de edición, leído del servidor (`GET`) con
+     * las mismas reglas de saneado que usa [updateRecipe] para decidir qué se
+     * ha editado. Lleva los ids de línea que permiten conservar lo que el
+     * formulario no muestra.
+     *
+     * @throws IllegalArgumentException si [slug] no pasa la lista blanca.
+     */
+    fun loadDraft(slug: String): ApiResult<RecipeDraft> {
+        val checked = RecipeSlug.checked(slug)
+        return guarded {
+            val original = readObject(transport.execute(HttpRequest(HttpMethod.GET, "$RECIPES_PATH/$checked")))
+            ApiResult.Success(RecipeDraftJson.toDraft(original))
+        }
+    }
+
+    /**
+     * Guarda [draft] sobre la receta [slug] con un solo `PUT` (sin `PATCH`):
+     * 1. valida y sanea el borrador (si falla, [ApiResult.DraftInvalid] y no se
+     *    envía nada);
+     * 2. pide el `GET` entero y lo trata como `JsonObject`, sin pasar por DTO,
+     *    para no perder ni inventar campos;
+     * 3. sustituye SOLO las claves editadas y quita las marcas de tiempo que
+     *    rellena Mealie (ver [RecipeDraftJson]);
+     * 4. envía el `PUT` y, como su respuesta no tiene esquema, vuelve a pedir
+     *    el `GET` para devolver la receta guardada.
+     *
+     * Si el nombre cambia, Mealie puede cambiar el slug: el `slug` de la
+     * [Recipe] devuelta es el que hay que usar a partir de ahora. Si el `PUT`
+     * se acepta pero la relectura falla, el resultado es
+     * [ApiResult.SavedButNotReloaded] (los cambios sí están guardados).
+     *
+     * Entre el `GET` y el `PUT` no hay control de concurrencia: si otra persona
+     * edita a la vez, gana el último en guardar.
+     *
+     * @throws IllegalArgumentException si [slug] no pasa la lista blanca.
+     */
+    fun updateRecipe(slug: String, draft: RecipeDraft): ApiResult<Recipe> {
+        val checked = RecipeSlug.checked(slug)
+        val clean = when (val validation = RecipeDraftValidator.validate(draft)) {
+            is DraftValidation.Valid -> validation.draft
+            is DraftValidation.Invalid -> return ApiResult.DraftInvalid(validation.errors)
+        }
+        val path = "$RECIPES_PATH/$checked"
+        val original = try {
+            readObject(transport.execute(HttpRequest(HttpMethod.GET, path)))
+        } catch (error: NetworkError) {
+            return ApiErrors.map(error)
+        }
+        val body = when (val merged = RecipeDraftJson.merge(original, clean)) {
+            is RecipeDraftJson.Merge.Body -> merged.json
+            is RecipeDraftJson.Merge.Errors -> return ApiResult.DraftInvalid(merged.errors)
+        }
+        val saved = try {
+            transport.execute(HttpRequest.json(HttpMethod.PUT, path, encode(body), readErrorBody = true))
+        } catch (error: NetworkError) {
+            return ApiErrors.map(error)
+        }
+        val reloadSlug = slugFromUpdateResponse(saved) ?: checked
+        return try {
+            ApiResult.Success(getRecipe(reloadSlug))
+        } catch (error: NetworkError) {
+            ApiResult.SavedButNotReloaded(error.toConnectionProblem())
+        }
+    }
+
+    /**
+     * `DELETE /api/recipes/{slug}`. El cuerpo de la respuesta (sin esquema
+     * fiable) se descarta.
+     *
+     * @throws IllegalArgumentException si [slug] no pasa la lista blanca.
+     */
+    fun deleteRecipe(slug: String): ApiResult<Unit> {
+        val checked = RecipeSlug.checked(slug)
+        return guarded {
+            transport.execute(HttpRequest(HttpMethod.DELETE, "$RECIPES_PATH/$checked"))
+            ApiResult.Success(Unit)
+        }
+    }
+
+    /**
+     * `POST /api/recipes/create/url`: el SERVIDOR descarga la página; la app no
+     * toca esa URL. Solo se admite `https` (con [SafeUrl]: sin usuario, sin
+     * espacios, ASCII) y, si no cumple, [ApiResult.InputRejected] sin enviar
+     * nada. Devuelve el slug de la receta creada, validado.
+     */
+    fun importFromUrl(
+        url: String,
+        includeTags: Boolean = false,
+        includeCategories: Boolean = false,
+    ): ApiResult<String> {
+        val safe = SafeUrl.httpOrNull(url)
+        if (safe == null || !safe.startsWith("https://", ignoreCase = true)) {
+            return ApiResult.InputRejected(InputProblem.InvalidUrl)
+        }
+        return guarded {
+            val body = JsonObject(
+                mapOf(
+                    "url" to JsonPrimitive(safe),
+                    "includeTags" to JsonPrimitive(includeTags),
+                    "includeCategories" to JsonPrimitive(includeCategories),
+                ),
+            )
+            val response = importTransport.execute(
+                HttpRequest.json(HttpMethod.POST, "$RECIPES_PATH/create/url", encode(body), readErrorBody = true),
+            )
+            ApiResult.Success(readSlug(response))
+        }
+    }
+
+    /**
+     * `PUT /api/recipes/{slug}/image` (multipart: `image` y `extension`).
+     *
+     * El recodificado y el borrado de EXIF los hace `app/`; aquí solo se
+     * rechaza lo que no sea una imagen: extensión distinta de
+     * `webp`/`jpeg`/`png`, bytes cuyo inicio (bytes mágicos) no sea de ese
+     * mismo formato, vacía o de más de [MAX_IMAGE_BYTES].
+     *
+     * @throws IllegalArgumentException si [slug] no pasa la lista blanca.
+     */
+    fun uploadImage(slug: String, bytes: ByteArray, extension: String): ApiResult<Unit> {
+        val checked = RecipeSlug.checked(slug)
+        val wanted = ImageType.values().firstOrNull { typeExtension(it) == extension.trim().lowercase(Locale.ROOT) }
+            ?: return ApiResult.InputRejected(InputProblem.UnsupportedImageType)
+        if (bytes.isEmpty()) return ApiResult.InputRejected(InputProblem.InvalidImage)
+        if (bytes.size > MAX_IMAGE_BYTES) return ApiResult.InputRejected(InputProblem.ImageTooLarge)
+        if (ImageTypes.fromMagic(bytes) != wanted) return ApiResult.InputRejected(InputProblem.InvalidImage)
+        val ext = typeExtension(wanted)
+        val multipart = MultipartBody.build(
+            listOf(
+                MultipartBody.Part.File("image", "image.$ext", wanted.mimeType, bytes),
+                MultipartBody.Part.Field("extension", ext),
+            ),
+        )
+        return guarded {
+            transport.execute(
+                HttpRequest.multipart(HttpMethod.PUT, "$RECIPES_PATH/$checked/image", multipart, readErrorBody = true),
+            )
+            ApiResult.Success(Unit)
+        }
+    }
+
+    // ------------------------------------------------------- organizadores
+
+    /** Categorías del servidor para el formulario. Ver [listOrganizers]. */
+    fun listCategories(
+        page: Int = 1,
+        perPage: Int = MAX_ORGANIZERS_PER_PAGE,
+        search: String? = null,
+    ): ApiResult<Page<Organizer>> =
+        listOrganizers(OrganizerKind.Categories, page, perPage, search)
+
+    /** Etiquetas del servidor para el formulario. Ver [listOrganizers]. */
+    fun listTags(
+        page: Int = 1,
+        perPage: Int = MAX_ORGANIZERS_PER_PAGE,
+        search: String? = null,
+    ): ApiResult<Page<Organizer>> =
+        listOrganizers(OrganizerKind.Tags, page, perPage, search)
+
+    /**
+     * Una página de `GET /api/organizers/categories` o `/tags`, por nombre
+     * ascendente. Como en las recetas, `next`/`previous` se ignoran y la
+     * paginación la calcula [Page]. Se descartan las entradas sin id (UUID),
+     * slug válido o nombre.
+     */
+    fun listOrganizers(
+        kind: OrganizerKind,
+        page: Int = 1,
+        perPage: Int = MAX_ORGANIZERS_PER_PAGE,
+        search: String? = null,
+    ): ApiResult<Page<Organizer>> {
+        val safePage = page.coerceAtLeast(1)
+        val safePerPage = perPage.coerceIn(1, MAX_ORGANIZERS_PER_PAGE)
+        val term = PlainTextSanitizer.sanitize(search, ORGANIZER_SEARCH_MAX).ifEmpty { null }
+        val query = buildString {
+            append("page=").append(safePage)
+            append("&perPage=").append(safePerPage)
+            term?.let { append("&search=").append(PercentEncoding.encode(it)) }
+            append("&orderBy=name&orderDirection=asc")
+        }
+        return guarded {
+            val dto = decode(
+                OrganizerPageDto.serializer(),
+                transport.execute(HttpRequest(HttpMethod.GET, kind.path, query = query)),
+            )
+            val items = dto.items.orEmpty().asSequence()
+                .filterNotNull()
+                .take(OrganizerMapper.MAX_ITEMS)
+                .mapNotNull { OrganizerMapper.organizer(it) }
+                .toList()
+            ApiResult.Success(
+                Page.of(
+                    items = items,
+                    page = dto.page ?: safePage,
+                    perPage = dto.perPage ?: safePerPage,
+                    total = dto.total ?: items.size.toLong(),
+                ),
+            )
+        }
+    }
+
     // ------------------------------------------------------------- privados
+
+    /** Ejecuta [block] y traduce cualquier [NetworkError] a un [ApiResult]. */
+    private inline fun <T> guarded(block: () -> ApiResult<T>): ApiResult<T> =
+        try {
+            block()
+        } catch (error: NetworkError) {
+            ApiErrors.map(error)
+        }
+
+    private fun encode(element: JsonElement): String =
+        CoreJson.json.encodeToString(JsonElement.serializer(), element)
+
+    /** El cuerpo como árbol JSON; cualquier fallo es [NetworkError.InvalidResponse] sin citar el cuerpo. */
+    private fun parseElement(response: HttpResponse): JsonElement =
+        try {
+            CoreJson.json.parseToJsonElement(response.bodyAsText())
+        } catch (ignored: IllegalArgumentException) {
+            throw NetworkError.InvalidResponse
+        } catch (ignored: StackOverflowError) {
+            throw NetworkError.InvalidResponse
+        }
+
+    private fun readObject(response: HttpResponse): JsonObject =
+        parseElement(response) as? JsonObject ?: throw NetworkError.InvalidResponse
+
+    /** Respuesta de crear/importar: un texto JSON con el slug, que pasa la lista blanca o no vale. */
+    private fun readSlug(response: HttpResponse): String {
+        val primitive = parseElement(response) as? JsonPrimitive
+        val slug = primitive?.takeIf { it.isString }?.content
+        if (slug == null || !RecipeSlug.isValid(slug)) throw NetworkError.InvalidResponse
+        return slug
+    }
+
+    /**
+     * El slug que devuelve el `PUT`, si lo trae y es válido. La respuesta no
+     * tiene esquema en el JSON del servidor, así que solo se mira ese campo y
+     * cualquier otra cosa (vacía, rota, otra forma) se ignora.
+     */
+    private fun slugFromUpdateResponse(response: HttpResponse): String? =
+        try {
+            val value = (parseElement(response) as? JsonObject)?.get("slug") as? JsonPrimitive
+            value?.takeIf { it.isString }?.content?.takeIf { RecipeSlug.isValid(it) }
+        } catch (ignored: NetworkError) {
+            null
+        }
+
+    private fun typeExtension(type: ImageType): String = type.mimeType.substringAfter('/')
 
     private fun imageFailure(error: NetworkError): ImageResult =
         when {
@@ -228,6 +519,14 @@ class MealieClient(
         const val RECIPES_PATH = "/api/recipes"
 
         private const val MAX_VERSION_LENGTH = 64
+        private const val ORGANIZER_SEARCH_MAX = 100
+
+        /** Tope de elementos por página de etiquetas o categorías. */
+        const val MAX_ORGANIZERS_PER_PAGE = 100
+
+        /** Importar por URL: el servidor descarga y analiza la página, que puede tardar. */
+        private const val IMPORT_READ_TIMEOUT_MS = 110_000
+        private const val IMPORT_TOTAL_TIMEOUT_MS = 120_000L
 
         /** `AppInfo` son unos cientos de bytes: más que esto no es un Mealie. */
         private const val ABOUT_MAX_RESPONSE_BYTES = 64L * 1024
@@ -269,6 +568,14 @@ class MealieClient(
                 allowLocalHttp = allowLocalHttp,
                 activeNetwork = activeNetwork,
                 maxResponseBytes = MAX_IMAGE_BYTES,
+            ),
+            importTransport = UrlConnectionTransport.create(
+                serverUrl = session.serverUrl,
+                token = session.token,
+                allowLocalHttp = allowLocalHttp,
+                activeNetwork = activeNetwork,
+                readTimeoutMs = IMPORT_READ_TIMEOUT_MS,
+                totalTimeoutMs = IMPORT_TOTAL_TIMEOUT_MS,
             ),
             anonymousTransport = UrlConnectionTransport.createWithoutToken(
                 serverUrl = session.serverUrl,

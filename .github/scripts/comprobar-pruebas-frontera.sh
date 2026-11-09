@@ -40,6 +40,12 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.html.PlainTextSanitizerTest
   io.github.garfieldrockero.gastronomicon.core.session.SessionTest
   io.github.garfieldrockero.gastronomicon.core.session.SessionPayloadFormatTest
+  io.github.garfieldrockero.gastronomicon.core.network.MultipartBodyTest
+  io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransportWriteTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraftValidatorTest
+  io.github.garfieldrockero.gastronomicon.core.client.RecipeDraftMergeTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientWriteTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientImportUploadTest
 )
 
 # Valor numérico del atributo $1 en la etiqueta de apertura $2 (comillas dobles o

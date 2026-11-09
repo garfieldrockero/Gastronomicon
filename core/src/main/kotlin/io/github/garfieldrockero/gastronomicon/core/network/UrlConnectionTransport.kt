@@ -4,6 +4,7 @@ import io.github.garfieldrockero.gastronomicon.core.ServerUrl
 import io.github.garfieldrockero.gastronomicon.core.config.ApiToken
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.net.HttpRetryException
 import java.net.HttpURLConnection
 import java.net.ConnectException
 import java.net.SocketException
@@ -156,7 +157,7 @@ class UrlConnectionTransport internal constructor(
         var body = request.body
         var redirects = 0
         while (true) {
-            when (val hop = performHop(target, method, headers, body, deadlineNanos)) {
+            when (val hop = performHop(target, method, headers, body, deadlineNanos, request.readErrorBody)) {
                 is Hop.Final -> return hop.response
                 is Hop.Redirect -> {
                     // Se valida antes de abrir la segunda conexión: al destino
@@ -198,6 +199,7 @@ class UrlConnectionTransport internal constructor(
         headers: Map<String, String>,
         body: ByteArray?,
         deadlineNanos: Long,
+        readErrorBody: Boolean,
     ): Hop {
         // El plazo se mira al empezar cada salto y lo que queda recorta los
         // tiempos de espera: si quedan 200 ms, ni la conexión ni la lectura
@@ -290,7 +292,17 @@ class UrlConnectionTransport internal constructor(
                 // 301 o 302 no pasa de aquí.
                 return Hop.Redirect(resolved, statusCode)
             }
-            if (statusCode !in 200..299) throw NetworkError.HttpError(statusCode)
+            if (statusCode !in 200..299) {
+                // Solo el 422 y solo si la petición lo pidió: es el único error
+                // cuyo cuerpo (el detalle de validación) tiene uso. Los demás se
+                // quedan en el código, que es lo que el resto del núcleo espera.
+                val errorBody = if (readErrorBody && statusCode == STATUS_UNPROCESSABLE) {
+                    readLimitedErrorBody(connection, deadlineNanos)
+                } else {
+                    null
+                }
+                throw NetworkError.HttpError(statusCode, errorBody)
+            }
             // El mapa de cabeceras del JDK y de Android es un
             // Map<String, List<String>> de Java que trae la clave nula de la
             // línea de estado y valores que pueden venir a nulos. Se copia con
@@ -306,6 +318,15 @@ class UrlConnectionTransport internal constructor(
             return Hop.Final(HttpResponse(statusCode, lowercaseHeaders(rawHeaders), responseBody))
         } catch (error: NetworkError) {
             throw error
+        } catch (error: HttpRetryException) {
+            // Un 401 (o 407) sobre una petición con cuerpo de longitud fija: el
+            // JDK no puede reenviar el cuerpo tras pedir credenciales y lanza
+            // esto en lugar de devolver el código. No hay reintento, ni se
+            // contesta a ningún desafío: es el 401 de siempre. El mensaje de la
+            // excepción no se usa.
+            val code = error.responseCode()
+            if (code in 400..599) throw NetworkError.HttpError(code)
+            throw NetworkError.InvalidResponse
         } catch (error: IOException) {
             throw mapNetworkError(error)
         } catch (error: RuntimeException) {
@@ -398,6 +419,34 @@ class UrlConnectionTransport internal constructor(
     private fun effectivePort(uri: URI): Int {
         if (uri.port != -1) return uri.port
         return if (uri.scheme?.equals("https", ignoreCase = true) == true) 443 else 80
+    }
+
+    /**
+     * Cuerpo de un error 422, como mucho [HttpRequest.MAX_ERROR_BODY_BYTES]. Si
+     * el flujo falla, se acaba el plazo o no hay cuerpo, devuelve null: el
+     * error HTTP se entrega igualmente, solo que sin detalle. Lo que sobra del
+     * límite no se lee (la conexión se cierra después).
+     */
+    private fun readLimitedErrorBody(connection: HttpURLConnection, deadlineNanos: Long): ByteArray? {
+        val stream = connection.errorStream ?: return null
+        return try {
+            stream.use { input ->
+                val buffer = ByteArray(READ_CHUNK)
+                val output = ByteArrayOutputStream()
+                var total = 0
+                while (total < HttpRequest.MAX_ERROR_BODY_BYTES) {
+                    if (System.nanoTime() - deadlineNanos > 0) return null
+                    val wanted = minOf(buffer.size, HttpRequest.MAX_ERROR_BODY_BYTES - total)
+                    val read = input.read(buffer, 0, wanted)
+                    if (read == -1) break
+                    output.write(buffer, 0, read)
+                    total += read
+                }
+                output.toByteArray()
+            }
+        } catch (ignored: IOException) {
+            null
+        }
     }
 
     private fun readBody(connection: HttpURLConnection, deadlineNanos: Long): ByteArray {
@@ -498,6 +547,9 @@ class UrlConnectionTransport internal constructor(
         /** Tope del plazo total: más allá, la suma en nanosegundos pierde sentido. */
         private const val MAX_TOTAL_TIMEOUT_MS = 600_000L
         private const val READ_CHUNK = 8192
+
+        /** 422 «Unprocessable Content»: el único error del que se lee el cuerpo. */
+        private const val STATUS_UNPROCESSABLE = 422
 
         /** 303 «See Other»: se sigue como GET sin cuerpo. */
         private const val STATUS_SEE_OTHER = 303
