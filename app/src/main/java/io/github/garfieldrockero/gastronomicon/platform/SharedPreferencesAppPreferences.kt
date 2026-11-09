@@ -6,9 +6,10 @@ import io.github.garfieldrockero.gastronomicon.ui.settings.AppPreferences
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
 
 /**
- * Tema y modo de red local en `SharedPreferences` privadas y sin cifrar: no son
- * secretos. Archivo distinto del de la sesión. Excluido de las copias de
- * seguridad igual que todo lo demás (`allowBackup=false`).
+ * Tema, modo de red local y ámbito de los datos sin conexión, en
+ * `SharedPreferences` privadas y sin cifrar: no son secretos (el token tiene su
+ * propio almacén con el Keystore). Archivo distinto del de la sesión. Excluido
+ * de las copias de seguridad igual que todo lo demás (`allowBackup=false`).
  */
 class SharedPreferencesAppPreferences(context: Context) : AppPreferences {
 
@@ -43,9 +44,38 @@ class SharedPreferencesAppPreferences(context: Context) : AppPreferences {
     fun trySetAllowLocalHttp(value: Boolean): Boolean =
         prefs.edit().putBoolean(KEY_LOCAL_HTTP, value).commit()
 
+    /**
+     * Ámbito de los datos sin conexión: solo el hash de `ServerScope`, nunca la
+     * URL ni el id de usuario. `commit()` para que el borrado al cerrar la
+     * sesión no se quede en el aire (si falla, el resultado se ignora: al no
+     * haber ámbito no se ofrece nada offline, que es el lado seguro).
+     */
+    override var offlineScopeId: String?
+        get() = prefs.getString(KEY_OFFLINE_SCOPE, null)
+        set(value) {
+            val editor = prefs.edit()
+            if (value == null) editor.remove(KEY_OFFLINE_SCOPE) else editor.putString(KEY_OFFLINE_SCOPE, value)
+            editor.commit()
+        }
+
+    /**
+     * Marca de borrado del ámbito pendiente. `commit()` como el id: tiene que
+     * estar escrita **antes** de quitar el id, para que un corte a media limpieza
+     * se repita al arrancar en vez de dar el borrado por hecho.
+     */
+    override var offlineScopeClearPending: Boolean
+        get() = prefs.getBoolean(KEY_OFFLINE_SCOPE_CLEAR, false)
+        set(value) {
+            val editor = prefs.edit()
+            if (value) editor.putBoolean(KEY_OFFLINE_SCOPE_CLEAR, true) else editor.remove(KEY_OFFLINE_SCOPE_CLEAR)
+            editor.commit()
+        }
+
     private companion object {
         const val PREFS_NAME = "gastronomicon_preferencias"
         const val KEY_THEME = "tema"
         const val KEY_LOCAL_HTTP = "http_local"
+        const val KEY_OFFLINE_SCOPE = "ambito_offline"
+        const val KEY_OFFLINE_SCOPE_CLEAR = "ambito_offline_pendiente"
     }
 }

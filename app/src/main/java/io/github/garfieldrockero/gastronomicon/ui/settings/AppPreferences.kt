@@ -3,9 +3,9 @@ package io.github.garfieldrockero.gastronomicon.ui.settings
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
 
 /**
- * Preferencias que no son secretas: el tema y el interruptor de la red local.
- * Van en `SharedPreferences` normales; el token NUNCA pasa por aquí (tiene su
- * propio almacén cifrado, `SessionStore`).
+ * Preferencias que no son secretas: el tema, el interruptor de la red local y el
+ * ámbito de los datos sin conexión. Van en `SharedPreferences` normales; el token
+ * NUNCA pasa por aquí (tiene su propio almacén cifrado, `SessionStore`).
  *
  * Es una interfaz para poder usar una versión en memoria en previews y
  * pruebas, y para que la raíz de la app lea el tema con la misma fuente que
@@ -20,10 +20,29 @@ interface AppPreferences : io.github.garfieldrockero.gastronomicon.core.session.
      * borrar la sesión.
      */
     override var allowLocalHttp: Boolean
+
+    /**
+     * Ámbito de los datos sin conexión, ya hasheado por `ServerScope`: **no**
+     * lleva la URL, ni el id de usuario, ni el token. Se escribe al comprobar la
+     * conexión y guardar la sesión, y se borra con ella (ver
+     * `platform/OfflineScopeStore`). Null = nada sin conexión (falla cerrado).
+     */
+    var offlineScopeId: String?
+
+    /**
+     * Hay que borrar [offlineScopeId] y aún no se ha podido (un `commit()` que no
+     * cuaja, el proceso que muere a media limpieza). Se escribe **antes** de
+     * quitar el id y se reintenta al arrancar: mientras esté puesta, la app no
+     * sirve el ámbito guardado, aunque el id siga en el archivo.
+     */
+    var offlineScopeClearPending: Boolean
 }
 
 /** Preferencias en memoria para previews y pruebas: no persisten nada. */
 class InMemoryAppPreferences(
     override var themeMode: ThemeMode = ThemeMode.SYSTEM,
     override var allowLocalHttp: Boolean = false,
-) : AppPreferences
+) : AppPreferences {
+    override var offlineScopeId: String? = null
+    override var offlineScopeClearPending: Boolean = false
+}

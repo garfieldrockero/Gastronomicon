@@ -52,6 +52,13 @@ class ServerScope private constructor(val id: String) {
         private val USER_SHAPE = Regex("[A-Za-z0-9._:-]{1,128}")
 
         /**
+         * Forma del identificador ya calculado y guardado: el SHA-256 de [of]
+         * en hexadecimal minúscula y nada más. Ni mayúsculas, ni separadores,
+         * ni otra longitud.
+         */
+        private val SCOPE_SHAPE = Regex("[0-9a-f]{64}")
+
+        /**
          * Ámbito de [serverUrl] para la cuenta [userId], o null si la URL o el
          * id no son válidos.
          *
@@ -87,6 +94,23 @@ class ServerScope private constructor(val id: String) {
          * interfaz ya ha leído el id con `MealieClient.currentUser()`.
          */
         fun of(session: Session, userId: String): ServerScope? = of(session.serverUrl, userId)
+
+        /**
+         * Reconstruye el ámbito a partir del identificador ya calculado, tal
+         * como se guardó en preferencias privadas al comprobar la conexión.
+         *
+         * Sirve para enseñar lo guardado al arrancar sin red, cuando no se
+         * puede preguntar `/api/users/self` para volver a componerlo. Solo se
+         * acepta la forma exacta de [SCOPE_SHAPE]; cualquier otra cosa da null
+         * y la interfaz no ofrece nada sin conexión (falla cerrado).
+         *
+         * No comprueba que ese hash sea el de la sesión actual —no puede, el id
+         * de usuario no se guarda—: quien lo persiste se encarga de que solo
+         * sobreviva mientras la sesión (servidor y token) sea la misma, y lo
+         * borra al cambiarla o al cerrarla.
+         */
+        fun fromStoredId(id: String): ServerScope? =
+            if (SCOPE_SHAPE.matches(id)) ServerScope(id) else null
     }
 }
 

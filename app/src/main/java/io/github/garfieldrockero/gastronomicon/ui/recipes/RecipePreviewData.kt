@@ -228,6 +228,11 @@ internal object RecipePreviewData {
         maybeCreated: Boolean = false,
         showDuplicateConfirm: Boolean = false,
         catalogsTruncated: Boolean = false,
+        recoveredDraft: RecipeDraft? = null,
+        recoveredAtText: String = "",
+        showDraftConfirm: Boolean = false,
+        showDraftDiscardConfirm: Boolean = false,
+        draftInvalid: Boolean = false,
     ): RecipeEditorState.Editing = RecipeEditorState.Editing(
         mode = mode,
         form = RecipeForm.from(draft),
@@ -251,6 +256,11 @@ internal object RecipePreviewData {
         photo = photo,
         maybeCreated = maybeCreated,
         showDuplicateConfirm = showDuplicateConfirm,
+        recoveredDraft = recoveredDraft,
+        recoveredAtText = recoveredAtText,
+        showDraftConfirm = showDraftConfirm,
+        showDraftDiscardConfirm = showDraftDiscardConfirm,
+        draftInvalid = draftInvalid,
     )
 
     /**

@@ -13,6 +13,11 @@ import io.github.garfieldrockero.gastronomicon.core.client.ValidationDetail
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.network.NetworkError
 import io.github.garfieldrockero.gastronomicon.core.network.toConnectionProblem
+import io.github.garfieldrockero.gastronomicon.core.offline.CachedDraft
+import io.github.garfieldrockero.gastronomicon.core.offline.DraftTarget
+import io.github.garfieldrockero.gastronomicon.core.offline.OfflineCopyDate
+import io.github.garfieldrockero.gastronomicon.core.offline.OfflineRead
+import io.github.garfieldrockero.gastronomicon.core.offline.OfflineWrite
 import io.github.garfieldrockero.gastronomicon.core.recipes.QuantityParser
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftError
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftErrorKind
@@ -24,9 +29,11 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.DraftStep
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftValidation
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraft
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraftValidator
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlug
 import io.github.garfieldrockero.gastronomicon.platform.ClientAccess
 import io.github.garfieldrockero.gastronomicon.platform.ImageRecodeResult
 import io.github.garfieldrockero.gastronomicon.platform.ImageRecoder
+import io.github.garfieldrockero.gastronomicon.platform.OfflineRecipes
 import io.github.garfieldrockero.gastronomicon.platform.PhotoSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -242,6 +249,26 @@ data class PhotoState(
     val busy: Boolean get() = preparing || uploading
 }
 
+/**
+ * Cómo ha ido la consulta del borrador guardado al abrir el formulario.
+ *
+ * Solo [Miss] —no había ninguno— autoriza a borrar al salir sin cambios: lo que la
+ * persona no ha llegado a ver no se tira.
+ */
+enum class DraftLookup {
+    /** Todavía no se sabe (consulta en curso): no se borra nada al salir. */
+    Pending,
+
+    /** No había borrador guardado para este formulario. */
+    Miss,
+
+    /** Hay uno guardado y se ha ofrecido: hasta que se decida, no se toca. */
+    Hit,
+
+    /** No se pudo consultar (Keystore ocupado, almacén roto): no se toca. */
+    Failed,
+}
+
 /** Estado del formulario. La interfaz solo lo pinta y avisa de lo que toca la persona. */
 sealed interface RecipeEditorState {
     data object Closed : RecipeEditorState
@@ -276,6 +303,29 @@ sealed interface RecipeEditorState {
         val maybeCreated: Boolean = false,
         /** Diálogo de «¿guardar otra vez?» tras [maybeCreated]. */
         val showDuplicateConfirm: Boolean = false,
+        /**
+         * Borrador guardado de esta misma receta que aún no se ha aplicado, con
+         * su fecha ya en texto. Se ofrece «Recuperar» / «Descartar»: **nunca** se
+         * aplica solo. Se borra al recuperarlo, al descartarlo o al guardar.
+         * La oferta **no** desaparece al teclear: sigue ahí hasta que la persona
+         * decida. Si sale del formulario con cambios nuevos, lo escrito se guarda
+         * y sustituye a este borrador (lo nuevo gana).
+         */
+        val recoveredDraft: RecipeDraft? = null,
+        val recoveredAtText: String = "",
+        /**
+         * Cómo fue la consulta del borrador al abrir: solo con
+         * [DraftLookup.Miss] se borra el borrador guardado al salir sin cambios.
+         * Lo que no se ha llegado a ofrecer (consulta en curso, fallida u oferta
+         * viva) no se toca nunca.
+         */
+        val draftLookup: DraftLookup = DraftLookup.Pending,
+        /** «Recuperar» con algo ya escrito en el formulario: pide confirmación. */
+        val showDraftConfirm: Boolean = false,
+        /** «Descartar» el borrador ofrecido: borra de verdad, así que también pregunta. */
+        val showDraftDiscardConfirm: Boolean = false,
+        /** El borrador ofrecido no pasa el validador: se dice en la propia caja. */
+        val draftInvalid: Boolean = false,
     ) : RecipeEditorState
 
     /**
@@ -305,10 +355,21 @@ sealed interface RecipeEditorState {
  *   prepara fuera del hilo principal, se puede cancelar y no guarda ni el Uri,
  *   ni la ruta, ni los bytes en el estado.
  * - Sin token, sin URL del servidor ni mensajes de excepción en el estado.
+ *
+ * Fase 8 (borradores): lo escrito se guarda en [offline] al salir del
+ * formulario y al pasar a segundo plano (nunca con retardo mientras se escribe;
+ * el almacén es bloqueante). Al abrir el formulario de esa receta, si hay
+ * borrador, se ofrece recuperarlo o descartarlo: **nunca** se aplica solo. Se
+ * borra al guardar bien, al descartarlo, al salir sin cambios **solo si la
+ * consulta al abrir dijo que no había ninguno** y al cerrar la sesión (eso último
+ * lo hace el vaciado del almacén). Con una oferta viva, salir con cambios nuevos
+ * guarda lo escrito y sustituye al borrador; sin cambios, no se toca. El borrador
+ * pasa por [RecipeDraftValidator] antes de volver al formulario.
  */
 class RecipeEditorViewModel(
     private val access: ClientAccess,
     private val recoder: ImageRecoder,
+    private val offline: OfflineRecipes? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
@@ -320,6 +381,15 @@ class RecipeEditorViewModel(
     private var catalogJob: Job? = null
     private var saveJob: Job? = null
     private var photoJob: Job? = null
+    private var draftJob: Job? = null
+
+    /**
+     * Cambia solo al reiniciar por otra sesión ([reset]). Los guardados de
+     * borrador que salen al cerrar el formulario comprueban que siga igual: si
+     * la sesión cambió por el camino, no escriben nada de la anterior.
+     */
+    @Volatile
+    private var sessionEpoch = 0L
 
     /**
      * Ids de interfaz del formulario. No se reinicia al abrir ni al cerrar: así dos
@@ -345,6 +415,7 @@ class RecipeEditorViewModel(
             catalogs = OrganizerCatalog(loading = true),
         )
         loadCatalogs(gen)
+        loadRecoveredDraft(gen, DraftTarget.New)
     }
 
     /** Abre el formulario de una receta existente, leyendo su borrador del servidor. */
@@ -369,6 +440,7 @@ class RecipeEditorViewModel(
                         ),
                     )
                     loadCatalogs(gen)
+                    loadRecoveredDraft(gen, targetOf(mode) ?: return@launch)
                 }
                 LoadDraftResult.NotFound -> _state.value = RecipeEditorState.NotFound
                 is LoadDraftResult.Problem -> _state.value = RecipeEditorState.LoadFailed(mode, result.problem)
@@ -386,6 +458,234 @@ class RecipeEditorViewModel(
             RecipeEditorState.NotFound -> close()
             else -> Unit
         }
+    }
+
+    // ------------------------------------------------- borradores (fase 8)
+
+    /**
+     * Mira si hay un borrador guardado de este formulario y lo ofrece. No lo
+     * aplica: eso es [onRecoverDraft], cuando la persona lo pide.
+     *
+     * Apunta en `draftLookup` cómo ha ido: solo un [DraftLookup.Miss] permite
+     * borrar al salir sin cambios. Si el almacén no responde o el ámbito no se
+     * conoce, queda [DraftLookup.Failed] y no se toca nada.
+     */
+    private fun loadRecoveredDraft(gen: Int, target: DraftTarget) {
+        val store = offline ?: return
+        draftJob?.cancel()
+        draftJob = viewModelScope.launch {
+            val outcome = withContext(ioDispatcher) { lookupDraft(store, target) }
+            if (gen != generation) return@launch
+            _state.update { current ->
+                if (current !is RecipeEditorState.Editing || current.recoveredDraft != null) {
+                    current
+                } else {
+                    when (outcome) {
+                        is DraftLookupOutcome.Found -> current.copy(
+                            recoveredDraft = outcome.draft.draft,
+                            recoveredAtText = OfflineCopyDate.format(outcome.draft.savedAtMillis),
+                            draftLookup = DraftLookup.Hit,
+                        )
+                        DraftLookupOutcome.None -> current.copy(draftLookup = DraftLookup.Miss)
+                        DraftLookupOutcome.Failed -> current.copy(draftLookup = DraftLookup.Failed)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Lo que ha dicho el almacén al mirar si había borrador. Sin textos ni fechas. */
+    private sealed interface DraftLookupOutcome {
+        class Found(val draft: CachedDraft) : DraftLookupOutcome
+        data object None : DraftLookupOutcome
+        data object Failed : DraftLookupOutcome
+    }
+
+    /** Consulta bloqueante al almacén (hilo de fondo): no lanza por fallos normales. */
+    private fun lookupDraft(store: OfflineRecipes, target: DraftTarget): DraftLookupOutcome {
+        val scope = store.scope() ?: return DraftLookupOutcome.Failed
+        return try {
+            when (val read = store.loadDraft(scope, target)) {
+                is OfflineRead.Hit -> DraftLookupOutcome.Found(read.value)
+                is OfflineRead.Miss -> DraftLookupOutcome.None
+                is OfflineRead.Failed -> DraftLookupOutcome.Failed
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DraftLookupOutcome.Failed
+        }
+    }
+
+    /**
+     * Pasa el borrador ofrecido al formulario, **solo** si la persona lo pide.
+     * Antes pasa por el validador del núcleo, igual que si se fuera a guardar:
+     * lo que se recupere tiene que ser tan válido como lo escrito a mano. Los
+     * errores se enseñan y el formulario no se toca.
+     *
+     * Si el formulario ya tiene algo escrito (en modo edición, la propia receta),
+     * recuperar lo sustituiría: primero se pregunta ([showDraftConfirm]).
+     */
+    fun onRecoverDraft() {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        if (current.recoveredDraft == null || current.saving) return
+        if (current.form.hasContent()) {
+            _state.value = current.copy(showDraftConfirm = true)
+            return
+        }
+        applyRecoveredDraft(current)
+    }
+
+    /** «Sustituir» del aviso de que se va a pisar lo escrito. */
+    fun confirmRecoverDraft() {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        if (current.recoveredDraft == null || current.saving) return
+        if (!current.showDraftConfirm) return
+        applyRecoveredDraft(current.copy(showDraftConfirm = false))
+    }
+
+    fun dismissRecoverDraft() {
+        _state.update { current ->
+            if (current is RecipeEditorState.Editing && current.showDraftConfirm) {
+                current.copy(showDraftConfirm = false)
+            } else {
+                current
+            }
+        }
+    }
+
+    private fun applyRecoveredDraft(current: RecipeEditorState.Editing) {
+        val saved = current.recoveredDraft ?: return
+        when (val validation = RecipeDraftValidator.validate(saved)) {
+            is DraftValidation.Valid -> {
+                val form = RecipeForm.from(validation.draft, uiIds)
+                _state.value = current.copy(
+                    form = form,
+                    errors = emptyList(),
+                    serverDetails = emptyList(),
+                    saveProblem = null,
+                    rejected = false,
+                    recoveredDraft = null,
+                    recoveredAtText = "",
+                    draftInvalid = false,
+                    dirty = form.toDraft().first != current.baseline,
+                )
+            }
+            is DraftValidation.Invalid -> _state.value = current.copy(
+                errors = validation.errors,
+                failedSaveAttempts = current.failedSaveAttempts + 1,
+                serverDetails = emptyList(),
+                saveProblem = null,
+                rejected = false,
+                draftInvalid = true,
+            )
+        }
+    }
+
+    /** «Descartar» el borrador ofrecido: se pide confirmación antes de borrarlo de verdad. */
+    fun onDiscardRecoveredDraft() {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        if (current.recoveredDraft == null) return
+        _state.value = current.copy(showDraftDiscardConfirm = true)
+    }
+
+    fun confirmDiscardRecoveredDraft() {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        if (current.recoveredDraft == null) return
+        _state.value = current.copy(
+            recoveredDraft = null,
+            recoveredAtText = "",
+            showDraftDiscardConfirm = false,
+            draftInvalid = false,
+            // Se acaba de borrar: al salir sin cambios ya no hay nada que conservar.
+            draftLookup = DraftLookup.Miss,
+        )
+        val target = targetOf(current.mode) ?: return
+        deleteDraft(target)
+    }
+
+    fun dismissDiscardRecoveredDraft() {
+        _state.update { current ->
+            if (current is RecipeEditorState.Editing && current.showDraftDiscardConfirm) {
+                current.copy(showDraftDiscardConfirm = false)
+            } else {
+                current
+            }
+        }
+    }
+
+    /**
+     * Lo escrito se guarda como borrador: la pantalla pasa a segundo plano
+     * (`onStop`) o la persona sale del formulario.
+     *
+     * Sin cambios nuevos no hay nada que ofrecer al volver: se quita el borrador
+     * **solo** si la consulta al abrir dijo que no había ninguno ([DraftLookup.Miss]).
+     * Lo que no se ha llegado a ofrecer (consulta en curso, fallida o con una oferta
+     * viva sin decidir) no se toca: perder un borrador que la persona no ha visto
+     * sería peor que dejar uno de más.
+     *
+     * Con cambios nuevos **lo nuevo gana**: se guarda lo escrito y sustituye al
+     * borrador que estuviera ofrecido (el diálogo de salida lo dice). Así «Salir y
+     * guardar» y el guardado en segundo plano no mienten.
+     */
+    fun saveDraftNow() {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        if (current.saving) return
+        val target = targetOf(current.mode) ?: return
+        val store = offline ?: return
+        val bornEpoch = sessionEpoch
+        val gen = generation
+        if (!current.dirty) {
+            if (current.draftLookup == DraftLookup.Miss) deleteDraft(target)
+            return
+        }
+        val draft = current.form.toDraft().first
+        // Había una oferta viva: al escribir encima, la oferta deja de existir en el
+        // almacén y no se puede seguir enseñando.
+        val replacesOffer = current.recoveredDraft != null
+        viewModelScope.launch(ioDispatcher) {
+            if (bornEpoch != sessionEpoch) return@launch
+            val scope = store.scope() ?: return@launch
+            val written = try {
+                store.saveDraft(scope, target, draft)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Sin borrador se sigue pudiendo escribir; no se avisa de esto.
+                return@launch
+            }
+            if (!replacesOffer || written != OfflineWrite.Saved) return@launch
+            if (gen != generation) return@launch
+            _state.update { latest ->
+                if (latest is RecipeEditorState.Editing && latest.recoveredDraft != null) {
+                    latest.copy(recoveredDraft = null, recoveredAtText = "", draftInvalid = false)
+                } else {
+                    latest
+                }
+            }
+        }
+    }
+
+    /** Borra el borrador guardado de [target] en segundo plano (guardar bien o descartar). */
+    private fun deleteDraft(target: DraftTarget) {
+        val store = offline ?: return
+        val bornEpoch = sessionEpoch
+        viewModelScope.launch(ioDispatcher) {
+            if (bornEpoch != sessionEpoch) return@launch
+            val scope = store.scope() ?: return@launch
+            try {
+                store.deleteDraft(scope, target)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Queda un borrador que ya no vale; caduca solo con los días.
+            }
+        }
+    }
+
+    private fun targetOf(mode: EditorMode): DraftTarget? = when (mode) {
+        EditorMode.Create -> DraftTarget.New
+        is EditorMode.Edit -> if (RecipeSlug.isValid(mode.slug)) DraftTarget.Recipe(mode.slug) else null
     }
 
     // ------------------------------------------------------------- campos
@@ -480,6 +780,9 @@ class RecipeEditorViewModel(
                 saveProblem = null,
                 rejected = false,
                 dirty = form.toDraft().first != current.baseline,
+                // La oferta del borrador **no** se quita al teclear: sigue hasta que la
+                // persona pulse «Recuperar» o «Descartar». Si sale con estos cambios, se
+                // guardan y sustituyen al borrador ofrecido (lo nuevo gana).
             )
         }
     }
@@ -579,9 +882,19 @@ class RecipeEditorViewModel(
             maybeCreated = false,
         )
         val gen = generation
+        val target = targetOf(current.mode)
         saveJob = viewModelScope.launch {
             val outcome = withContext(ioDispatcher) { save(clean, current.mode) }
             if (gen != generation) return@launch
+            when (outcome) {
+                // Guardado bien: el borrador ya no hace falta.
+                is SaveOutcome.Saved -> if (target != null) deleteDraft(target)
+                // La receta ya existe con su nombre: el borrador de «nueva» sobra. Lo que
+                // quede por escribir se guardará como borrador de la receta al salir.
+                is SaveOutcome.CreatedIncomplete ->
+                    if (current.mode == EditorMode.Create) deleteDraft(DraftTarget.New)
+                else -> Unit
+            }
             applySaveOutcome(outcome)
         }
     }
@@ -1035,12 +1348,20 @@ class RecipeEditorViewModel(
                 return
             }
         }
+        // Al salir se apunta lo escrito como borrador (si hay algo que apuntar).
+        saveDraftNow()
         close()
     }
 
+    /**
+     * «Descartar» del diálogo de salida: lo escrito **no** se pierde, se guarda
+     * como borrador y se ofrece al volver a abrir el formulario. Por eso se
+     * guarda antes de cerrar.
+     */
     fun confirmDiscard() {
         val current = _state.value as? RecipeEditorState.Editing
         if (current?.saving == true) return
+        saveDraftNow()
         close()
     }
 
@@ -1056,18 +1377,23 @@ class RecipeEditorViewModel(
         _state.value = RecipeEditorState.Closed
     }
 
-    /** Al cambiar de sesión: nada de lo cargado vale. */
-    fun reset() = close()
+    /** Al cambiar de sesión: nada de lo cargado vale, ni los borradores en curso. */
+    fun reset() {
+        sessionEpoch++
+        close()
+    }
 
     private fun start(): Int {
         loadJob?.cancel()
         catalogJob?.cancel()
         saveJob?.cancel()
         photoJob?.cancel()
+        draftJob?.cancel()
         loadJob = null
         catalogJob = null
         saveJob = null
         photoJob = null
+        draftJob = null
         pendingPhoto = null
         return ++generation
     }
@@ -1161,11 +1487,15 @@ class RecipeEditorViewModel(
         /** Lado máximo de la vista previa que se guarda en el estado, en píxeles. */
         private const val PREVIEW_SIDE = 480
 
-        fun factory(access: ClientAccess, recoder: ImageRecoder): ViewModelProvider.Factory =
+        fun factory(
+            access: ClientAccess,
+            recoder: ImageRecoder,
+            offline: OfflineRecipes? = null,
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RecipeEditorViewModel(access, recoder) as T
+                    RecipeEditorViewModel(access, recoder, offline) as T
             }
     }
 }
@@ -1176,6 +1506,28 @@ internal fun sameOrganizer(a: DraftOrganizer, b: DraftOrganizer): Boolean {
     if (a.slug != null && b.slug != null) return a.slug == b.slug
     return a.name.trim().lowercase(Locale.ROOT) == b.name.trim().lowercase(Locale.ROOT)
 }
+
+/**
+ * ¿Hay algo escrito que un borrador recuperado vaya a sustituir? En modo edición
+ * el formulario ya trae la receta del servidor, así que recuperar siempre pide
+ * confirmación (también sustituye lo que se haya cambiado).
+ *
+ * Las filas en blanco no cuentan: «Añadir ingrediente» sin escribir nada no es
+ * contenido, y preguntar por ellas solo estorbaría.
+ */
+private fun RecipeForm.hasContent(): Boolean =
+    name.isNotBlank() || description.isNotBlank() || servings.isNotBlank() ||
+        totalTime.isNotBlank() || prepTime.isNotBlank() || cookTime.isNotBlank() ||
+        performTime.isNotBlank() ||
+        ingredients.any { it.hasContent() } || steps.any { it.hasContent() } ||
+        notes.isNotEmpty() || tags.isNotEmpty() || categories.isNotEmpty()
+
+/** Una fila de ingrediente con algo escrito (la unidad y el alimento no se editan). */
+private fun IngredientForm.hasContent(): Boolean =
+    quantity.isNotBlank() || note.isNotBlank() || title.isNotBlank()
+
+/** Un paso con algo escrito. */
+private fun StepForm.hasContent(): Boolean = title.isNotBlank() || text.isNotBlank()
 
 private fun mergeChoices(available: List<DraftOrganizer>, selected: List<DraftOrganizer>): List<DraftOrganizer> {
     val merged = ArrayList<DraftOrganizer>(available.size + selected.size)

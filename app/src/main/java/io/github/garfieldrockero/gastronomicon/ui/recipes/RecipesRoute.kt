@@ -49,6 +49,7 @@ fun RecipesRoute(
 ) {
     val listState by listViewModel.state.collectAsStateWithLifecycle()
     val detailState by detailViewModel.state.collectAsStateWithLifecycle()
+    val offlineCopy by detailViewModel.offlineCopy.collectAsStateWithLifecycle()
     val deleteState by detailViewModel.deleteState.collectAsStateWithLifecycle()
     val editorState by editorViewModel.state.collectAsStateWithLifecycle()
     val importState by importViewModel.state.collectAsStateWithLifecycle()
@@ -160,6 +161,13 @@ fun RecipesRoute(
                 onPhotoPicked = editorViewModel::onPhotoPicked,
                 onPhotoProblem = editorViewModel::onPhotoProblem,
                 onRetryPhoto = editorViewModel::onRetryPhoto,
+                onRecoverDraft = editorViewModel::onRecoverDraft,
+                onConfirmRecoverDraft = editorViewModel::confirmRecoverDraft,
+                onDismissRecoverDraft = editorViewModel::dismissRecoverDraft,
+                onDiscardRecoveredDraft = editorViewModel::onDiscardRecoveredDraft,
+                onConfirmDiscardRecoveredDraft = editorViewModel::confirmDiscardRecoveredDraft,
+                onDismissDiscardRecoveredDraft = editorViewModel::dismissDiscardRecoveredDraft,
+                onEnterBackground = editorViewModel::saveDraftNow,
             ),
             modifier = modifier,
         )
@@ -218,6 +226,7 @@ fun RecipesRoute(
             RecipeDetailScreen(
                 state = detailState,
                 deleteState = deleteState,
+                offline = offlineCopy,
                 imageLoader = imageLoader,
                 onBack = detailViewModel::close,
                 onRetry = detailViewModel::retry,

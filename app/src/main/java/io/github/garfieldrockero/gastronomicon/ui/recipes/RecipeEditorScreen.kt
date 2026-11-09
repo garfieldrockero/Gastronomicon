@@ -46,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -75,6 +76,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.garfieldrockero.gastronomicon.R
 import io.github.garfieldrockero.gastronomicon.core.client.ValidationDetail
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
@@ -137,6 +141,17 @@ class RecipeEditorActions(
     val onPhotoProblem: (PhotoProblem) -> Unit = {},
     /** Repetir la subida de la misma foto, sin volver a recodificarla. */
     val onRetryPhoto: () -> Unit = {},
+    /** Pasa el borrador guardado al formulario (solo cuando la persona lo pide). */
+    val onRecoverDraft: () -> Unit = {},
+    /** «Sustituir» cuando el borrador va a pisar lo que ya hay escrito. */
+    val onConfirmRecoverDraft: () -> Unit = {},
+    val onDismissRecoverDraft: () -> Unit = {},
+    /** Tira el borrador guardado y no lo vuelve a ofrecer (pide confirmación). */
+    val onDiscardRecoveredDraft: () -> Unit = {},
+    val onConfirmDiscardRecoveredDraft: () -> Unit = {},
+    val onDismissDiscardRecoveredDraft: () -> Unit = {},
+    /** La pantalla pasa a segundo plano (`onStop`): se guarda lo escrito como borrador. */
+    val onEnterBackground: () -> Unit = {},
 )
 
 /**
@@ -159,6 +174,18 @@ fun RecipeEditorScreen(
     modifier: Modifier = Modifier,
 ) {
     BackHandler { actions.onRequestClose() }
+
+    // Al pasar a segundo plano se guarda el borrador de lo escrito (sin retardo y sin
+    // bloquear la pantalla). Se engancha aquí y no en la ruta porque el formulario
+    // solo está montado mientras se ve.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) actions.onEnterBackground()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Quitar una fila con texto dentro pide confirmación: un toque perdido no puede
     // borrar un paso largo. Vacía, se quita directo. Es estado de la pantalla, no del
@@ -244,6 +271,8 @@ fun RecipeEditorScreen(
     if (editing != null && editing.showDiscardConfirm) {
         DiscardDialog(
             createdIncomplete = editing.createdIncomplete,
+            // Con una oferta de borrador viva, lo escrito la sustituye: el texto lo dice.
+            replacesDraft = editing.recoveredDraft != null,
             onConfirm = actions.onConfirmDiscard,
             onDismiss = actions.onDismissDiscard,
         )
@@ -252,6 +281,18 @@ fun RecipeEditorScreen(
         DuplicateSaveDialog(
             onConfirm = actions.onConfirmDuplicateSave,
             onDismiss = actions.onDismissDuplicateSave,
+        )
+    }
+    if (editing != null && editing.showDraftConfirm) {
+        RecoverDraftDialog(
+            onConfirm = actions.onConfirmRecoverDraft,
+            onDismiss = actions.onDismissRecoverDraft,
+        )
+    }
+    if (editing != null && editing.showDraftDiscardConfirm) {
+        DiscardDraftDialog(
+            onConfirm = actions.onConfirmDiscardRecoveredDraft,
+            onDismiss = actions.onDismissDiscardRecoveredDraft,
         )
     }
 
@@ -367,6 +408,65 @@ private fun EditorContent(
 
 @Composable
 private fun EditorMessages(state: RecipeEditorState.Editing, actions: RecipeEditorActions) {
+    // Borrador guardado de la última vez: se ofrece, nunca se aplica solo. La oferta
+    // sigue a la vista aunque se escriba: solo se va con «Recuperar» o «Descartar».
+    val recovered = state.recoveredDraft
+    if (recovered != null) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(
+                modifier = Modifier.padding(Spacing.medium),
+                verticalArrangement = Arrangement.spacedBy(Spacing.small),
+            ) {
+                Text(
+                    text = stringResource(R.string.editor_draft_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                Text(
+                    text = stringResource(R.string.editor_draft_text, state.recoveredAtText),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                // En edición, el borrador es de una versión anterior del formulario: la
+                // receta del servidor pudo cambiar desde entonces.
+                if (state.mode is EditorMode.Edit) {
+                    Text(
+                        text = stringResource(R.string.editor_draft_edit_warning),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                if (state.draftInvalid) {
+                    Text(
+                        text = stringResource(R.string.editor_draft_invalid),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                Button(
+                    onClick = actions.onRecoverDraft,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = Sizes.MinTouchTarget),
+                ) {
+                    Text(stringResource(R.string.editor_draft_recover))
+                }
+                OutlinedButton(
+                    onClick = actions.onDiscardRecoveredDraft,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = Sizes.MinTouchTarget),
+                ) {
+                    Text(stringResource(R.string.editor_draft_discard))
+                }
+            }
+        }
+    }
+
     // Lo primero: si el servidor no ha dicho si la receta se creó, que se vea antes
     // que cualquier otro aviso. Guardar otra vez pedirá confirmación (ver el ViewModel).
     if (state.maybeCreated) {
@@ -1501,6 +1601,7 @@ private fun SavedContent(
 @Composable
 private fun DiscardDialog(
     createdIncomplete: Boolean,
+    replacesDraft: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1510,7 +1611,11 @@ private fun DiscardDialog(
         text = {
             Text(
                 stringResource(
-                    if (createdIncomplete) R.string.editor_discard_text_created else R.string.editor_discard_text,
+                    when {
+                        createdIncomplete -> R.string.editor_discard_text_created
+                        replacesDraft -> R.string.editor_discard_text_draft
+                        else -> R.string.editor_discard_text
+                    },
                 ),
             )
         },
@@ -1529,6 +1634,63 @@ private fun DiscardDialog(
                 modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
             ) {
                 Text(stringResource(R.string.editor_discard_confirm))
+            }
+        },
+    )
+}
+
+/**
+ * «Recuperar» cuando el formulario ya tiene texto: se va a sustituir tal cual.
+ * Sin este aviso, un toque perdido tira lo escrito (o la receta en edición).
+ */
+@Composable
+private fun RecoverDraftDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.editor_draft_recover_confirm_title)) },
+        text = { Text(stringResource(R.string.editor_draft_recover_confirm_text)) },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.editor_dialog_cancel))
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.editor_draft_recover_confirm))
+            }
+        },
+    )
+}
+
+/** «Descartar» el borrador borra de verdad: se pregunta antes, como todo lo irreversible. */
+@Composable
+private fun DiscardDraftDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.editor_draft_discard_confirm_title)) },
+        text = { Text(stringResource(R.string.editor_draft_discard_confirm_text)) },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.editor_dialog_cancel))
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.editor_draft_discard_confirm))
             }
         },
     )
@@ -1801,6 +1963,110 @@ private fun RecipeEditorDiscardPreview() {
     GastronomiconTheme {
         RecipeEditorScreen(
             state = RecipePreviewData.editorState(showDiscardConfirm = true),
+            actions = previewActions(),
+        )
+    }
+}
+
+/** «Salir y guardar» con la oferta de borrador viva: el texto avisa de que la sustituye. */
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorDiscardReplacingDraftPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(
+                showDiscardConfirm = true,
+                recoveredDraft = RecipePreviewData.draft,
+                recoveredAtText = "hoy a las 20:14",
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorRecoveredDraftPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(
+                recoveredDraft = RecipePreviewData.draft,
+                recoveredAtText = "hoy a las 20:14",
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeEditorRecoveredDraftDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(
+                recoveredDraft = RecipePreviewData.draft,
+                recoveredAtText = "ayer a las 9:05",
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeEditorRecoveredDraftLargeTextPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(
+                mode = EditorMode.Create,
+                recoveredDraft = RecipePreviewData.draft,
+                recoveredAtText = "el 5 de noviembre de 2026",
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorRecoveredDraftInvalidPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(
+                recoveredDraft = RecipePreviewData.draft,
+                recoveredAtText = "hoy a las 20:14",
+                draftInvalid = true,
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorRecoverDraftConfirmPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(
+                recoveredDraft = RecipePreviewData.draft,
+                recoveredAtText = "hoy a las 20:14",
+                showDraftConfirm = true,
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorDiscardDraftConfirmPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(
+                recoveredDraft = RecipePreviewData.draft,
+                recoveredAtText = "hoy a las 20:14",
+                showDraftDiscardConfirm = true,
+            ),
             actions = previewActions(),
         )
     }

@@ -26,6 +26,24 @@ class AppContainer(context: Context) {
     private val appContext: Context = context.applicationContext
 
     /**
+     * Tema, interruptor de HTTP local y el ámbito de los datos sin conexión.
+     * Ninguno es un secreto: el token tiene su propio almacén cifrado.
+     */
+    val preferences: AppPreferences = SharedPreferencesAppPreferences(appContext)
+
+    // El almacén real, sin el envoltorio de abajo. Va antes que el ámbito porque este
+    // necesita poder leer la sesión guardada (para no pedir un «Guardar» de más).
+    private val keystoreSessionStore: SessionStore = KeystoreSessionStore(appContext)
+
+    /**
+     * Ámbito de las recetas guardadas y los borradores: el hash de servidor y
+     * cuenta, nunca la URL ni el id de usuario. Se escribe al probar la conexión
+     * y guardar la sesión, y se borra a la vez que lo offline (ver
+     * [OfflineClearingSessionStore]).
+     */
+    val offlineScope: OfflineScopeStore = OfflineScopeStore(preferences) { keystoreSessionStore.load() }
+
+    /**
      * Datos offline (fase 8): ficheros cifrados en el directorio privado de la app,
      * nunca en la caché. Uno solo para toda la app, compartido por la caché de
      * recetas y los borradores (el almacén serializa sus operaciones).
@@ -38,35 +56,38 @@ class AppContainer(context: Context) {
         // toca el disco cuando hay una marca pendiente; el arranque normal no hace
         // nada. Lo que no se pueda borrar ahora sigue cifrado.
         offlineStore.retryPendingClear()
+        // Lo mismo con el ámbito de lo offline: si borrarlo se quedó marcado (un
+        // `commit()` que no cuajó y el proceso murió), se repite aquí para no servir
+        // las copias de la cuenta anterior. Sin marca no toca nada.
+        offlineScope.retryPendingClear()
     }
 
-    /**
-     * Caché de recetas ya abiertas. Expuesta para la fase 8, **todavía sin usar**:
-     * ninguna pantalla la consulta ni la rellena.
-     */
+    /** Caché de las recetas ya abiertas, para poder verlas sin conexión. */
     val recipeCache: RecipeCache = RecipeCache(offlineStore)
 
-    /**
-     * Borradores del formulario de receta. Expuesto para la fase 8, **todavía sin
-     * usar**: el formulario aún no guarda ni recupera borradores.
-     */
+    /** Borradores del formulario de receta, para no perder lo escrito. */
     val draftStore: DraftStore = DraftStore(offlineStore)
 
-    // El almacén real, sin el envoltorio de abajo.
-    private val keystoreSessionStore: SessionStore = KeystoreSessionStore(appContext)
+    /** Lo que usan las pantallas de recetas: caché, borradores y ámbito, en uno. */
+    val offline: OfflineRecipes = StoreOfflineRecipes(recipeCache, draftStore) { offlineScope.current() }
 
     /**
      * La sesión guardada. Al cambiar de servidor o de token, y al borrarla, se
      * vacía además todo lo offline de la cuenta anterior (ver
      * [OfflineClearingSessionStore]): no queda caché de una sesión que ya no está.
+     * El ámbito se apunta después de guardar bien la sesión ([ScopeRecordingSessionStore]),
+     * así que probar un servidor sin guardarlo no deja nada.
      */
-    val sessionStore: SessionStore = OfflineClearingSessionStore(keystoreSessionStore) {
-        offlineStore.clearAll()
-    }
+    val sessionStore: SessionStore = ScopeRecordingSessionStore(
+        OfflineClearingSessionStore(keystoreSessionStore) {
+            offlineScope.clear()
+            offlineStore.clearAll()
+        },
+        offlineScope,
+    )
 
-    val preferences: AppPreferences = SharedPreferencesAppPreferences(appContext)
     val activeNetwork: ActiveNetworkProvider = AndroidActiveNetworkProvider(appContext)
-    val connectionTester: ConnectionTester = MealieConnectionTester(activeNetwork)
+    val connectionTester: ConnectionTester = MealieConnectionTester(activeNetwork, offlineScope)
     val appVersion: String = appContext.appVersionName()
 
     /** Un cliente nuevo por operación, sacado de la sesión guardada (ver [StoreClientAccess]). */

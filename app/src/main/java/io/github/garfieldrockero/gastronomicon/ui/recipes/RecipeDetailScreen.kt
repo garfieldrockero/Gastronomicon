@@ -101,6 +101,10 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
  *
  * El enlace de origen es un dato: se ve el servidor de origen y, solo si es https,
  * un botón que lo abre en el navegador del sistema con un toque.
+ *
+ * Sin conexión ([offline] no nulo): se pinta la copia guardada, con un aviso que
+ * lleva su fecha y «Volver a intentar», sin foto (no se guardan), sin editar y sin
+ * borrar. Las raciones se siguen pudiendo escalar.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -119,18 +123,21 @@ fun RecipeDetailScreen(
     onDeleteDismiss: () -> Unit,
     onDeleteConfirm: () -> Unit,
     modifier: Modifier = Modifier,
+    offline: OfflineCopyUi? = null,
 ) {
+    // Lo que se pinta: la copia guardada manda sobre lo que diga el estado del núcleo.
+    val shownName = offline?.view?.name ?: (state as? RecipeDetailState.Ready)?.view?.name
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
                 title = {
-                    if (state is RecipeDetailState.Ready) {
+                    if (shownName != null) {
                         // El nombre en una línea con «…»; el encabezado completo está en el cuerpo,
                         // así que TalkBack no lo lee dos veces.
                         Text(
-                            text = state.view.name,
+                            text = shownName,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clearAndSetSemantics { },
@@ -151,8 +158,13 @@ fun RecipeDetailScreen(
                     }
                 },
                 actions = {
-                    if (state is RecipeDetailState.Ready) {
-                        IconButton(onClick = onEdit) {
+                    // Con la copia no se edita ni se borra: lo que se ve no está en el servidor.
+                    // Los botones siguen a la vista pero apagados, para que se vea qué se podrá
+                    // hacer cuando vuelva la conexión.
+                    val online = state is RecipeDetailState.Ready && offline == null
+                    val shown = offline?.view != null || state is RecipeDetailState.Ready
+                    if (shown) {
+                        IconButton(onClick = onEdit, enabled = online) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_edit),
                                 contentDescription = stringResource(R.string.detail_edit),
@@ -160,13 +172,16 @@ fun RecipeDetailScreen(
                         }
                         // Lo destructivo, apartado de lo frecuente: va en un menú.
                         var menuOpen by rememberSaveable { mutableStateOf(false) }
-                        IconButton(onClick = { menuOpen = true }, enabled = !deleteState.deleting) {
+                        IconButton(onClick = { menuOpen = true }, enabled = online && !deleteState.deleting) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_more_vert),
                                 contentDescription = stringResource(R.string.detail_more),
                             )
                         }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenu(
+                            expanded = menuOpen && online,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -195,50 +210,64 @@ fun RecipeDetailScreen(
         val contentModifier = Modifier
             .fillMaxSize()
             .padding(innerPadding)
-        when (state) {
-            // Closed no se ve nunca (la ruta enseña la lista), pero el «when» ha de ser completo.
-            RecipeDetailState.Closed, RecipeDetailState.Loading -> LoadingBlock(
-                text = stringResource(R.string.detail_loading),
-                modifier = contentModifier,
-            )
-
-            is RecipeDetailState.Failed -> ProblemBlock(
-                problem = state.problem,
-                defaultTitle = R.string.problem_title_recipe,
-                onRetry = onRetry,
-                onOpenSettings = onOpenSettings,
-                modifier = contentModifier,
-            )
-
-            // 401 y 403: lleva a Ajustes, no a reintentar.
-            RecipeDetailState.Unauthorized -> ProblemBlock(
-                problem = ConnectionProblem.Unauthorized,
-                defaultTitle = R.string.problem_title_recipe,
-                onRetry = onRetry,
-                onOpenSettings = onOpenSettings,
-                modifier = contentModifier,
-            )
-
-            RecipeDetailState.NotFound -> MessageBlock(
-                title = stringResource(R.string.detail_not_found_title),
-                text = stringResource(R.string.detail_not_found_text),
-                primaryLabel = stringResource(R.string.detail_not_found_action),
-                onPrimary = onBack,
-                modifier = contentModifier,
-            )
-
-            is RecipeDetailState.Ready -> RecipeDetailContent(
-                view = state.view,
-                imageLoader = imageLoader,
+        if (offline != null) {
+            RecipeDetailContent(
+                view = offline.view,
+                // Sin red no se pueden pedir fotos: la copia no las guarda.
+                imageLoader = null,
                 onMoreServings = onMoreServings,
                 onFewerServings = onFewerServings,
                 onOpenSource = onOpenSource,
                 modifier = contentModifier,
+                offline = offline,
+                onRetry = onRetry,
             )
+        } else {
+            when (state) {
+                // Closed no se ve nunca (la ruta enseña la lista), pero el «when» ha de ser completo.
+                RecipeDetailState.Closed, RecipeDetailState.Loading -> LoadingBlock(
+                    text = stringResource(R.string.detail_loading),
+                    modifier = contentModifier,
+                )
+
+                is RecipeDetailState.Failed -> ProblemBlock(
+                    problem = state.problem,
+                    defaultTitle = R.string.problem_title_recipe,
+                    onRetry = onRetry,
+                    onOpenSettings = onOpenSettings,
+                    modifier = contentModifier,
+                )
+
+                // 401 y 403: lleva a Ajustes, no a reintentar.
+                RecipeDetailState.Unauthorized -> ProblemBlock(
+                    problem = ConnectionProblem.Unauthorized,
+                    defaultTitle = R.string.problem_title_recipe,
+                    onRetry = onRetry,
+                    onOpenSettings = onOpenSettings,
+                    modifier = contentModifier,
+                )
+
+                RecipeDetailState.NotFound -> MessageBlock(
+                    title = stringResource(R.string.detail_not_found_title),
+                    text = stringResource(R.string.detail_not_found_text),
+                    primaryLabel = stringResource(R.string.detail_not_found_action),
+                    onPrimary = onBack,
+                    modifier = contentModifier,
+                )
+
+                is RecipeDetailState.Ready -> RecipeDetailContent(
+                    view = state.view,
+                    imageLoader = imageLoader,
+                    onMoreServings = onMoreServings,
+                    onFewerServings = onFewerServings,
+                    onOpenSource = onOpenSource,
+                    modifier = contentModifier,
+                )
+            }
         }
     }
 
-    if (deleteState.confirming && state is RecipeDetailState.Ready) {
+    if (deleteState.confirming && state is RecipeDetailState.Ready && offline == null) {
         DeleteRecipeDialog(
             name = state.view.name,
             deleting = deleteState.deleting,
@@ -345,11 +374,14 @@ private fun RecipeDetailContent(
     onFewerServings: () -> Unit,
     onOpenSource: (SourceLink) -> Boolean,
     modifier: Modifier = Modifier,
+    offline: OfflineCopyUi? = null,
+    onRetry: () -> Unit = {},
 ) {
     val heroPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
 
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
-        if (view.imageRecipeId != null) {
+        // Sin red no hay foto: la copia no guarda imágenes, así que ni se intenta.
+        if (view.imageRecipeId != null && offline == null) {
             RecipePhoto(
                 recipeId = view.imageRecipeId,
                 loader = imageLoader,
@@ -364,6 +396,10 @@ private fun RecipeDetailContent(
             modifier = Modifier.padding(Spacing.large),
             verticalArrangement = Arrangement.spacedBy(Spacing.large),
         ) {
+            if (offline != null) {
+                OfflineNotice(copy = offline, onRetry = onRetry)
+            }
+
             Text(
                 text = view.name,
                 style = MaterialTheme.typography.headlineMedium,
@@ -421,6 +457,84 @@ private fun SectionTitle(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.semantics { heading() },
     )
+}
+
+/**
+ * Aviso de que lo que se está viendo es una copia guardada: la fecha (ya en
+ * texto, del núcleo), el motivo real si no fue simple falta de red, y «Volver a
+ * intentar».
+ *
+ * Compacto a propósito: va arriba del todo y no puede empujar la receta fuera de
+ * la pantalla. Una línea de fecha con el botón al lado y, debajo, el texto corto
+ * (con el texto del sistema muy grande se omite). Mientras el reintento está en
+ * marcha, la copia **sigue** a la vista, el botón se apaga y se anuncia.
+ */
+@Composable
+private fun OfflineNotice(copy: OfflineCopyUi, onRetry: () -> Unit) {
+    val largeText = isLargeText()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.medium),
+            verticalArrangement = Arrangement.spacedBy(Spacing.small),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.extraSmall),
+                ) {
+                    Text(
+                        text = stringResource(R.string.detail_offline_banner, copy.cachedAtText),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                    if (!largeText) {
+                        Text(
+                            text = stringResource(R.string.detail_offline_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    val reason = copy.problem?.takeIf { it != ConnectionProblem.NoNetwork }
+                    if (reason != null) {
+                        Text(
+                            text = stringResource(errorTextRes(reason)),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = onRetry,
+                    enabled = !copy.retrying,
+                    modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+                ) {
+                    Text(stringResource(R.string.problem_retry))
+                }
+            }
+            if (copy.retrying) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        text = stringResource(R.string.offline_retrying),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -791,10 +905,15 @@ private val IngredientRowMinHeight = 56.dp
 // ------------------------------------------------------------------ previews
 
 @Composable
-private fun DetailPreview(state: RecipeDetailState, deleteState: RecipeDeleteUiState = RecipeDeleteUiState()) {
+private fun DetailPreview(
+    state: RecipeDetailState,
+    deleteState: RecipeDeleteUiState = RecipeDeleteUiState(),
+    offline: OfflineCopyUi? = null,
+) {
     RecipeDetailScreen(
         state = state,
         deleteState = deleteState,
+        offline = offline,
         imageLoader = null,
         onBack = {},
         onRetry = {},
@@ -833,6 +952,79 @@ private fun RecipeDetailLoadedLargeTextPreview() {
 @Composable
 private fun RecipeDetailLoadingPreview() {
     GastronomiconTheme { DetailPreview(RecipeDetailState.Loading) }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeDetailOfflinePreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Failed(ConnectionProblem.NoNetwork),
+            offline = OfflineCopyUi(
+                view = RecipePreviewData.detail,
+                cachedAtText = "hoy a las 20:14",
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeDetailOfflineDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        DetailPreview(
+            state = RecipeDetailState.Failed(ConnectionProblem.NoNetwork),
+            offline = OfflineCopyUi(
+                view = RecipePreviewData.detail.moreServings(),
+                cachedAtText = "ayer a las 9:05",
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeDetailOfflineLargeTextPreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Failed(ConnectionProblem.ServerNotResponding),
+            offline = OfflineCopyUi(
+                view = RecipePreviewData.detail,
+                cachedAtText = "el 5 de noviembre de 2026",
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeDetailOfflineRetryingPreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Failed(ConnectionProblem.NoNetwork),
+            offline = OfflineCopyUi(
+                view = RecipePreviewData.detail.moreServings(),
+                cachedAtText = "hoy a las 20:14",
+                problem = ConnectionProblem.NoNetwork,
+                retrying = true,
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeDetailOfflineCertificatePreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Failed(ConnectionProblem.SecureConnectionFailed),
+            offline = OfflineCopyUi(
+                view = RecipePreviewData.detail,
+                cachedAtText = "ayer a las 9:05",
+                problem = ConnectionProblem.SecureConnectionFailed,
+            ),
+        )
+    }
 }
 
 @Preview(showBackground = true, widthDp = 360, fontScale = 2f)

@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -74,6 +75,7 @@ import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.RecipePhoto
 import io.github.garfieldrockero.gastronomicon.ui.components.StarRating
+import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
@@ -196,6 +198,22 @@ fun RecipeListScreen(
                     showDetail = !isLargeText(),
                 )
             }
+            // Sin conexión: lo que hay en la lista son las copias guardadas. Va arriba,
+            // antes de las recetas, para que se sepa antes de tocar nada.
+            val offline = state.offline
+            if (offline != null) {
+                OfflineListBanner(
+                    banner = offline,
+                    loading = state.list.isLoading,
+                    onRetry = onRetry,
+                    modifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small),
+                )
+            } else if (state.offlineScopeHint) {
+                // Sesión de antes del modo sin conexión: se dice cómo activarlo.
+                OfflineScopeHint(
+                    modifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small),
+                )
+            }
             RecipeListContent(
                 list = state.list,
                 imageLoader = imageLoader,
@@ -215,6 +233,111 @@ fun RecipeListScreen(
 }
 
 // ------------------------------------------------------------------ contenido
+
+/**
+ * Aviso de que la lista son las copias guardadas: la fecha de la más reciente
+ * (ya en texto, del núcleo), qué se está viendo, el motivo real si no fue simple
+ * falta de red y «Volver a intentar».
+ *
+ * Caja de color suave, no de error: no hay nada roto, solo falta cobertura. Se
+ * anuncia al aparecer (región viva) para que no pase desapercibido.
+ *
+ * Con el texto del sistema muy grande se deja solo el título y el botón: si no,
+ * el aviso se comería media pantalla (justo donde más falta hace la lista).
+ * Mientras el reintento está en marcha, se ve en el propio aviso y el botón se
+ * apaga, para que el toque no parezca no haber hecho nada.
+ */
+@Composable
+private fun OfflineListBanner(
+    banner: OfflineBanner,
+    loading: Boolean,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val largeText = isLargeText()
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.medium),
+            verticalArrangement = Arrangement.spacedBy(Spacing.small),
+        ) {
+            Text(
+                text = stringResource(R.string.recipes_offline_banner, banner.cachedAtText),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            if (!largeText) {
+                Text(
+                    text = stringResource(R.string.recipes_offline_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            // «Sin conexión» no siempre es falta de cobertura: con el certificado roto o
+            // con HTTP local fuera de casa también se ve la copia, y hay que decirlo.
+            val reason = banner.problem?.takeIf { it != ConnectionProblem.NoNetwork }
+            if (reason != null) {
+                Text(
+                    text = stringResource(errorTextRes(reason)),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Button(
+                onClick = onRetry,
+                enabled = !loading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.problem_retry))
+            }
+            if (loading) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.small, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(SmallSpinner),
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 3.dp,
+                    )
+                    Text(
+                        text = stringResource(R.string.offline_retrying),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sin ámbito guardado no hay copias que enseñar: se explica cómo activarlas en
+ * una línea, sin tapar el error de conexión que va debajo.
+ */
+@Composable
+private fun OfflineScopeHint(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Text(
+            text = stringResource(R.string.recipes_offline_scope_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .padding(Spacing.medium)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+}
 
 @Composable
 private fun RecipeListContent(
@@ -647,6 +770,79 @@ private fun RecipeListLoadingPreview() {
 private fun RecipeListLoadingLargeTextPreview() {
     GastronomiconTheme {
         ListPreview(previewState(RecipeListState(phase = ListPhase.LoadingFirst)))
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeListOfflinePreview() {
+    GastronomiconTheme {
+        ListPreview(
+            RecipeListUiState(
+                list = loadedList.copy(hasMore = false),
+                query = "",
+                offline = OfflineBanner(cachedAtText = "hoy a las 20:14"),
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeListOfflineLargeTextPreview() {
+    GastronomiconTheme {
+        ListPreview(
+            RecipeListUiState(
+                list = loadedList.copy(hasMore = false),
+                query = "",
+                offline = OfflineBanner(cachedAtText = "el 5 de noviembre de 2026"),
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeListOfflineRetryingPreview() {
+    GastronomiconTheme {
+        ListPreview(
+            RecipeListUiState(
+                list = loadedList.copy(hasMore = false, phase = ListPhase.LoadingFirst),
+                query = "",
+                offline = OfflineBanner(cachedAtText = "hoy a las 20:14"),
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeListOfflineCertificatePreview() {
+    GastronomiconTheme {
+        ListPreview(
+            RecipeListUiState(
+                list = loadedList.copy(hasMore = false),
+                query = "",
+                offline = OfflineBanner(
+                    cachedAtText = "ayer a las 9:05",
+                    problem = ConnectionProblem.SecureConnectionFailed,
+                ),
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeListOfflineScopeHintPreview() {
+    GastronomiconTheme {
+        ListPreview(
+            RecipeListUiState(
+                list = RecipeListState(problem = ConnectionProblem.NoNetwork, loadedOnce = true),
+                query = "",
+                offlineScopeHint = true,
+            ),
+        )
     }
 }
 

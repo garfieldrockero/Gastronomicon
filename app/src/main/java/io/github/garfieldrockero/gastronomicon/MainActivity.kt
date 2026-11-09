@@ -120,13 +120,13 @@ private fun AppRoot(appViewModel: AppViewModel, container: AppContainer) {
     )
 
     val recipeListViewModel: RecipeListViewModel = viewModel(
-        factory = RecipeListViewModel.factory(container.clientAccess),
+        factory = RecipeListViewModel.factory(container.clientAccess, container.offline),
     )
     val recipeDetailViewModel: RecipeDetailViewModel = viewModel(
-        factory = RecipeDetailViewModel.factory(container.clientAccess),
+        factory = RecipeDetailViewModel.factory(container.clientAccess, container.offline),
     )
     val recipeEditorViewModel: RecipeEditorViewModel = viewModel(
-        factory = RecipeEditorViewModel.factory(container.clientAccess, container.imageRecoder),
+        factory = RecipeEditorViewModel.factory(container.clientAccess, container.imageRecoder, container.offline),
     )
     val recipeImportViewModel: RecipeImportViewModel = viewModel(
         factory = RecipeImportViewModel.factory(container.clientAccess),

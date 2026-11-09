@@ -110,6 +110,10 @@
     <string name="recipes_no_match_action">Buscar en todo tu Mealie</string>
     <string name="recipes_more_failed">No se han podido cargar más recetas.</string>
     <string name="recipes_reload_failed">No se ha podido actualizar la lista.</string>
+    <string name="recipes_offline_banner">Sin conexión · copia más reciente: %1$s</string>
+    <string name="recipes_offline_hint">Son las recetas que ya habías abierto en este móvil. Puede que falten otras.</string>
+    <string name="recipes_offline_scope_hint">Pulsa «Probar conexión» en Ajustes para activar el modo sin conexión.</string>
+    <string name="offline_retrying">Volviendo a conectar…</string>
 
     <!-- Fallos al cargar recetas (lista y detalle). El texto de cada motivo sale de setup_error_*. -->
     <string name="problem_title_default">No se han podido cargar las recetas</string>
@@ -120,7 +124,7 @@
     <string name="problem_text_unauthorized">Mealie ya no acepta el token guardado. Entra en Ajustes y pega uno nuevo. No se ha borrado nada.</string>
     <string name="problem_retry">Volver a intentar</string>
     <string name="problem_open_settings">Abrir Ajustes</string>
-    <string name="problem_offline_hint">Todavía no se guardan recetas para verlas sin conexión.</string>
+    <string name="problem_offline_hint">Solo se ven las recetas que ya habías abierto en este móvil.</string>
 
     <!-- Receta: detalle. -->
     <string name="detail_title">Receta</string>
@@ -150,6 +154,8 @@
     <string name="detail_source_text">Receta original en %1$s</string>
     <string name="detail_source_open">Abrir en el navegador</string>
     <string name="detail_source_open_failed">No se pudo abrir el enlace.</string>
+    <string name="detail_offline_banner">Sin conexión · copia guardada %1$s</string>
+    <string name="detail_offline_hint">Copia guardada en el móvil, sin foto. No se puede editar hasta que vuelva la conexión.</string>
 
     <!-- Recetas: acciones de la lista y del detalle. -->
     <string name="recipes_create">Nueva receta</string>
@@ -222,11 +228,25 @@
     <string name="editor_error_place_ingredient">Ingrediente %1$d</string>
     <string name="editor_error_place_step">Paso %1$d</string>
     <string name="editor_list_errors_title">Revisa estos datos:</string>
-    <string name="editor_discard_title">¿Descartar los cambios?</string>
-    <string name="editor_discard_text">Se perderá lo que has escrito y no se guardará en tu Mealie.</string>
-    <string name="editor_discard_text_created">La receta ya está creada con el nombre, pero se perderán los detalles que has escrito.</string>
-    <string name="editor_discard_confirm">Descartar</string>
+    <string name="editor_discard_title">¿Salir sin enviar los cambios?</string>
+    <string name="editor_discard_text">Se guardará como borrador en este móvil y no se enviará a tu Mealie. Podrás recuperarlo la próxima vez que abras el formulario.</string>
+    <string name="editor_discard_text_created">La receta ya está creada con el nombre, pero los detalles que has escrito se guardarán como borrador en este móvil, sin enviarlos.</string>
+    <string name="editor_discard_text_draft">Se guardará lo que has escrito como borrador en este móvil y sustituirá el borrador anterior. No se enviará a tu Mealie. Podrás recuperarlo la próxima vez que abras el formulario.</string>
+    <string name="editor_discard_confirm">Salir y guardar</string>
     <string name="editor_discard_keep">Seguir editando</string>
+    <string name="editor_draft_title">Tienes un borrador sin guardar</string>
+    <string name="editor_draft_text">Lo dejaste a medias %1$s y se guardó en este móvil. Puedes recuperarlo o empezar de cero.</string>
+    <string name="editor_draft_edit_warning">La receta pudo cambiar en tu Mealie desde esa fecha.</string>
+    <string name="editor_draft_invalid">Este borrador ya no es válido; puedes descartarlo.</string>
+    <string name="editor_draft_recover">Recuperar borrador</string>
+    <string name="editor_draft_discard">Descartar</string>
+    <string name="editor_draft_recover_confirm_title">¿Sustituir lo que has escrito?</string>
+    <string name="editor_draft_recover_confirm_text">Se pondrá el borrador guardado en lugar de lo que hay ahora en el formulario. Sustituirá lo que has escrito y no se puede deshacer.</string>
+    <string name="editor_draft_recover_confirm">Sustituir</string>
+    <string name="editor_draft_discard_confirm_title">¿Descartar el borrador?</string>
+    <string name="editor_draft_discard_confirm_text">Se borrará de este móvil el borrador guardado y no se podrá recuperar.</string>
+    <string name="editor_draft_discard_confirm">Descartar</string>
+    <string name="editor_dialog_cancel">Cancelar</string>
     <string name="editor_saved_warning_title">Se ha guardado, pero no se ha podido recargar</string>
     <string name="editor_saved_warning_text">Los cambios están en tu Mealie. Vuelve a la lista para verlos.</string>
     <string name="editor_saved_opening">Receta guardada. Abriendo…</string>
