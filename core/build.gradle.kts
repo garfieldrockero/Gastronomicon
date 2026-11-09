@@ -11,7 +11,9 @@ kotlin {
 }
 
 dependencies {
-    implementation(libs.kotlinx.serialization.json)
+    // `api`: algunos tipos públicos del núcleo (p. ej. PlannedMeal.rawJson) llevan JsonObject en
+    // su firma y la app necesita verlo para construirlos. Misma dependencia ya aprobada.
+    api(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
 }
 
