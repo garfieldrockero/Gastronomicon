@@ -7,6 +7,7 @@ import io.github.garfieldrockero.gastronomicon.core.config.ApiToken
 import io.github.garfieldrockero.gastronomicon.core.config.ServerAddress
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.network.addressProblemOf
+import io.github.garfieldrockero.gastronomicon.core.reminder.ReminderSettings
 import io.github.garfieldrockero.gastronomicon.core.session.SaveDecision
 import io.github.garfieldrockero.gastronomicon.core.session.SaveSessionPolicy
 import io.github.garfieldrockero.gastronomicon.core.session.Session
@@ -43,6 +44,7 @@ class SettingsViewModel(
     private val preferences: AppPreferences,
     private val connectionTester: ConnectionTester,
     private val appVersion: String,
+    private val reminderAccess: ReminderAccess,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
@@ -127,7 +129,11 @@ class SettingsViewModel(
         loadJob = viewModelScope.launch {
             val loaded = withContext(ioDispatcher) {
                 try {
-                    LoadResult.Loaded(sessionStore.load())
+                    LoadResult.Loaded(
+                        session = sessionStore.load(),
+                        reminder = reminderAccess.settings(),
+                        notificationsAllowed = reminderAccess.notificationsAllowed(),
+                    )
                 } catch (e: SessionStorageException) {
                     LoadResult.Failed
                 }
@@ -148,6 +154,12 @@ class SettingsViewModel(
                 server = fields?.server ?: current.server,
                 port = fields?.port ?: current.port,
                 hasSavedToken = session != null,
+                reminder = ReminderUiState(
+                    enabled = loaded.reminder.enabled && session != null,
+                    minuteOfDay = loaded.reminder.minuteOfDay,
+                    notificationsAllowed = loaded.notificationsAllowed,
+                    permissionDenied = false,
+                ),
             )
             baseline = Baseline(withFields.server, withFields.port, withFields.allowLocalHttp)
             withFields.withCanSave()
@@ -421,7 +433,11 @@ class SettingsViewModel(
                 // lo que hay de verdad y se reinicia la referencia de «sin cambios».
                 val reread = withContext(ioDispatcher) {
                     try {
-                        LoadResult.Loaded(sessionStore.load())
+                        LoadResult.Loaded(
+                            session = sessionStore.load(),
+                            reminder = reminderAccess.settings(),
+                            notificationsAllowed = reminderAccess.notificationsAllowed(),
+                        )
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -465,9 +481,116 @@ class SettingsViewModel(
                 hasSavedToken = false,
                 status = SettingsStatus.Idle,
                 sessionStatus = SessionStatus.Cleared,
+                // Sin sesión no hay aviso; la preferencia guardada se conserva
+                // (decisión D7) y volverá a verse al configurar de nuevo.
+                reminder = current.reminder.copy(enabled = false),
             ).withCanSave()
         }
         onSessionClearedListener?.invoke()
+    }
+
+    // ---- Recordatorio del planificador ----
+
+    /**
+     * Enciende o apaga el aviso. Solo con una sesión guardada y sin una acción en
+     * marcha. Si el sistema no deja publicar notificaciones (decisión D6), **no**
+     * se enciende: se deja constancia para que la pantalla enseñe el aviso y el
+     * botón a los ajustes del sistema.
+     */
+    fun onReminderEnabledChange(enabled: Boolean) {
+        val current = _state.value
+        if (current.loading || current.loadFailed || !current.hasSavedToken) return
+        if (enabled) {
+            // Se pregunta al sistema justo ahora: el permiso pudo concederse o
+            // revocarse en sus ajustes con Ajustes abierto.
+            if (queryNotificationsAllowed() != true) {
+                onReminderPermissionDenied()
+                return
+            }
+            reminderAccess.setEnabled(true)
+            _state.update { latest ->
+                latest.copy(
+                    reminder = latest.reminder.copy(
+                        enabled = true,
+                        // Ya está permitido: el aviso del permiso se quita en la
+                        // misma pulsación, sin esperar a volver a la pantalla.
+                        notificationsAllowed = true,
+                        permissionDenied = false,
+                    ),
+                )
+            }
+            return
+        }
+        reminderAccess.setEnabled(false)
+        _state.update { latest ->
+            latest.copy(reminder = latest.reminder.copy(enabled = false, permissionDenied = false))
+        }
+    }
+
+    /**
+     * Vuelve a preguntar al sistema si deja publicar notificaciones. Se llama al
+     * volver a Ajustes (`ON_RESUME`, ver `SettingsRoute`) porque el permiso se
+     * puede conceder o revocar desde los ajustes del sistema sin cerrar la app:
+     *
+     * - al concederlo, el aviso de la sección desaparece;
+     * - al revocarlo con el interruptor encendido, el aviso vuelve a verse. La
+     *   preferencia no se toca: la persona no lo ha apagado, y en cuanto vuelva a
+     *   permitir las notificaciones el aviso funcionará otra vez.
+     *
+     * Sin sesión guardada no hay sección que corregir y no se pregunta nada.
+     */
+    fun refreshNotificationsAllowed() {
+        val current = _state.value
+        if (current.loading || current.loadFailed || !current.hasSavedToken) return
+        viewModelScope.launch {
+            val allowed = withContext(ioDispatcher) { queryNotificationsAllowed() } ?: return@launch
+            _state.update { latest ->
+                if (latest.loading || latest.loadFailed) {
+                    latest
+                } else {
+                    latest.copy(reminder = latest.reminder.copy(notificationsAllowed = allowed))
+                }
+            }
+        }
+    }
+
+    /**
+     * Lo que dice el sistema ahora mismo, o `null` si no contesta (no se cambia
+     * nada de lo que ya se sabía). Al activar, `null` cuenta como «no»: la rama
+     * cerrada de D6.
+     */
+    private fun queryNotificationsAllowed(): Boolean? = try {
+        reminderAccess.notificationsAllowed()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
+    /** El diálogo del sistema ha denegado el permiso: el interruptor no se queda encendido. */
+    fun onReminderPermissionDenied() {
+        _state.update { current ->
+            current.copy(
+                reminder = current.reminder.copy(
+                    enabled = false,
+                    notificationsAllowed = false,
+                    permissionDenied = true,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Cambia la hora del aviso (minuto del día). La coacción a 0..1439 es de
+     * `core/` y la implementación reprograma la alarma si está activado.
+     */
+    fun onReminderMinuteChange(minuteOfDay: Int) {
+        if (_state.value.loading) return
+        val safe = ReminderSettings.coerceMinuteOfDay(minuteOfDay)
+        reminderAccess.setMinuteOfDay(safe)
+        _state.update { current ->
+            current.copy(reminder = current.reminder.copy(minuteOfDay = safe))
+        }
     }
 
     // ---- Auxiliares ----
@@ -501,7 +624,12 @@ class SettingsViewModel(
     }
 
     private sealed interface LoadResult {
-        data class Loaded(val session: Session?) : LoadResult
+        data class Loaded(
+            val session: Session?,
+            val reminder: ReminderSettings,
+            val notificationsAllowed: Boolean,
+        ) : LoadResult
+
         data object Failed : LoadResult
     }
 
@@ -517,10 +645,17 @@ class SettingsViewModel(
             preferences: AppPreferences,
             connectionTester: ConnectionTester,
             appVersion: String,
+            reminderAccess: ReminderAccess,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                SettingsViewModel(sessionStore, preferences, connectionTester, appVersion) as T
+                SettingsViewModel(
+                    sessionStore,
+                    preferences,
+                    connectionTester,
+                    appVersion,
+                    reminderAccess,
+                ) as T
         }
     }
 }

@@ -2,6 +2,7 @@ package io.github.garfieldrockero.gastronomicon
 
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.ColorDrawable
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -46,13 +47,22 @@ import io.github.garfieldrockero.gastronomicon.ui.start.StorageProblemScreen
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.isDark
 import io.github.garfieldrockero.gastronomicon.ui.theme.themeBackground
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
 
     private val container by lazy { AppContainer(this) }
 
+    /**
+     * Petición de abrir el planificador pendiente (una notificación pulsada).
+     * Se consume en la composición, que es quien tiene el [AppViewModel] de la
+     * pestaña. Vive en la actividad porque el `Intent` llega antes que la UI.
+     */
+    private val openMealPlan = MutableStateFlow(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleIntent(intent)
         // La foto de la cámara vive en la caché mientras se recodifica: al arrancar el
         // proceso se vacía lo que hubiera quedado antes (una sola vez, aunque la actividad
         // se recree), fuera del hilo principal y sin tocar la foto de la galería.
@@ -68,9 +78,23 @@ class MainActivity : ComponentActivity() {
             // ELEGIDO, no el del sistema (el XML solo conoce este último).
             LaunchedEffect(dark) { applySystemBars(dark) }
             GastronomiconTheme(mode = themeMode) {
-                AppRoot(appViewModel, container)
+                AppRoot(appViewModel, container, openMealPlan)
             }
         }
+    }
+
+    /**
+     * Con `singleTop`, pulsar el aviso con la app abierta no crea otra instancia:
+     * llega aquí. Solo se lee la acción propia; el `Intent` no lleva datos.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_MEAL_PLAN) openMealPlan.value = true
     }
 
     private fun applySystemBars(dark: Boolean) {
@@ -82,10 +106,18 @@ class MainActivity : ComponentActivity() {
         window.setBackgroundDrawable(ColorDrawable(themeBackground(dark).toArgb()))
     }
 
-    private companion object {
+    companion object {
+        /**
+         * Acción del `PendingIntent` de la notificación del recordatorio. Abre
+         * esta actividad y selecciona la pestaña del planificador (decisión D8).
+         * El `Intent` no lleva ni fechas ni nombres: solo esta acción.
+         */
+        const val ACTION_OPEN_MEAL_PLAN: String =
+            "io.github.garfieldrockero.gastronomicon.action.ABRIR_PLANIFICADOR"
+
         // Los mismos velos que usa `enableEdgeToEdge()` por defecto con la navegación de tres botones.
-        val LIGHT_NAV_SCRIM = AndroidColor.argb(0xe6, 0xFF, 0xFF, 0xFF)
-        val DARK_NAV_SCRIM = AndroidColor.argb(0x80, 0x1b, 0x1b, 0x16)
+        private val LIGHT_NAV_SCRIM = AndroidColor.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        private val DARK_NAV_SCRIM = AndroidColor.argb(0x80, 0x1b, 0x1b, 0x16)
     }
 }
 
@@ -101,7 +133,11 @@ class MainActivity : ComponentActivity() {
  * vea ni un token a medio escribir ni un aviso de la vez anterior.
  */
 @Composable
-private fun AppRoot(appViewModel: AppViewModel, container: AppContainer) {
+private fun AppRoot(
+    appViewModel: AppViewModel,
+    container: AppContainer,
+    openMealPlan: MutableStateFlow<Boolean>,
+) {
     val screen by appViewModel.screen.collectAsStateWithLifecycle()
     val setupViewModel: SetupViewModel = viewModel(
         factory = SetupViewModel.factory(
@@ -116,6 +152,7 @@ private fun AppRoot(appViewModel: AppViewModel, container: AppContainer) {
             container.preferences,
             container.connectionTester,
             container.appVersion,
+            container.reminderAccess,
         ),
     )
 
@@ -137,6 +174,20 @@ private fun AppRoot(appViewModel: AppViewModel, container: AppContainer) {
     val shoppingViewModel: ShoppingViewModel = viewModel(
         factory = ShoppingViewModel.factory(container.shoppingAccess),
     )
+
+    // Pulsar el aviso del recordatorio lleva al planificador (decisión D8). Con
+    // `singleTop` no se crea otra actividad: se cambia la pestaña. Si la persona
+    // estaba en Ajustes, se cierra; la primera configuración no se toca.
+    val mealPlanRequest by openMealPlan.collectAsStateWithLifecycle()
+    LaunchedEffect(mealPlanRequest) {
+        if (!mealPlanRequest) return@LaunchedEffect
+        appViewModel.onTabSelected(MainTab.MealPlan)
+        if (appViewModel.screen.value == AppScreen.Settings) {
+            settingsViewModel.onLeave()
+            appViewModel.onCloseSettings()
+        }
+        openMealPlan.value = false
+    }
 
     // El desplazamiento de la lista vive aquí, fuera de Recetas: así sobrevive a ir a Ajustes
     // y volver (mirar el tema o «Acerca de» no tira la posición). «Volver arriba» lo aplica

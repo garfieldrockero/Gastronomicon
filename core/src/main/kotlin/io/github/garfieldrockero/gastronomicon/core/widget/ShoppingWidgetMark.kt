@@ -195,7 +195,8 @@ internal fun planFor(list: ShoppingList, itemId: String): WidgetPlan {
  *
  * Por qué así:
  * - El `PUT` parte del **JSON recién leído**, no de una copia en disco: si la
- *   nota cambió en la web de Mealie, no se pisa con la vieja.
+ *   nota cambió en la web de Mealie, no se pisa con la de la caché (si cambia
+ *   entre el `GET` y el `PUT`, gana la última, como en la app).
  * - Si el `GET` ve el elemento ya marcado, no hay `PUT`. Por eso un toque
  *   repetido (o un `PendingIntent` que el launcher reenvía) no duplica nada:
  *   el destino es un booleano, no una suma.
@@ -252,15 +253,28 @@ class ShoppingWidgetMarker(
         }
     }
 
-    private fun send(fresh: ShoppingList, item: ShoppingItem): ShoppingWidgetMarkResult =
-        when (val write = writeOutcome(call { source.setChecked(item, true) })) {
+    private fun send(fresh: ShoppingList, item: ShoppingItem): ShoppingWidgetMarkResult {
+        // El transporte envuelve sus fallos en `NetworkError`; una excepción
+        // suelta saltó al validar o al componer el cuerpo, antes de enviar, y
+        // no puede haber dejado nada escrito.
+        val outcome = try {
+            writeOutcome(source.setChecked(item, true))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: NetworkError) {
+            writeOutcome(ApiErrors.map(error))
+        } catch (error: RuntimeException) {
+            WidgetWrite.NotApplied(ConnectionProblem.Unknown)
+        }
+        return when (outcome) {
             WidgetWrite.Applied -> marked(fresh, item.id, alreadyChecked = false)
             WidgetWrite.Gone -> itemGone(fresh, item.id)
             WidgetWrite.Unauthorized -> ShoppingWidgetMarkResult.Unauthorized
             WidgetWrite.Rejected -> ShoppingWidgetMarkResult.ServerRejected
-            is WidgetWrite.NotApplied -> ShoppingWidgetMarkResult.NotApplied(write.problem)
-            is WidgetWrite.Unconfirmed -> ShoppingWidgetMarkResult.Unconfirmed(write.problem)
+            is WidgetWrite.NotApplied -> ShoppingWidgetMarkResult.NotApplied(outcome.problem)
+            is WidgetWrite.Unconfirmed -> ShoppingWidgetMarkResult.Unconfirmed(outcome.problem)
         }
+    }
 
     /** Instantánea con el elemento marcado. */
     private fun marked(fresh: ShoppingList, itemId: String, alreadyChecked: Boolean): ShoppingWidgetMarkResult {
@@ -308,9 +322,11 @@ class ShoppingWidgetMarker(
     }
 
     /**
-     * Ejecuta una llamada a la fuente y reduce un fallo de red a un [ApiResult]
+     * Ejecuta la lectura fresca y reduce un fallo de red a un [ApiResult]
      * tipado, igual que `ShoppingListController`. Una cancelación no se traga
-     * (el `finally` ya quitó el id en vuelo) y un `Error` tampoco.
+     * (el `finally` ya quitó el id en vuelo) y un `Error` tampoco. Las
+     * excepciones sueltas solo pueden venir de la fuente antes de hablar con la
+     * red: se cuentan como un fallo de lectura sin datos.
      */
     private inline fun <T> call(block: () -> ApiResult<T>): ApiResult<T> =
         try {

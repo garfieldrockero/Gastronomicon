@@ -2,7 +2,6 @@ package io.github.garfieldrockero.gastronomicon.core.reminder
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -68,10 +67,9 @@ class ReminderScheduleTest {
     @Test
     fun `antes de la hora el disparo es hoy`() {
         val now = atMadrid(2026, 11, 9, 8)
-        val trigger = ReminderSchedule.nextTrigger(now, 540, madrid)
+        val trigger = ReminderSchedule.nextTrigger(now, 540, madrid)!!
 
-        assertNotNull(trigger)
-        assertEquals(LocalDate.of(2026, 11, 9), trigger!!.date)
+        assertEquals(LocalDate.of(2026, 11, 9), trigger.date)
         assertEquals(atMadrid(2026, 11, 9, 9), trigger.at)
     }
 

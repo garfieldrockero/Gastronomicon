@@ -49,6 +49,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.garfieldrockero.gastronomicon.R
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
@@ -83,6 +85,10 @@ fun SettingsRoute(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // El permiso de notificaciones se puede conceder o revocar en los ajustes del
+    // sistema y volver aquí sin cerrar la app: al volver a la pantalla se relee,
+    // para que el aviso desaparezca al concederlo y vuelva a verse al revocarlo.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshNotificationsAllowed() }
     // Atrás del sistema: mientras se borra la sesión se consume sin salir (el
     // manejador sigue activo a propósito; si se desactivara, Atrás cerraría la app).
     val clearing = state.sessionStatus == SessionStatus.Clearing
@@ -99,6 +105,9 @@ fun SettingsRoute(
             viewModel.onThemeChange(mode)
             onThemeChanged(mode)
         },
+        onReminderEnabledChange = viewModel::onReminderEnabledChange,
+        onReminderPermissionDenied = viewModel::onReminderPermissionDenied,
+        onReminderMinuteChange = viewModel::onReminderMinuteChange,
         onClearSessionClick = viewModel::onClearSessionClick,
         onClearSessionConfirm = viewModel::onClearSessionConfirm,
         onClearSessionDismiss = viewModel::onClearSessionDismiss,
@@ -127,6 +136,9 @@ fun SettingsScreen(
     onTestConnection: () -> Unit,
     onSave: () -> Unit,
     onThemeChange: (ThemeMode) -> Unit,
+    onReminderEnabledChange: (Boolean) -> Unit,
+    onReminderPermissionDenied: () -> Unit,
+    onReminderMinuteChange: (Int) -> Unit,
     onClearSessionClick: () -> Unit,
     onClearSessionConfirm: () -> Unit,
     onClearSessionDismiss: () -> Unit,
@@ -182,6 +194,21 @@ fun SettingsScreen(
             }
 
             AppearanceSection(selected = state.themeMode, onThemeChange = onThemeChange)
+
+            if (!state.loading) {
+                ReminderSection(
+                    reminder = state.reminder,
+                    available = !state.loadFailed && state.hasSavedToken,
+                    blockedReason = when {
+                        state.loadFailed -> R.string.reminder_reason_load_failed
+                        !state.hasSavedToken -> R.string.reminder_reason_no_session
+                        else -> null
+                    },
+                    onEnabledChange = onReminderEnabledChange,
+                    onPermissionDenied = onReminderPermissionDenied,
+                    onMinuteChange = onReminderMinuteChange,
+                )
+            }
 
             SessionSection(
                 enabled = !state.loading && !state.busy,
@@ -561,6 +588,7 @@ private val ExampleState = SettingsUiState(
     status = SettingsStatus.Idle,
     sessionStatus = SessionStatus.Idle,
     showClearConfirm = false,
+    reminder = ReminderUiState(enabled = true, minuteOfDay = 9 * 60),
 )
 
 @Composable
@@ -575,6 +603,9 @@ private fun ExampleSettingsScreen(state: SettingsUiState, mode: ThemeMode = Them
             onTestConnection = {},
             onSave = {},
             onThemeChange = {},
+            onReminderEnabledChange = {},
+            onReminderPermissionDenied = {},
+            onReminderMinuteChange = {},
             onClearSessionClick = {},
             onClearSessionConfirm = {},
             onClearSessionDismiss = {},

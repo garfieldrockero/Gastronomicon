@@ -1,6 +1,7 @@
 package io.github.garfieldrockero.gastronomicon.ui.settings
 
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
+import io.github.garfieldrockero.gastronomicon.core.reminder.ReminderSchedule
 import io.github.garfieldrockero.gastronomicon.ui.components.maskedServer
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
 
@@ -36,6 +37,8 @@ data class SettingsUiState(
     /** Marcha de borrar la sesión; su aviso va aparte, bajo «Borrar la sesión». */
     val sessionStatus: SessionStatus,
     val showClearConfirm: Boolean,
+    /** Recordatorio del planificador: interruptor, hora y estado del permiso. */
+    val reminder: ReminderUiState = ReminderUiState(),
 ) {
     /** Hay una acción en marcha: los campos y los botones se bloquean. */
     val busy: Boolean
@@ -46,7 +49,8 @@ data class SettingsUiState(
         "SettingsUiState(loading=$loading, loadFailed=$loadFailed, server=${maskedServer(server)}, " +
             "port=$port, allowLocalHttp=$allowLocalHttp, tokenInput=***, " +
             "hasSavedToken=$hasSavedToken, canSave=$canSave, dirty=$dirty, themeMode=$themeMode, " +
-            "status=$status, sessionStatus=$sessionStatus, showClearConfirm=$showClearConfirm)"
+            "status=$status, sessionStatus=$sessionStatus, showClearConfirm=$showClearConfirm, " +
+            "reminder=$reminder)"
 }
 
 /** Marcha de la pantalla de Ajustes. */
@@ -77,4 +81,30 @@ sealed interface SessionStatus {
 
     /** La sesión ya está borrada; quien navega debe llevar a la primera configuración. */
     data object Cleared : SessionStatus
+}
+
+/**
+ * Estado de la sección «Recordatorio» de Ajustes. Sin lógica: el minuto del día
+ * y su texto («09:05») los coacciona y compone `core/reminder`.
+ *
+ * - [enabled] es lo que se pinta en el interruptor; sin sesión se pinta apagado
+ *   aunque la preferencia siga guardada (decisión D7: se conserva, no se avisa).
+ * - [notificationsAllowed] es lo que dice el sistema ahora mismo. Si es `false`,
+ *   el interruptor no puede quedarse encendido y se enseña el aviso con el botón
+ *   a los ajustes del sistema (decisión D6).
+ * - [permissionDenied] distingue «acaba de denegar el permiso» de «las
+ *   notificaciones estaban bloqueadas de antes»; la pantalla usa el mismo aviso.
+ */
+data class ReminderUiState(
+    val enabled: Boolean = false,
+    val minuteOfDay: Int = ReminderSchedule.DEFAULT_MINUTE_OF_DAY,
+    val notificationsAllowed: Boolean = true,
+    val permissionDenied: Boolean = false,
+) {
+    /** «09:00», calculado por el núcleo. */
+    val timeText: String get() = ReminderSchedule.textOf(minuteOfDay)
+
+    override fun toString(): String =
+        "ReminderUiState(enabled=$enabled, minuteOfDay=$minuteOfDay, " +
+            "notificationsAllowed=$notificationsAllowed, permissionDenied=$permissionDenied)"
 }

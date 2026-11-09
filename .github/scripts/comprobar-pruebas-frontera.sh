@@ -71,6 +71,13 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDraftTest
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanWeekViewTest
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanRawJsonTest
+  io.github.garfieldrockero.gastronomicon.core.reminder.ReminderScheduleTest
+  io.github.garfieldrockero.gastronomicon.core.reminder.ReminderContentTest
+  io.github.garfieldrockero.gastronomicon.core.reminder.ReminderSettingsTest
+  io.github.garfieldrockero.gastronomicon.core.offline.MealPlanCacheTest
+  io.github.garfieldrockero.gastronomicon.core.offline.ShoppingListCacheTest
+  io.github.garfieldrockero.gastronomicon.core.offline.ShoppingListCacheCodecTest
+  io.github.garfieldrockero.gastronomicon.core.widget.ShoppingWidgetMarkTest
 )
 
 # Valor numérico del atributo $1 en la etiqueta de apertura $2 (comillas dobles o

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Recordatorio local del planificador (prefijo reminder_). Todo el texto es
+         de la app: el aviso no lleva datos del servidor salvo los nombres de las
+         comidas, que compone y sanea `core/reminder/ReminderContent`.
+         Los botones «Cancelar» y «Guardar» no se repiten aquí: se usan los que ya
+         tiene la app (`plan_cancel` y `setup_save`). -->
+
+    <string name="reminder_section_title">Recordatorio</string>
+    <string name="reminder_switch_label">Avisarme de lo que hay planeado para hoy</string>
+
+    <!-- La hora va a la derecha de la fila, como el valor de un ajuste. -->
+    <string name="reminder_time_label">Hora del aviso</string>
+    <string name="reminder_time_description">Elegir la hora del aviso. Ahora es a las %1$s.</string>
+    <string name="reminder_time_unavailable">Podrás cambiarla cuando el aviso esté disponible.</string>
+    <string name="reminder_time_dialog_title">Hora del aviso</string>
+    <string name="reminder_late_hint">Puede llegar unos minutos más tarde, sobre todo con el móvil en reposo.</string>
+
+    <!-- El permiso de notificaciones se pide al activar; si se deniega, el
+         interruptor no se queda encendido y se ofrece ir al sistema. -->
+    <string name="reminder_permission_denied">Gastronomicón no puede avisarte: las notificaciones están bloqueadas en este móvil. Actívalas en los ajustes del sistema y vuelve a intentarlo.</string>
+    <string name="reminder_open_notification_settings">Abrir ajustes de notificaciones</string>
+
+    <string name="reminder_reason_no_session">Configura tu servidor primero: el aviso se lee de la copia del plan guardada en el móvil.</string>
+    <string name="reminder_reason_load_failed">No se ha podido leer tu sesión ahora mismo. Vuelve a intentarlo.</string>
+
+    <!-- Canal y aviso. El título dice algo por sí solo porque TalkBack lo lee
+         al llegar la notificación. -->
+    <string name="reminder_channel_name">Recordatorio del planificador</string>
+    <string name="reminder_channel_description">Un aviso al día con lo que hay planeado para hoy.</string>
+    <string name="reminder_notification_title">Comidas de hoy</string>
+</resources>

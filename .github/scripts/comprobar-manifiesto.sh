@@ -65,7 +65,11 @@ esac
 # Solo estos permisos están aprobados. DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 # la añade AndroidX Core: es un permiso signature de la propia app para sus
 # receptores no exportados y no da acceso a nada externo.
-permitidos="android.permission.INTERNET android.permission.ACCESS_NETWORK_STATE io.github.garfieldrockero.gastronomicon.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+# POST_NOTIFICATIONS se pide en tiempo de ejecución al activar el recordatorio y
+# RECEIVE_BOOT_COMPLETED solo deja reprogramar su alarma. Cualquier otro permiso
+# (SCHEDULE_EXACT_ALARM, USE_EXACT_ALARM, WAKE_LOCK…) rompe el CI: la lista falla
+# cerrada.
+permitidos="android.permission.INTERNET android.permission.ACCESS_NETWORK_STATE android.permission.POST_NOTIFICATIONS android.permission.RECEIVE_BOOT_COMPLETED io.github.garfieldrockero.gastronomicon.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
 while IFS= read -r permiso; do
   [ -z "$permiso" ] && continue
   case " $permitidos " in
@@ -394,6 +398,100 @@ normalizar_xmltree() {
   '
 }
 
+# --- Receptor del recordatorio ----------------------------------------------
+# El manifiesto se vuelve a leer como árbol con rutas (normalizar_xmltree) para
+# comprobar los receptores. Lista blanca exacta:
+#  - receptores: el de AndroidX de profileinstaller (exportado, como ya estaba
+#    aprobado) y el recordatorio de la app, **no exportado**;
+#  - acciones del receptor del recordatorio: las cuatro de reprogramación
+#    (reinicio, actualización de la APK, cambio de hora y de zona), ni una más;
+#  - ningún <service> declarado.
+# El receptor va exportado=false y su acción de alarma no está en el filtro: viaja
+# en el PendingIntent explícito, así que no es una puerta que se pueda abrir desde
+# fuera. Un receptor añadido a mano o una acción de más rompen el CI.
+arbol_manifiesto=$(normalizar_xmltree <<< "$salida_xml")
+
+receptores=$(awk -F'\t' '
+  $1 == "manifest/application/receiver" {
+    nombre = "(sin nombre)"
+    exportado = ""
+    for (i = 2; i <= NF; i++) {
+      if (index($i, "name=") == 1) nombre = substr($i, 6)
+      if (index($i, "exported=") == 1) exportado = substr($i, 10)
+    }
+    print nombre "\t" exportado
+  }
+' <<< "$arbol_manifiesto" | LC_ALL=C sort)
+
+receptores_esperados=$(
+  printf '%s\n' \
+    $'androidx.profileinstaller.ProfileInstallReceiver\ttrue' \
+    $'io.github.garfieldrockero.gastronomicon.platform.ReminderReceiver\tfalse' |
+    LC_ALL=C sort
+)
+if [ "$receptores" != "$receptores_esperados" ]; then
+  echo "::error::Los receptores del manifiesto de la APK no son los aprobados (profileinstaller exportado y el recordatorio de la app no exportado)."
+  {
+    echo "Esperado:"
+    printf '%s\n' "$receptores_esperados"
+    echo "Encontrado:"
+    if [ -z "$receptores" ]; then
+      echo "  (ninguno)"
+    else
+      printf '%s\n' "$receptores"
+    fi
+  } | volcar_seguro
+  exit 1
+fi
+
+# Las acciones se atribuyen a su receptor con el volcado aplanado: cada elemento se
+# imprime justo antes del siguiente, así que las acciones de un <receiver> quedan
+# detrás de su línea y antes del siguiente componente. Se exige que el receptor del
+# recordatorio tenga EXACTAMENTE las cuatro acciones de reprogramación (una acción de
+# más rompe el CI). Las de AndroidX (profileinstaller) no se tocan aquí.
+acciones_recordatorio=$(awk -F'\t' '
+  $1 ~ /^(manifest|application|activity|activity-alias|service|provider|receiver)$/ {
+    actual = ""
+    if ($1 == "receiver") {
+      for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) actual = substr($i, 6)
+    }
+    next
+  }
+  $1 == "action" && actual == "io.github.garfieldrockero.gastronomicon.platform.ReminderReceiver" {
+    for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6)
+  }
+' <<< "$registros" | LC_ALL=C sort)
+
+acciones_recordatorio_esperadas=$(
+  printf '%s\n' \
+    "android.intent.action.BOOT_COMPLETED" \
+    "android.intent.action.MY_PACKAGE_REPLACED" \
+    "android.intent.action.TIME_SET" \
+    "android.intent.action.TIMEZONE_CHANGED" |
+    LC_ALL=C sort
+)
+if [ "$acciones_recordatorio" != "$acciones_recordatorio_esperadas" ]; then
+  echo "::error::El receptor del recordatorio no tiene exactamente las cuatro acciones aprobadas (reinicio, actualización, hora y zona)."
+  {
+    echo "Esperado:"
+    printf '%s\n' "$acciones_recordatorio_esperadas"
+    echo "Encontrado:"
+    if [ -z "$acciones_recordatorio" ]; then
+      echo "  (ninguna)"
+    else
+      printf '%s\n' "$acciones_recordatorio"
+    fi
+  } | volcar_seguro
+  exit 1
+fi
+
+servicios=$(awk -F'\t' '$1 == "manifest/application/service" { print $1 }' <<< "$arbol_manifiesto")
+if [ -n "$servicios" ]; then
+  echo "::error::La APK declara un <service>; la app no tiene ninguno aprobado (el recordatorio no usa servicios)."
+  volcar_seguro <<< "$servicios"
+  exit 1
+fi
+
 # Una línea de la lista blanca: la ruta del elemento y, detrás, sus atributos.
 arbol_esperado() {
   local ruta=$1
@@ -642,4 +740,4 @@ if ! cmp -s "$rutas" "$rutas_esperadas"; then
   exit 1
 fi
 
-echo "APK correcta: permisos aprobados; manifiesto sin tráfico en claro global (el HTTP local lo regula la configuración de red aprobada y core/ServerUrl), sin depuración, sin copias y sin componentes exportados de más; un único provider (FileProvider de la cámara, no exportado y con permiso temporal por Uri); configuración de red, reglas de extracción y rutas del FileProvider idénticas a las aprobadas, tanto en los ficheros del repositorio como en el recurso compilado de la APK (lista blanca, sin variantes de configuración)."
+echo "APK correcta: permisos aprobados (INTERNET, ACCESS_NETWORK_STATE, POST_NOTIFICATIONS y RECEIVE_BOOT_COMPLETED); manifiesto sin tráfico en claro global (el HTTP local lo regula la configuración de red aprobada y core/ServerUrl), sin depuración, sin copias y sin componentes exportados de más; un único provider (FileProvider de la cámara, no exportado y con permiso temporal por Uri); receptores y sus acciones con lista blanca exacta (el recordatorio no exportado); ningún service; configuración de red, reglas de extracción y rutas del FileProvider idénticas a las aprobadas, tanto en los ficheros del repositorio como en el recurso compilado de la APK (lista blanca, sin variantes de configuración)."

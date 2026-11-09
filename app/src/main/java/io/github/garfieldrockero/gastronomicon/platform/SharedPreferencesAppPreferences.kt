@@ -2,6 +2,8 @@ package io.github.garfieldrockero.gastronomicon.platform
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.github.garfieldrockero.gastronomicon.core.reminder.ReminderSchedule
+import io.github.garfieldrockero.gastronomicon.core.reminder.ReminderSettings
 import io.github.garfieldrockero.gastronomicon.ui.settings.AppPreferences
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
 
@@ -71,11 +73,49 @@ class SharedPreferencesAppPreferences(context: Context) : AppPreferences {
             editor.commit()
         }
 
+    /**
+     * Recordatorio activado. No es un secreto: va con el tema, no con el token.
+     * `apply()` basta: si el proceso muere justo después, como mucho se pierde un
+     * cambio de interruptor que la persona puede repetir.
+     */
+    override var reminderEnabled: Boolean
+        get() = prefs.getBoolean(KEY_REMINDER_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_REMINDER_ENABLED, value).apply()
+        }
+
+    /** Minuto del día coaccionado al leer y al escribir: nunca sale de 0..1439. */
+    override var reminderMinuteOfDay: Int
+        get() = ReminderSettings.coerceMinuteOfDay(
+            prefs.getInt(KEY_REMINDER_MINUTE, ReminderSchedule.DEFAULT_MINUTE_OF_DAY),
+        )
+        set(value) {
+            prefs.edit()
+                .putInt(KEY_REMINDER_MINUTE, ReminderSettings.coerceMinuteOfDay(value))
+                .apply()
+        }
+
+    /** Fecha de la última vez que se avisó; una marca ilegible se lee como «nunca». */
+    override var reminderLastNotifiedDate: String?
+        get() = prefs.getString(KEY_REMINDER_LAST_NOTIFIED, null)
+        set(value) {
+            val editor = prefs.edit()
+            if (value == null) {
+                editor.remove(KEY_REMINDER_LAST_NOTIFIED)
+            } else {
+                editor.putString(KEY_REMINDER_LAST_NOTIFIED, value)
+            }
+            editor.apply()
+        }
+
     private companion object {
         const val PREFS_NAME = "gastronomicon_preferencias"
         const val KEY_THEME = "tema"
         const val KEY_LOCAL_HTTP = "http_local"
         const val KEY_OFFLINE_SCOPE = "ambito_offline"
         const val KEY_OFFLINE_SCOPE_CLEAR = "ambito_offline_pendiente"
+        const val KEY_REMINDER_ENABLED = "recordatorio_activo"
+        const val KEY_REMINDER_MINUTE = "recordatorio_minuto"
+        const val KEY_REMINDER_LAST_NOTIFIED = "recordatorio_ultimo_aviso"
     }
 }

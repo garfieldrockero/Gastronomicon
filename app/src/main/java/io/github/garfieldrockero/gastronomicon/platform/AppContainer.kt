@@ -5,6 +5,7 @@ import io.github.garfieldrockero.gastronomicon.core.client.MealieClient
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanClient
 import io.github.garfieldrockero.gastronomicon.core.network.ActiveNetworkProvider
 import io.github.garfieldrockero.gastronomicon.core.offline.DraftStore
+import io.github.garfieldrockero.gastronomicon.core.offline.MealPlanCache
 import io.github.garfieldrockero.gastronomicon.core.offline.RecipeCache
 import io.github.garfieldrockero.gastronomicon.core.session.Session
 import io.github.garfieldrockero.gastronomicon.core.session.SessionStore
@@ -13,6 +14,7 @@ import io.github.garfieldrockero.gastronomicon.ui.mealplan.MealPlanAccess
 import io.github.garfieldrockero.gastronomicon.ui.mealplan.StoreMealPlanAccess
 import io.github.garfieldrockero.gastronomicon.ui.settings.AppPreferences
 import io.github.garfieldrockero.gastronomicon.ui.settings.ConnectionTester
+import io.github.garfieldrockero.gastronomicon.ui.settings.ReminderAccess
 import io.github.garfieldrockero.gastronomicon.ui.shopping.ShoppingAccess
 import io.github.garfieldrockero.gastronomicon.ui.shopping.StoreShoppingAccess
 
@@ -50,6 +52,22 @@ class AppContainer(context: Context) {
      */
     val offlineStore: KeystoreBlobStore = KeystoreBlobStore(appContext)
 
+    /**
+     * Copia cifrada del planificador para el recordatorio (fase 9). La escribe
+     * [CachingMealPlanAccess] al abrir el planificador; la lee
+     * [ReminderReceiver] sin red y sin la sesión.
+     */
+    val mealPlanCache: MealPlanCache = MealPlanCache(offlineStore)
+
+    /**
+     * Alarma del recordatorio. Va antes que [sessionStore] porque este la usa
+     * para cancelar el aviso al cerrar la sesión (decisión D7).
+     */
+    val reminderScheduler: ReminderScheduler = ReminderScheduler(appContext, preferences)
+
+    /** Lo que usan Ajustes para el interruptor, la hora y el permiso de notificaciones. */
+    val reminderAccess: ReminderAccess = AndroidReminderAccess(appContext, preferences)
+
     init {
         // Si un borrado de datos offline se quedó a medias (disco lleno, Keystore
         // ocupado), se reintenta aquí: sin esto el fallo pasaría por «borrado». Solo
@@ -60,6 +78,10 @@ class AppContainer(context: Context) {
         // `commit()` que no cuajó y el proceso murió), se repite aquí para no servir
         // las copias de la cuenta anterior. Sin marca no toca nada.
         offlineScope.retryPendingClear()
+        // Al abrir la app se vuelve a poner la alarma del recordatorio: «Forzar
+        // detención» y una actualización la borran, y así se recupera sin esperar
+        // al reinicio. Si no toca (apagado, sin sesión) solo se cancela.
+        reminderScheduler.schedule()
     }
 
     /** Caché de las recetas ya abiertas, para poder verlas sin conexión. */
@@ -78,12 +100,15 @@ class AppContainer(context: Context) {
      * El ámbito se apunta después de guardar bien la sesión ([ScopeRecordingSessionStore]),
      * así que probar un servidor sin guardarlo no deja nada.
      */
-    val sessionStore: SessionStore = ScopeRecordingSessionStore(
-        OfflineClearingSessionStore(keystoreSessionStore) {
-            offlineScope.clear()
-            offlineStore.clearAll()
-        },
-        offlineScope,
+    val sessionStore: SessionStore = ReminderSessionStore(
+        ScopeRecordingSessionStore(
+            OfflineClearingSessionStore(keystoreSessionStore) {
+                offlineScope.clear()
+                offlineStore.clearAll()
+            },
+            offlineScope,
+        ),
+        reminderScheduler,
     )
 
     val activeNetwork: ActiveNetworkProvider = AndroidActiveNetworkProvider(appContext)
@@ -105,10 +130,16 @@ class AppContainer(context: Context) {
     /**
      * Planificador: una fuente nueva por operación, con la sesión guardada
      * (ver [StoreMealPlanAccess]). Misma política de sesión, red y HTTP local.
+     * Va decorada para dejar la copia cifrada que lee el recordatorio
+     * ([CachingMealPlanAccess]): la pantalla no cambia y el receptor no hace red.
      */
-    val mealPlanAccess: MealPlanAccess = StoreMealPlanAccess(sessionStore) { session ->
-        MealPlanClient.create(session, preferences.allowLocalHttp, activeNetwork)
-    }
+    val mealPlanAccess: MealPlanAccess = CachingMealPlanAccess(
+        delegate = StoreMealPlanAccess(sessionStore) { session ->
+            MealPlanClient.create(session, preferences.allowLocalHttp, activeNetwork)
+        },
+        cache = mealPlanCache,
+        scope = { offlineScope.current() },
+    )
 
     /** Imágenes de receta: caché solo en memoria. Se vacía al cambiar de sesión. */
     val imageLoader: ImageLoader = ImageLoader(clientAccess)

@@ -1,5 +1,7 @@
 package io.github.garfieldrockero.gastronomicon.ui.settings
 
+import io.github.garfieldrockero.gastronomicon.core.reminder.ReminderSchedule
+import io.github.garfieldrockero.gastronomicon.core.reminder.ReminderSettings
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
 
 /**
@@ -36,6 +38,26 @@ interface AppPreferences : io.github.garfieldrockero.gastronomicon.core.session.
      * sirve el ámbito guardado, aunque el id siga en el archivo.
      */
     var offlineScopeClearPending: Boolean
+
+    /**
+     * Recordatorio del planificador activado (decisión D7: la preferencia se
+     * conserva al cerrar o cambiar la sesión; sin sesión no hay aviso).
+     */
+    var reminderEnabled: Boolean
+
+    /**
+     * Minuto del día del aviso, 0..1439. Se lee **coaccionado** con
+     * [ReminderSettings.coerceMinuteOfDay]: un valor manipulado se pinta como el
+     * de por defecto (09:00), igual que un `themeMode` desconocido.
+     */
+    var reminderMinuteOfDay: Int
+
+    /**
+     * Última fecha (`yyyy-MM-dd`) en la que se avisó, para no repetir el aviso el
+     * mismo día. Se guarda como texto y se lee con
+     * [ReminderSettings.parseDate]: una marca ilegible se trata como «nunca».
+     */
+    var reminderLastNotifiedDate: String?
 }
 
 /** Preferencias en memoria para previews y pruebas: no persisten nada. */
@@ -45,4 +67,15 @@ class InMemoryAppPreferences(
 ) : AppPreferences {
     override var offlineScopeId: String? = null
     override var offlineScopeClearPending: Boolean = false
+    override var reminderEnabled: Boolean = false
+
+    private var reminderMinute: Int = ReminderSchedule.DEFAULT_MINUTE_OF_DAY
+
+    override var reminderMinuteOfDay: Int
+        get() = reminderMinute
+        set(value) {
+            reminderMinute = ReminderSettings.coerceMinuteOfDay(value)
+        }
+
+    override var reminderLastNotifiedDate: String? = null
 }
