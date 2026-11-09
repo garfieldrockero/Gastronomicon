@@ -40,6 +40,11 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.html.PlainTextSanitizerTest
   io.github.garfieldrockero.gastronomicon.core.session.SessionTest
   io.github.garfieldrockero.gastronomicon.core.session.SessionPayloadFormatTest
+  io.github.garfieldrockero.gastronomicon.core.offline.ServerScopeTest
+  io.github.garfieldrockero.gastronomicon.core.offline.OfflineCodecTest
+  io.github.garfieldrockero.gastronomicon.core.offline.RecipeCacheTest
+  io.github.garfieldrockero.gastronomicon.core.offline.DraftStoreTest
+  io.github.garfieldrockero.gastronomicon.core.offline.OfflineWipeTest
   io.github.garfieldrockero.gastronomicon.core.network.MultipartBodyTest
   io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransportWriteTest
   io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransportUploadCutoffTest
@@ -52,6 +57,7 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientMaybeCreatedTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClientTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListControllerTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerControllerTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListViewTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingTextTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRawJsonTest

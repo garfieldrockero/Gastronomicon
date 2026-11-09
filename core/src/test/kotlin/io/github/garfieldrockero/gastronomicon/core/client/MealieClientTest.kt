@@ -190,6 +190,74 @@ class MealieClientTest {
         }
     }
 
+    // ----------------------------------------------------------- currentUser
+
+    @Test
+    fun `currentUser devuelve el id normalizado y manda el token solo en self`() {
+        routes[SELF] = { e ->
+            respond(
+                e,
+                200,
+                """{"id":"0F8FAD5B-D9CB-469F-A165-70867728950E","username":"pepe",
+                    "email":"pepe@ejemplo.org","tokens":[]}""",
+            )
+        }
+
+        val result = client().currentUser()
+
+        val user = (result as ApiResult.Success<CurrentUser>).value
+        assertEquals("0f8fad5b-d9cb-469f-a165-70867728950e", user.id)
+        assertEquals(listOf(SELF), seen.map { it.path })
+        assertEquals("Bearer tok-secreto-ABC123xyz", seen[0].authorization)
+        assertFalse(result.toString().contains("0f8fad5b"))
+        assertFalse(user.toString().contains("0f8fad5b"))
+    }
+
+    @Test
+    fun `currentUser con un id que no es uuid falla cerrado`() {
+        val bodies = listOf(
+            "{}",
+            """{"id":null}""",
+            """{"id":"x"}""",
+            """{"id":"../fuera"}""",
+            """{"id":"0f8fad5b-d9cb-469f-a165-70867728950"}""",
+        )
+        for (body in bodies) {
+            routes[SELF] = { e -> respond(e, 200, body) }
+            assertEquals(body, ApiResult.Failure(ConnectionProblem.Unknown), client().currentUser())
+        }
+    }
+
+    @Test
+    fun `currentUser con un cuerpo que no es json es Failure`() {
+        routes[SELF] = { e -> respond(e, 200, "<html>esto no es Mealie</html>") }
+
+        assertEquals(ApiResult.Failure(ConnectionProblem.Unknown), client().currentUser())
+    }
+
+    @Test
+    fun `currentUser mapea los errores del servidor`() {
+        val expected = mapOf(
+            401 to ApiResult.Unauthorized,
+            403 to ApiResult.Forbidden,
+            404 to ApiResult.NotFound,
+            500 to ApiResult.Failure(ConnectionProblem.ServerError),
+        )
+        for ((status, result) in expected) {
+            routes[SELF] = { e -> respond(e, status) }
+            assertEquals("self $status", result, client().currentUser())
+        }
+    }
+
+    @Test
+    fun `currentUser no expone el token al imprimirse`() {
+        routes[SELF] = { e -> respond(e, 401) }
+
+        val result = client().currentUser()
+
+        assertFalse(result.toString().contains(token.value))
+    }
+
     @Test
     fun `sin servidor es ServerNotResponding por conexion rechazada`() {
         server.stop(0)

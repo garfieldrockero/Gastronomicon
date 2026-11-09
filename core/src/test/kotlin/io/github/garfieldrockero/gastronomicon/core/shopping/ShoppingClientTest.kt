@@ -188,7 +188,7 @@ class ShoppingClientTest {
                 {"id":"$listId","name":"Compra"}
             ]}""",
         )
-        val page = success(client().listLists(page = 2))
+        val page = success(client().listLists(page = 2, perPage = ShoppingClient.DEFAULT_LISTS_PER_PAGE))
         assertEquals(2, page.page)
         assertEquals(50, page.perPage)
         assertEquals(2, page.total.toInt())
@@ -291,6 +291,113 @@ class ShoppingClientTest {
         assertThrows(IllegalArgumentException::class.java) { client.deleteItem("no-es-uuid") }
         assertThrows(IllegalArgumentException::class.java) { client.addItem("no-es-uuid", "Leche") }
         assertTrue(mealie.seen.isEmpty())
+    }
+
+    // ------------------------------------------------------------- crear lista
+
+    @Test
+    fun `crear una lista manda solo el nombre saneado y devuelve el resumen`() {
+        mealie.fixed(
+            "POST",
+            ShoppingClient.LISTS_PATH,
+            201,
+            """{"id":"$listId","name":"Compra semanal","listItems":[]}""",
+        )
+
+        val result = client().createList("  Compra\u202E semanal  ")
+
+        assertEquals(ApiResult.Success(ShoppingListSummary(listId, "Compra semanal")), result)
+        val request = mealie.seen.single()
+        assertEquals(ShoppingClient.LISTS_PATH, request.path)
+        assertEquals(setOf("name"), bodyOf(request).keys)
+        assertEquals("Compra semanal", bodyOf(request)["name"]!!.jsonPrimitive.content)
+        assertEquals("application/json", request.headers["content-type"])
+        assertEquals("Bearer ${mealie.token.value}", request.headers["authorization"])
+    }
+
+    @Test
+    fun `crear una lista con un nombre vacio o largo no llega a la red`() {
+        val client = client()
+        assertThrows(IllegalArgumentException::class.java) { client.createList("   ") }
+        assertThrows(IllegalArgumentException::class.java) {
+            client.createList("a".repeat(ShoppingText.MAX_LIST_NAME + 1))
+        }
+        assertTrue(mealie.seen.isEmpty())
+    }
+
+    @Test
+    fun `el nombre de la lista justo en el tope se acepta`() {
+        val name = "a".repeat(ShoppingText.MAX_LIST_NAME)
+        mealie.fixed("POST", ShoppingClient.LISTS_PATH, 201, """{"id":"$listId","name":"$name"}""")
+
+        assertEquals(name, success(client().createList(name)).name)
+    }
+
+    @Test
+    fun `crear una lista con una respuesta sin id o con id invalido es dudoso`() {
+        mealie.fixed("POST", ShoppingClient.LISTS_PATH, 201, """{"name":"Compra"}""")
+        assertEquals(
+            ApiResult.MaybeCreated(ConnectionProblem.Unknown),
+            client().createList("Compra"),
+        )
+
+        mealie.fixed("POST", ShoppingClient.LISTS_PATH, 201, """{"id":"no-es-uuid","name":"Compra"}""")
+        assertEquals(
+            ApiResult.MaybeCreated(ConnectionProblem.Unknown),
+            client().createList("Compra"),
+        )
+    }
+
+    @Test
+    fun `crear una lista con un rechazo definitivo no es dudoso`() {
+        val expected = mapOf(
+            401 to ApiResult.Unauthorized,
+            409 to ApiResult.Conflict,
+            422 to ApiResult.Invalid(emptyList()),
+        )
+        for ((status, result) in expected) {
+            mealie.fixed("POST", ShoppingClient.LISTS_PATH, status)
+            assertEquals("estado $status", result, client().createList("Compra"))
+        }
+    }
+
+    @Test
+    fun `un 5xx al crear la lista es dudoso`() {
+        mealie.fixed("POST", ShoppingClient.LISTS_PATH, 500)
+        assertEquals(
+            ApiResult.MaybeCreated(ConnectionProblem.ServerError),
+            client().createList("Compra"),
+        )
+    }
+
+    @Test
+    fun `crear una lista con el plazo agotado tras enviar es dudoso y no se repite`() {
+        mealie.route("POST", ShoppingClient.LISTS_PATH) { _, exchange ->
+            Thread.sleep(800)
+            runCatching { FakeMealie.reply(exchange, 201, """{"id":"$listId"}""".toByteArray()) }
+        }
+
+        val result = client(readTimeoutMs = 200).createList("Compra")
+
+        assertEquals(ApiResult.MaybeCreated(ConnectionProblem.ServerNotResponding), result)
+        assertNoSecrets(result)
+        // Ni un reintento automático: solo ha salido el POST original.
+        assertEquals(1, mealie.seen.size)
+    }
+
+    @Test
+    fun `el detalle de un 422 al crear la lista se lee saneado y acotado`() {
+        mealie.fixed(
+            "POST",
+            ShoppingClient.LISTS_PATH,
+            422,
+            """{"detail":[{"loc":["body","nombre"],"msg":"Mal\u202E nombre"}]}""",
+        )
+
+        val result = client().createList("Compra")
+
+        assertEquals(ApiResult.Invalid(listOf(ValidationDetail(null, null, "Mal nombre"))), result)
+        assertNoSecrets(result)
     }
 
     // -------------------------------------------------------------- escritura

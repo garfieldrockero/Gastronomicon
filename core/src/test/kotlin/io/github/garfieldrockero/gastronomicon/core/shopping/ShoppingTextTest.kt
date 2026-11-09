@@ -43,4 +43,20 @@ class ShoppingTextTest {
         assertTrue(ShoppingText.DEFAULT_LIST_NAME.isNotEmpty())
         assertTrue(ShoppingText.DEFAULT_NO_SECTION_TITLE.isNotEmpty())
     }
+
+    @Test
+    fun `el nombre de lista para crear se valida sin recortar en silencio`() {
+        assertEquals(ShoppingInputProblem.EmptyText, ShoppingText.listNameInput("   ").problem)
+        assertEquals(ShoppingInputProblem.EmptyText, ShoppingText.listNameInput(null).problem)
+
+        val justo = "a".repeat(ShoppingText.MAX_LIST_NAME)
+        assertNull(ShoppingText.listNameInput(justo).problem)
+        assertEquals(justo, ShoppingText.listNameInput(justo).text)
+
+        val largo = "a".repeat(ShoppingText.MAX_LIST_NAME + 1)
+        assertEquals(ShoppingInputProblem.TextTooLong, ShoppingText.listNameInput(largo).problem)
+        // Para el aviso se devuelve recortado; nunca se envía con problema.
+        assertEquals(ShoppingText.MAX_LIST_NAME, ShoppingText.listNameInput(largo).text.length)
+        assertEquals("Compra semanal", ShoppingText.listNameInput("Compra\u202E semanal").text)
+    }
 }

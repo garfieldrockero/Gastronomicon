@@ -27,6 +27,17 @@ internal class AboutDto(
     val production: Boolean? = null,
 )
 
+/**
+ * `UserOut` de `GET /api/users/self`, reducido al `id`.
+ *
+ * No se declaran correo, grupo, hogar ni la lista de tokens: lo que no se lee
+ * no se puede filtrar. `ignoreUnknownKeys` hace que el resto se ignore solo.
+ */
+@Serializable
+internal class UserSelfDto(
+    val id: String? = null,
+)
+
 @Serializable
 internal class LabelDto(
     val name: String? = null,

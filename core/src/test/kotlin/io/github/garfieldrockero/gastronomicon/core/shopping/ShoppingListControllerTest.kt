@@ -6,8 +6,10 @@ import io.github.garfieldrockero.gastronomicon.core.network.NetworkError
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -16,6 +18,13 @@ import kotlin.concurrent.thread
 private const val LIST_UUID = "11111111-1111-4111-8111-111111111111"
 private const val NEW_UUID = "55555555-5555-4555-8555-555555555555"
 private const val OTHER_UUID = "66666666-6666-4666-8666-666666666666"
+
+/**
+ * Fallo no recuperable de mentira: no es una excepción, así que ninguna capa lo
+ * atrapa. Sirve para comprobar que la fase se limpia igualmente antes de que
+ * suba.
+ */
+private class ShoppingFatalError(message: String) : Error(message)
 
 /**
  * Pruebas del estado de la compra con una fuente falsa: no tocan la red.
@@ -65,6 +74,10 @@ class ShoppingListControllerTest {
         var editError: NetworkError? = null
         var deleteError: NetworkError? = null
         var deleteCheckedError: NetworkError? = null
+        // Lo que no es un resultado ni una excepción: un `Error` de la máquina
+        // virtual o una cancelación de la corrutina que llamó.
+        var getThrowable: Throwable? = null
+        var addThrowable: Throwable? = null
         var onGet: (() -> Unit)? = null
         var onAdd: (() -> Unit)? = null
         var onSetChecked: (() -> Unit)? = null
@@ -78,6 +91,7 @@ class ShoppingListControllerTest {
 
         override fun getList(listId: String): ApiResult<ShoppingList> {
             calls += "get"
+            getThrowable?.let { throw it }
             getError?.let { throw it }
             onGet?.invoke()
             return getResult ?: ApiResult.Success(lists[listId] ?: list)
@@ -85,6 +99,7 @@ class ShoppingListControllerTest {
 
         override fun addItem(listId: String, text: String): ApiResult<Unit> {
             calls += "add:$text"
+            addThrowable?.let { throw it }
             addError?.let { throw it }
             onAdd?.invoke()
             if (addResult is ApiResult.Success) {
@@ -714,5 +729,123 @@ class ShoppingListControllerTest {
         assertFalse(state.clearingChecked)
         assertTrue(state.busyItemIds.isEmpty())
         assertTrue(state.clearingItemIds.isEmpty())
+    }
+
+    // ------------------ creación dudosa y fallos que no son un resultado
+
+    @Test
+    fun `una excepcion suelta al anadir queda en duda y relee`() {
+        val fake = source()
+        fake.addThrowable = IllegalStateException("fallo raro")
+        val controller = ShoppingListController(fake)
+        controller.open(LIST_UUID)
+        fake.calls.clear()
+
+        val state = controller.add("Leche")
+
+        // No prueba que el POST no saliera: se relee antes de dejar repetir.
+        assertEquals(listOf("add:Leche", "get"), fake.calls)
+        assertEquals(ShoppingProblem.Failed(ConnectionProblem.Unknown), state.problem)
+        assertFalse(state.adding)
+    }
+
+    @Test
+    fun `una respuesta ilegible al anadir queda en duda y relee`() {
+        val fake = source()
+        fake.addError = NetworkError.InvalidResponse
+        val controller = ShoppingListController(fake)
+        controller.open(LIST_UUID)
+        fake.calls.clear()
+
+        val state = controller.add("Leche")
+
+        // La respuesta llegó después del envío y no se entiende: dudoso.
+        assertEquals(listOf("add:Leche", "get"), fake.calls)
+        assertEquals(ShoppingProblem.Failed(ConnectionProblem.Unknown), state.problem)
+    }
+
+    @Test
+    fun `un 502 al anadir queda en duda y relee`() {
+        val fake = source()
+        fake.addError = NetworkError.HttpError(502)
+        val controller = ShoppingListController(fake)
+        controller.open(LIST_UUID)
+        fake.calls.clear()
+
+        val state = controller.add("Leche")
+
+        // Un proxy puede contestar 502 mientras Mealie sigue creando.
+        assertEquals(listOf("add:Leche", "get"), fake.calls)
+        assertEquals(ShoppingProblem.Failed(ConnectionProblem.ServerError), state.problem)
+    }
+
+    @Test
+    fun `un fallo antes del envio al anadir no relee`() {
+        val fake = source()
+        fake.addError = NetworkError.ConnectionRefused
+        val controller = ShoppingListController(fake)
+        controller.open(LIST_UUID)
+        fake.calls.clear()
+
+        val state = controller.add("Leche")
+
+        // El servidor no llegó a escuchar: no hay nada que comprobar.
+        assertEquals(listOf("add:Leche"), fake.calls)
+        assertEquals(ShoppingProblem.Failed(ConnectionProblem.ServerNotResponding), state.problem)
+    }
+
+    @Test
+    fun `un rechazo definitivo al anadir no relee`() {
+        val fake = source()
+        fake.addError = NetworkError.HttpError(422)
+        val controller = ShoppingListController(fake)
+        controller.open(LIST_UUID)
+        fake.calls.clear()
+
+        val state = controller.add("Leche")
+
+        assertEquals(listOf("add:Leche"), fake.calls)
+        assertEquals(ShoppingProblem.InvalidData(emptyList()), state.problem)
+    }
+
+    @Test
+    fun `un Error al leer devuelve la fase a Idle y se relanza`() {
+        val fake = source(listOf(item(id1)))
+        fake.getThrowable = ShoppingFatalError("se acabó la memoria")
+        val controller = ShoppingListController(fake)
+
+        assertThrows(ShoppingFatalError::class.java) { controller.open(LIST_UUID) }
+
+        // La interfaz no se queda esperando una respuesta que ya no va a llegar.
+        assertEquals(ShoppingPhase.Idle, controller.state.phase)
+        assertFalse(controller.state.isLoading)
+        assertEquals(LIST_UUID, controller.state.listId)
+    }
+
+    @Test
+    fun `una cancelacion al leer no se disfraza de fallo y deja la fase en Idle`() {
+        val fake = source(listOf(item(id1)))
+        fake.getThrowable = CancellationException("cancelado")
+        val controller = ShoppingListController(fake)
+
+        assertThrows(CancellationException::class.java) { controller.open(LIST_UUID) }
+
+        assertEquals(ShoppingPhase.Idle, controller.state.phase)
+        assertNull(controller.state.problem)
+        assertFalse(controller.state.loadedOnce)
+    }
+
+    @Test
+    fun `un Error al anadir cierra el estado y se relanza`() {
+        val fake = source()
+        fake.addThrowable = ShoppingFatalError("se acabó la memoria")
+        val controller = ShoppingListController(fake)
+        controller.open(LIST_UUID)
+
+        assertThrows(ShoppingFatalError::class.java) { controller.add("Leche") }
+
+        // `adding` no puede quedarse encendido: el botón de añadir seguiría muerto.
+        assertFalse(controller.state.adding)
+        assertEquals(ShoppingPhase.Idle, controller.state.phase)
     }
 }

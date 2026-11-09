@@ -142,7 +142,14 @@ data class MealPlanWeekView(
 ) {
     /** La semana que se está mirando contiene el día de hoy. */
     val isCurrentWeek: Boolean
-        get() = !today.isBefore(weekStart) && !today.isAfter(weekEnd)
+        get() = contains(today)
+
+    /**
+     * ¿[date] cae en esta semana? Lo usa la interfaz para saber si una comida
+     * guardada se queda a la vista o se va a otra semana; la comparación de
+     * fechas no se hace en la pantalla.
+     */
+    fun contains(date: LocalDate): Boolean = !date.isBefore(weekStart) && !date.isAfter(weekEnd)
 
     val hasMeals: Boolean get() = days.any { it.meals.isNotEmpty() }
 
@@ -163,6 +170,15 @@ data class MealPlanWeekView(
         const val MISSING_RECIPE_LABEL = "Receta no disponible"
 
         private const val MAX_MEALS_PER_DAY = 50
+
+        /**
+         * Etiqueta de un día suelto, compuesta en el núcleo:
+         * «miércoles 18 de noviembre», con el año cuando no es el de [today]
+         * («viernes 1 de enero de 2027»). La interfaz no formatea fechas ni
+         * depende del idioma del móvil.
+         */
+        fun dayLabel(date: LocalDate, today: LocalDate): String =
+            MealPlanLabels.dayWithYear(date, today)
 
         fun of(weekStart: LocalDate, meals: List<PlannedMeal>, today: LocalDate): MealPlanWeekView {
             val start = MealPlanDates.weekStart(weekStart)

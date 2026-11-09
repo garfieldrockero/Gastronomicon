@@ -6,6 +6,7 @@ import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.network.NetworkError
 import io.github.garfieldrockero.gastronomicon.core.network.toConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.recipes.ServingScaler
+import java.util.concurrent.CancellationException
 
 /**
  * Lleva una lista de la compra: carga, marcar/desmarcar, añadir, editar la
@@ -37,6 +38,18 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.ServingScaler
  * [ShoppingProblem.Failed]), y cualquier otra excepción inesperada se reduce a
  * [ShoppingProblem.Failed] con [ConnectionProblem.Unknown]: el estado nunca se
  * queda «cargando».
+ *
+ * Dos cosas no se disfrazan nunca:
+ * - Al **añadir**, un fallo que no prueba que la petición no salió (un
+ *   [NetworkError.AfterSend], un 5xx, una respuesta ilegible o una excepción
+ *   suelta) es [ApiResult.MaybeCreated]: preferir un aviso de más solo hace
+ *   mirar la lista, mientras que decir «no se añadió» de menos deja dos líneas
+ *   iguales. Solo se cuenta como fallo definitivo lo que prueba que no salió
+ *   nada (los mismos [NetworkError] que `ShoppingClient`) o un rechazo
+ *   definitivo del servidor.
+ * - Una **cancelación** o un `Error` de la carga no son fallos de red: la fase
+ *   vuelve a [ShoppingPhase.Idle] y la excepción sigue subiendo, para que quien
+ *   canceló lo sepa y la interfaz no espere una respuesta que no va a llegar.
  */
 class ShoppingListController(private val source: ShoppingListSource) {
 
@@ -172,11 +185,18 @@ class ShoppingListController(private val source: ShoppingListSource) {
             state = current.copy(adding = true, problem = null)
         }
         val openList = listId ?: return state
-        val result = callCreate { source.addItem(openList, input.text) }
-        synchronized(lock) {
-            if (state.listId == openList) state = state.copy(adding = false)
+        // `adding` se cierra siempre, también si la fuente se corta con una
+        // cancelación o un `Error`: si no, el botón de añadir quedaría muerto.
+        var result: ApiResult<Unit>? = null
+        try {
+            result = callCreate { source.addItem(openList, input.text) }
+        } finally {
+            synchronized(lock) {
+                if (state.listId == openList) state = state.copy(adding = false)
+            }
         }
-        return when (result) {
+        val added = result ?: return state
+        return when (added) {
             is ApiResult.Success -> load(openList, firstLoad = false)
             is ApiResult.MaybeCreated -> {
                 // La fase de «añadiendo» ya está cerrada antes de releer. El
@@ -187,13 +207,13 @@ class ShoppingListController(private val source: ShoppingListSource) {
                 load(openList, firstLoad = false)
                 synchronized(lock) {
                     if (state.listId == openList) {
-                        state = state.copy(problem = problemOf(result))
+                        state = state.copy(problem = problemOf(added))
                     }
                     state
                 }
             }
             else -> synchronized(lock) {
-                if (state.listId == openList) state = state.copy(problem = problemOf(result))
+                if (state.listId == openList) state = state.copy(problem = problemOf(added))
                 state
             }
         }
@@ -372,21 +392,72 @@ class ShoppingListController(private val source: ShoppingListSource) {
         }
 
     /**
-     * Como [call], pero para el `POST` de añadir: un fallo después de enviar el
-     * cuerpo ([NetworkError.AfterSend]) puede haber creado el elemento, así que
-     * se cuenta como [ApiResult.MaybeCreated] y se relee la lista antes de
-     * repetir, igual que hace [ShoppingClient].
+     * Como [call], pero para la carga: una cancelación no se convierte en un
+     * fallo de red. Se relanza tal cual ([load] devuelve la fase a
+     * [ShoppingPhase.Idle] antes) para que quien canceló lo sepa y la interfaz
+     * no enseñe un error que no ha existido.
      */
-    private inline fun callCreate(block: () -> ApiResult<Unit>): ApiResult<Unit> =
+    private inline fun <T> callLoad(block: () -> ApiResult<T>): ApiResult<T> =
         try {
             block()
-        } catch (error: NetworkError.AfterSend) {
-            ApiResult.MaybeCreated(error.original.toConnectionProblem())
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: NetworkError) {
             ApiErrors.map(error)
         } catch (error: RuntimeException) {
             ApiResult.Failure(ConnectionProblem.Unknown)
         }
+
+    /**
+     * Como [call], pero para el `POST` de añadir: solo se cuenta como fallo
+     * definitivo lo que prueba que la petición no salió o un rechazo del
+     * servidor que no deja nada creado. Todo lo demás —[NetworkError.AfterSend],
+     * un 5xx (un proxy puede contestar 502 mientras Mealie sigue creando), una
+     * respuesta ilegible o una excepción suelta— es [ApiResult.MaybeCreated]: se
+     * relee la lista antes de dejar repetir, igual que hace [ShoppingClient].
+     *
+     * Una cancelación no se traga: se relanza tal cual ([add] cierra `adding`
+     * antes) para que quien canceló lo sepa.
+     */
+    private inline fun callCreate(block: () -> ApiResult<Unit>): ApiResult<Unit> =
+        try {
+            block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: NetworkError.AfterSend) {
+            ApiResult.MaybeCreated(error.original.toConnectionProblem())
+        } catch (error: NetworkError) {
+            creationFailure(error)
+        } catch (error: RuntimeException) {
+            // Una excepción suelta no prueba que el cuerpo no llegara a salir,
+            // así que el elemento puede estar creado: dudoso, no fallido.
+            ApiResult.MaybeCreated(ConnectionProblem.Unknown)
+        }
+
+    /**
+     * «No se creó» solo si el fallo es anterior al envío o si el servidor ha
+     * contestado un rechazo definitivo; lo demás es ambiguo. Mismo criterio que
+     * `ShoppingClient.creationFailure`, para que el controlador y el cliente no
+     * discrepen con la misma respuesta.
+     */
+    private fun creationFailure(error: NetworkError): ApiResult<Nothing> = when {
+        error.happenedBeforeSend() -> ApiErrors.map(error)
+        error is NetworkError.HttpError && error.statusCode in DEFINITIVE_CREATION_REJECTIONS ->
+            ApiErrors.map(error)
+        else -> ApiResult.MaybeCreated(error.toConnectionProblem())
+    }
+
+    /** ¿El fallo prueba que la petición no llegó a salir? Mismo criterio que `ShoppingClient`. */
+    private fun NetworkError.happenedBeforeSend(): Boolean = when (this) {
+        NetworkError.NoConnection,
+        NetworkError.ConnectionRefused,
+        NetworkError.DnsFailure,
+        NetworkError.TlsError,
+        NetworkError.Timeout,
+        NetworkError.InvalidRequest,
+        NetworkError.LocalHttpNotAllowedOnThisNetwork -> true
+        else -> false
+    }
 
     private fun load(listId: String, firstLoad: Boolean): ShoppingListState {
         val ticket = synchronized(lock) {
@@ -403,7 +474,16 @@ class ShoppingListController(private val source: ShoppingListSource) {
             phaseTicket = generation
             generation
         }
-        val result = call { source.getList(listId) }
+        // Un `Error` o una cancelación no dejan resultado: la fase vuelve a Idle
+        // antes de que la excepción siga subiendo, o la interfaz se quedaría
+        // esperando para siempre una respuesta que ya no va a llegar.
+        var result: ApiResult<ShoppingList>? = null
+        try {
+            result = callLoad { source.getList(listId) }
+        } finally {
+            if (result == null) releasePhase(ticket, listId)
+        }
+        val loaded = result ?: return state
         return synchronized(lock) {
             // Se descarta si otra carga la ha superado o si ya no está abierta
             // la misma lista: aplicar entonces los elementos de una lista vieja
@@ -417,9 +497,9 @@ class ShoppingListController(private val source: ShoppingListSource) {
                 }
                 state
             } else {
-                state = when (result) {
+                state = when (loaded) {
                     is ApiResult.Success -> {
-                        val list = result.value
+                        val list = loaded.value
                         state.withItems(list.items).copy(
                             listId = list.id,
                             listName = list.name,
@@ -430,10 +510,24 @@ class ShoppingListController(private val source: ShoppingListSource) {
                     }
                     else -> state.copy(
                         phase = ShoppingPhase.Idle,
-                        problem = problemOf(result),
+                        problem = problemOf(loaded),
                     )
                 }
                 state
+            }
+        }
+    }
+
+    /**
+     * Devuelve la fase a [ShoppingPhase.Idle] si la carga [ticket] sigue
+     * mandando. Solo se llama cuando la lectura se corta con algo que no es un
+     * resultado (un `Error`, una cancelación): sin esto la fase se quedaría en
+     * «cargando» para siempre.
+     */
+    private fun releasePhase(ticket: Long, listId: String) {
+        synchronized(lock) {
+            if (ticket == generation && state.listId == listId && state.phase != ShoppingPhase.Idle) {
+                state = state.copy(phase = ShoppingPhase.Idle)
             }
         }
     }
@@ -453,5 +547,13 @@ class ShoppingListController(private val source: ShoppingListSource) {
         is ApiResult.SavedButNotReloaded -> ShoppingProblem.Failed(result.problem)
         is ApiResult.MaybeCreated -> ShoppingProblem.Failed(result.problem)
         is ApiResult.Failure -> ShoppingProblem.Failed(result.problem)
+    }
+
+    private companion object {
+        /**
+         * Códigos con los que el servidor rechaza la petición de forma
+         * definitiva: no se ha creado nada. Mismo conjunto que `ShoppingClient`.
+         */
+        val DEFINITIVE_CREATION_REJECTIONS = setOf(400, 401, 403, 404, 405, 409, 413, 415, 422)
     }
 }

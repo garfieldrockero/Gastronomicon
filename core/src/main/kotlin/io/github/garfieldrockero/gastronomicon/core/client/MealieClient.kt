@@ -45,6 +45,22 @@ sealed interface ConnectionCheck {
 }
 
 /**
+ * La cuenta con la que se habla, reducida a su `id`.
+ *
+ * Es lo único que la app necesita de `/api/users/self`: el ámbito de los datos
+ * offline ([io.github.garfieldrockero.gastronomicon.core.offline.ServerScope])
+ * se compone de la URL y de este id, para que dos cuentas del mismo servidor no
+ * compartan caché. El id **no es un secreto** (lo es el token, que aquí no
+ * entra), pero no hace falta en un log: [toString] no lo enseña.
+ *
+ * Solo se construye con un id ya validado por el núcleo: es un UUID en
+ * minúsculas.
+ */
+class CurrentUser internal constructor(val id: String) {
+    override fun toString(): String = "CurrentUser(***)"
+}
+
+/**
  * Cliente de lectura de Mealie sobre [HttpTransport].
  *
  * Tiene dos transportes del mismo servidor por una razón de seguridad:
@@ -59,10 +75,11 @@ sealed interface ConnectionCheck {
  * [NetworkError.InvalidResponse] si el cuerpo no es el JSON esperado. Esos
  * mensajes son fijos y no llevan token, URL ni cuerpo de la respuesta.
  *
- * Las operaciones de escritura, importar, subir imagen y listar organizadores
- * (más abajo) no lanzan por red: devuelven [ApiResult]. El cuerpo de un 422 se
- * lee solo ahí, con límite de bytes, y se entrega saneado y acotado
- * ([ValidationDetail]). Ninguna de las dos formas lleva token, URL ni cuerpo crudo.
+ * Las operaciones de escritura, importar, subir imagen, listar organizadores
+ * (más abajo) y [currentUser] no lanzan por red: devuelven [ApiResult]. El
+ * cuerpo de un 422 se lee solo ahí, con límite de bytes, y se entrega saneado y
+ * acotado ([ValidationDetail]). Ninguna de las dos formas lleva token, URL ni
+ * cuerpo crudo.
  */
 class MealieClient(
     private val transport: HttpTransport,
@@ -124,6 +141,34 @@ class MealieClient(
             return ConnectionCheck.Failure(error.toConnectionProblem())
         }
         return ConnectionCheck.Success(version)
+    }
+
+    /**
+     * La cuenta con la que se habla, solo por su `id`.
+     *
+     * `GET /api/users/self` devuelve un `UserOut` con correo, grupo, hogar y la
+     * lista de tokens; aquí solo se lee `id` y se descarta el resto sin mirarlo.
+     * El id se valida como UUID y se pasa a minúsculas ([RecipeImage.normalizeId]);
+     * si no tiene esa forma se falla cerrado ([ApiResult.Failure]) y no hay
+     * ámbito offline, en vez de usar un identificador inventado.
+     *
+     * No lanza por red: todo desenlace es un [ApiResult]. Ni el resultado ni sus
+     * mensajes llevan el token ni el cuerpo de la respuesta.
+     */
+    fun currentUser(): ApiResult<CurrentUser> {
+        val response = try {
+            selfTransport.execute(HttpRequest(HttpMethod.GET, SELF_PATH))
+        } catch (error: NetworkError) {
+            return ApiErrors.map(error)
+        }
+        val dto = try {
+            decode(UserSelfDto.serializer(), response)
+        } catch (error: NetworkError) {
+            return ApiErrors.map(error)
+        }
+        val id = RecipeImage.normalizeId(dto.id)
+            ?: return ApiResult.Failure(ConnectionProblem.Unknown)
+        return ApiResult.Success(CurrentUser(id))
     }
 
     /**

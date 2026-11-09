@@ -28,6 +28,19 @@ internal class ShoppingListPageDto(
     val items: List<ShoppingListSummaryDto?>? = null,
 )
 
+/**
+ * Cuerpo de `POST /api/households/shopping/lists` (`ShoppingListCreate`).
+ *
+ * Solo viaja el nombre: `extras` y las marcas de tiempo son opcionales y las
+ * rellena el servidor. `CoreJson` omite los campos nulos, pero aquí no hay
+ * ninguno que enviar. La respuesta (201, `ShoppingListOut`) se lee con
+ * [ShoppingListSummaryDto], que ignora el resto de campos.
+ */
+@Serializable
+internal class ShoppingListCreateDto(
+    val name: String,
+)
+
 /** `ShoppingListOut` de `GET /api/households/shopping/lists/{item_id}`. */
 @Serializable
 internal class ShoppingListDto(

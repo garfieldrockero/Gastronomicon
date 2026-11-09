@@ -41,6 +41,15 @@ internal object MealPlanLabels {
     fun day(date: LocalDate): String =
         "${WEEKDAYS[date.dayOfWeek.value - 1]} ${date.dayOfMonth} de ${MONTHS[date.monthValue - 1]}"
 
+    /**
+     * Igual que [day], pero con el año cuando no es el de [today]:
+     * «miércoles 18 de noviembre» o «viernes 1 de enero de 2027». Sin el año,
+     * un día de otra semana del mismo mes (o de otro año) se lee como si fuera
+     * de este año; y en la app hay hojas que enseñan días de cualquier semana.
+     */
+    fun dayWithYear(date: LocalDate, today: LocalDate): String =
+        if (date.year == today.year) day(date) else "${day(date)} de ${date.year}"
+
     /** «Semana del 9 al 15 de noviembre de 2026», también al cambiar de mes o de año. */
     fun week(start: LocalDate, end: LocalDate): String = when {
         start.year == end.year && start.monthValue == end.monthValue ->

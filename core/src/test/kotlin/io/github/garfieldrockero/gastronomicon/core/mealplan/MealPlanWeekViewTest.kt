@@ -242,6 +242,30 @@ class MealPlanWeekViewTest {
     }
 
     @Test
+    fun `la etiqueta de un dia suelto lleva el año cuando no es el actual`() {
+        assertEquals("miércoles 11 de noviembre", MealPlanWeekView.dayLabel(today, today))
+        assertEquals(
+            "viernes 1 de enero de 2027",
+            MealPlanWeekView.dayLabel(LocalDate.of(2027, 1, 1), today),
+        )
+        // Dentro del mismo año, el año sobra: la etiqueta no se alarga.
+        assertEquals(
+            "jueves 17 de diciembre",
+            MealPlanWeekView.dayLabel(LocalDate.of(2026, 12, 17), today),
+        )
+    }
+
+    @Test
+    fun `contains dice si un dia cae en la semana`() {
+        val view = MealPlanWeekView.of(monday, emptyList(), today)
+
+        assertTrue(view.contains(monday))
+        assertTrue(view.contains(view.weekEnd))
+        assertFalse(view.contains(monday.minusDays(1)))
+        assertFalse(view.contains(view.weekEnd.plusDays(1)))
+    }
+
+    @Test
     fun `una semana que cruza el año y el 29 de febrero`() {
         val newYear = MealPlanWeekView.of(LocalDate.of(2026, 1, 1), emptyList(), LocalDate.of(2026, 1, 1))
 

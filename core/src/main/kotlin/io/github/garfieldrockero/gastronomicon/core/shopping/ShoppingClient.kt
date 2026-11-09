@@ -32,6 +32,8 @@ import java.util.Locale
  *
  * Operaciones y endpoints (docs/openapi.json):
  * - `GET /api/households/shopping/lists` ([listLists]).
+ * - `POST /api/households/shopping/lists` ([createList]) con
+ *   `ShoppingListCreate`; devuelve 201 y el `ShoppingListOut` de la lista.
  * - `GET /api/households/shopping/lists/{item_id}` ([getList]). Devuelve la
  *   lista entera con sus `listItems`; este endpoint no pagina, así que no se
  *   inventa una paginación de elementos.
@@ -55,9 +57,9 @@ import java.util.Locale
 class ShoppingClient(private val transport: HttpTransport) : ShoppingListSource {
 
     /** Una página de listas. `next`/`previous` se ignoran y la paginación se calcula aquí. */
-    fun listLists(
-        page: Int = 1,
-        perPage: Int = DEFAULT_LISTS_PER_PAGE,
+    override fun listLists(
+        page: Int,
+        perPage: Int,
     ): ApiResult<Page<ShoppingListSummary>> {
         val safePage = page.coerceAtLeast(1)
         val safePerPage = perPage.coerceIn(1, MAX_LISTS_PER_PAGE)
@@ -87,6 +89,45 @@ class ShoppingClient(private val transport: HttpTransport) : ShoppingListSource 
                     total = dto.total ?: items.size.toLong(),
                 ),
             )
+        }
+    }
+
+    /** Página 1 con el tamaño por defecto: atajo para no romper las llamadas de siempre. */
+    fun listLists(): ApiResult<Page<ShoppingListSummary>> =
+        listLists(page = 1, perPage = DEFAULT_LISTS_PER_PAGE)
+
+    /**
+     * `POST /api/households/shopping/lists` (`ShoppingListCreate`): crea una
+     * lista vacía con ese nombre y devuelve su resumen ya saneado.
+     *
+     * El nombre pasa por [ShoppingText.listNameInput]: vacío o por encima de
+     * [ShoppingText.MAX_LIST_NAME] no sale de la app. Es la última barrera,
+     * como en [addItem]; el selector de listas valida antes y lo cuenta como
+     * `ShoppingListPickerProblem.InputRejected`.
+     *
+     * No se reintenta nunca. Un fallo posterior al envío del cuerpo es
+     * [ApiResult.MaybeCreated]: la lista puede existir y repetir el `POST`
+     * dejaría dos. Igual que al crear una receta, un 2xx con un id que no se
+     * puede leer también es dudoso.
+     *
+     * @throws IllegalArgumentException si el nombre queda vacío o pasa del tope.
+     */
+    override fun createList(name: String): ApiResult<ShoppingListSummary> {
+        val input = ShoppingText.listNameInput(name)
+        if (input.problem != null) {
+            throw IllegalArgumentException("El nombre de la lista de la compra no es válido.")
+        }
+        return guardedCreate {
+            val body = encode(
+                ShoppingListCreateDto.serializer(),
+                ShoppingListCreateDto(name = input.text),
+            )
+            val root = parseObject(
+                transport.execute(HttpRequest.json(HttpMethod.POST, LISTS_PATH, body, readErrorBody = true)),
+            )
+            val dto = decodeObject(ShoppingListSummaryDto.serializer(), root)
+            val summary = ShoppingMapper.summary(dto) ?: throw NetworkError.InvalidResponse
+            ApiResult.Success(summary)
         }
     }
 

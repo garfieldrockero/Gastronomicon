@@ -32,7 +32,7 @@ object ShoppingText {
     /** Tope de la nota de un elemento. */
     const val MAX_ITEM_TEXT = 200
 
-    /** Tope del nombre de una lista; solo se usa al leer. */
+    /** Tope del nombre de una lista: se aplica igual al leer y al crear. */
     const val MAX_LIST_NAME = 200
 
     /** Lo que se pinta cuando el servidor no manda nombre de lista. */
@@ -54,6 +54,18 @@ object ShoppingText {
 
     /** Nombre de lista saneado y recortado; puede quedar vacío. */
     fun listName(raw: String?): String = PlainTextSanitizer.sanitize(raw, MAX_LIST_NAME)
+
+    /**
+     * Nombre de lista para crear una: saneado y con el motivo del rechazo si
+     * queda vacío o pasa del tope. [ShoppingInput.text] lleva el nombre ya
+     * recortado solo para poder enseñarlo en un aviso; no se envía cuando
+     * [ShoppingInput.problem] no es null.
+     *
+     * Va aparte de [listName] porque leer un nombre puede quedar vacío (Mealie
+     * lo permite) y recortarlo en silencio, pero crear una lista sin nombre no
+     * vale y pasar del tope no debe perder lo que la persona escribió.
+     */
+    fun listNameInput(raw: String?): ShoppingInput = checked(raw, MAX_LIST_NAME)
 
     private fun checked(raw: String?, max: Int): ShoppingInput {
         // Se sanea a max+1 para distinguir «justo cabe» de «se pasa», igual que
