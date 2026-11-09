@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /** De dónde viene la foto elegida. Decide si el fichero es temporal y hay que borrarlo. */
@@ -73,8 +74,8 @@ sealed interface PhotoPickResult {
  *
  * El temporal de la cámara se borra en cuanto se cancela la cámara, y quien recodifique
  * la foto debe borrarlo al acabar (`ImageRecoder.recode(uri, discardSource = true)`) o
- * llamar a [discard]. Los restos de una sesión anterior se borran al arrancar con
- * [purgeStaleCameraFilesAsync].
+ * llamar a [discard]. Lo que quede de un arranque anterior se borra entero al empezar el
+ * proceso con [purgeCameraFilesAsync].
  *
  * Un fallo al abrir el selector no rompe la pantalla: se entrega un resultado tipado.
  */
@@ -98,6 +99,12 @@ class PhotoPicker internal constructor(
 
     /** Abre la cámara del sistema. La foto queda en un temporal que hay que recodificar. */
     fun takePhoto() {
+        // Con una cámara en curso (el Uri está pendiente) un segundo toque no borra el
+        // temporal del primero ni abre otra cámara: no hay nada que hacer hasta que vuelva.
+        // Un Uri huérfano (el proceso murió con la cámara abierta; su fichero ya se borró
+        // al arrancar) no bloquea: se descarta y se sigue.
+        if (pending.uri != null && CameraFiles.exists(context, pending.uri)) return
+
         // Un temporal que se quedó de un intento anterior no se reutiliza.
         CameraFiles.discard(context, pending.uri)
         pending.uri = null
@@ -187,14 +194,30 @@ fun rememberPhotoPicker(onResult: (PhotoPickResult) -> Unit): PhotoPicker {
 }
 
 /**
- * Borra los temporales de la cámara que dejó otra sesión (la app se cerró entre la foto
- * y el guardado, o Android mató el proceso). Se llama al arrancar, fuera del hilo
- * principal: son uno o dos ficheros, pero es disco.
+ * Bandera del proceso: la limpieza de la caché de fotos se hace una sola vez. La actividad
+ * se recrea (un giro, volver de segundo plano) y no puede repetirla: borraría la foto que
+ * la cámara está escribiendo ahora mismo.
  */
-fun purgeStaleCameraFilesAsync(context: Context) {
+private val camaraPurgada = AtomicBoolean(false)
+
+/**
+ * Momento en el que arranca el proceso (al cargarse este fichero, antes de que la pantalla
+ * deje abrir la cámara). Todo lo anterior es un resto de una sesión pasada; lo posterior
+ * sería una foto en curso y no se toca.
+ */
+private val procesoIniciadoEn = System.currentTimeMillis()
+
+/**
+ * Vacía `cacheDir/camara/` al empezar el proceso. El formulario no guarda su estado, así que
+ * en un arranque en frío no puede haber ninguna foto en curso: todo lo que ya estuviera ahí
+ * es un resto (con sus EXIF y su GPS) que sobra. Solo corre la primera vez por proceso,
+ * fuera del hilo principal; las fotos de la galería no se tocan.
+ */
+fun purgeCameraFilesAsync(context: Context) {
+    if (!camaraPurgada.compareAndSet(false, true)) return
     val appContext = context.applicationContext
     thread(isDaemon = true, name = "fotos-temporales") {
-        CameraFiles.purgeStale(appContext)
+        CameraFiles.purgeAll(appContext, procesoIniciadoEn)
     }
 }
 
@@ -214,7 +237,7 @@ internal class PendingCamera(private val saved: MutableState<String?>) {
 
 /**
  * Todo lo que toca el disco de la foto de la cámara, en un solo sitio: crear el
- * temporal, borrarlo (solo si es nuestro) y limpiar los restos antiguos.
+ * temporal, borrarlo (solo si es nuestro) y vaciar la carpeta al arrancar.
  */
 internal object CameraFiles {
 
@@ -224,9 +247,6 @@ internal object CameraFiles {
     private const val DIRECTORY_NAME = "camara"
     private const val NAME_PREFIX = "foto-"
     private const val NAME_SUFFIX = ".jpg"
-
-    /** Un resto de hace más de un día ya no es una foto que se esté subiendo. */
-    private const val STALE_AFTER_MS = 24L * 60 * 60 * 1000
 
     /**
      * Autoridad del FileProvider. Se deriva del paquete en tiempo de ejecución, igual que
@@ -260,19 +280,28 @@ internal object CameraFiles {
         }
     }
 
-    /** Borra los temporales antiguos. Los de ahora mismo no se tocan. */
-    fun purgeStale(context: Context) {
-        val dir = directory(context) ?: return
+    /** True si [uri] es un temporal nuestro que sigue en el disco. */
+    fun exists(context: Context, uri: Uri?): Boolean {
+        val file = fileOf(context, uri) ?: return false
+        return file.isFile
+    }
+
+    /**
+     * Borra lo que ya estuviera en `camara/` antes de [before] (el arranque del proceso).
+     * No hay ninguna foto en curso que conservar y cualquier resto lleva EXIF (y GPS) de
+     * más. Un fichero con marca posterior es de este arranque y no se toca.
+     */
+    fun purgeAll(context: Context, before: Long) {
+        val dir = existingDirectory(context) ?: return
         val files = try {
             dir.listFiles()
         } catch (ignored: SecurityException) {
             null
         } ?: return
-        val limit = System.currentTimeMillis() - STALE_AFTER_MS
         for (file in files) {
             if (!file.isFile) continue
             try {
-                if (file.lastModified() < limit) file.delete()
+                if (file.lastModified() < before) file.delete()
             } catch (ignored: SecurityException) {
                 return
             }
@@ -291,12 +320,18 @@ internal object CameraFiles {
         }
     }
 
+    /** La carpeta si ya existe; no la crea. Para purgar y para comprobar un Uri. */
+    private fun existingDirectory(context: Context): File? {
+        val dir = File(context.cacheDir, DIRECTORY_NAME)
+        return if (dir.isDirectory) dir else null
+    }
+
     /** El fichero si [uri] es un temporal nuestro; null en cualquier otro caso. */
     private fun fileOf(context: Context, uri: Uri?): File? {
         if (uri == null) return null
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) return null
         if (uri.authority != authority(context)) return null
-        val dir = directory(context) ?: return null
+        val dir = existingDirectory(context) ?: return null
         // El FileProvider pone el nombre del fichero como último segmento.
         val name = uri.lastPathSegment ?: return null
         if (name.isEmpty()) return null

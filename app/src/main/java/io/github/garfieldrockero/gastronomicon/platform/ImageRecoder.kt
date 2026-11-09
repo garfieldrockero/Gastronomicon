@@ -2,6 +2,7 @@ package io.github.garfieldrockero.gastronomicon.platform
 
 import android.content.ContentResolver
 import android.content.Context
+import android.content.res.AssetFileDescriptor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -58,9 +59,11 @@ sealed interface ImageRecodeResult {
  * - **EXIF fuera**: `Bitmap.compress` escribe un JPEG nuevo, así que la foto que sale
  *   de aquí no lleva ni coordenadas, ni fecha, ni modelo del móvil. Del original se
  *   lee **solo** la orientación, para girar el bitmap; no se copia ningún otro tag.
- * - **Entrada acotada**: se leen como mucho [MAX_INPUT_BYTES] y se decodifican
- *   primero las medidas (`inJustDecodeBounds`) para rechazar una foto desmesurada
- *   antes de reservar memoria para el bitmap.
+ * - **Entrada acotada y solo `content://`**: se leen como mucho [MAX_INPUT_BYTES] y se
+ *   decodifican primero las medidas (`inJustDecodeBounds`) para rechazar una foto
+ *   desmesurada antes de reservar memoria para el bitmap. Un esquema que no sea
+ *   `content://` (`file://`, `android.resource://`…) se rechaza sin abrirlo: el Uri lo
+ *   elige un proveedor de terceros cuando el móvil no tiene el selector de fotos.
  * - **Fuera del hilo principal y cancelable**: corre en `Dispatchers.IO` y comprueba
  *   entre pasos que la corrutina siga viva; si se cancela, no devuelve bytes.
  * - **Sin logs**: ni el Uri, ni el nombre del fichero, ni el mensaje de la excepción
@@ -79,6 +82,10 @@ class ImageRecoder(context: Context) {
     /**
      * Recodifica la imagen de [uri]. Con [discardSource], borra el fichero temporal de
      * la cámara al acabar, haya salido bien o mal.
+     *
+     * [discardSource] dice además de dónde viene la foto: solo la de la cámara puede ser
+     * un Uri del FileProvider propio (`content://<paquete>.camara/…`). Una foto de
+     * galería con esa autoridad se rechaza sin leerla.
      */
     suspend fun recode(uri: Uri, discardSource: Boolean = false): ImageRecodeResult =
         // El `finally` va fuera de `withContext`: si la corrutina ya está cancelada al
@@ -86,7 +93,7 @@ class ImageRecoder(context: Context) {
         try {
             withContext(Dispatchers.IO) {
                 try {
-                    val result = recodeBlocking(uri)
+                    val result = recodeBlocking(uri, fromCamera = discardSource)
                     // Cancelada a mitad: el resultado se tira, no se sube nada.
                     currentCoroutineContext().ensureActive()
                     result
@@ -109,8 +116,8 @@ class ImageRecoder(context: Context) {
 
     // ------------------------------------------------------------- privados
 
-    private suspend fun recodeBlocking(uri: Uri): ImageRecodeResult {
-        val source = when (val read = readInput(uri)) {
+    private suspend fun recodeBlocking(uri: Uri, fromCamera: Boolean): ImageRecodeResult {
+        val source = when (val read = readInput(uri, fromCamera)) {
             is InputRead.Read -> read.bytes
             InputRead.TooBig -> return ImageRecodeResult.TooLarge
             InputRead.Unreadable -> return ImageRecodeResult.Failed
@@ -159,26 +166,68 @@ class ImageRecoder(context: Context) {
         }
     }
 
-    /** Lee el fichero con tope de bytes, sin fiarse del tamaño que declare el proveedor. */
-    private fun readInput(uri: Uri): InputRead {
-        val stream: InputStream = try {
-            resolver.openInputStream(uri) ?: return InputRead.Unreadable
+    /**
+     * Lee el fichero con tope de bytes, sin fiarse del tamaño que declare el proveedor:
+     * el tamaño solo sirve para reservar memoria y para rechazar antes de leer.
+     *
+     * Solo se abre `content://`. El descriptor se abre una vez y se cierra siempre; el
+     * tamaño declarado, si lo hay, se acota a [MAX_INPUT_BYTES].
+     */
+    private suspend fun readInput(uri: Uri, fromCamera: Boolean): InputRead {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return InputRead.Unreadable
+        // Una foto de galería no puede ser un temporal nuestro: si un proveedor hostil
+        // devuelve un Uri de nuestro FileProvider, se rechaza (solo expone `camara/`).
+        if (!fromCamera && uri.authority == CameraFiles.authority(appContext)) {
+            return InputRead.Unreadable
+        }
+        val descriptor: AssetFileDescriptor = try {
+            resolver.openAssetFileDescriptor(uri, "r") ?: return InputRead.Unreadable
         } catch (ignored: Exception) {
             return InputRead.Unreadable
         }
         return try {
-            stream.use { readLimited(it) }
+            val declared = declaredSize(descriptor)
+            if (declared > MAX_INPUT_BYTES) {
+                InputRead.TooBig
+            } else {
+                descriptor.createInputStream().use { readLimited(it, declared) }
+            }
         } catch (ignored: IOException) {
             InputRead.Unreadable
         } catch (ignored: SecurityException) {
             InputRead.Unreadable
+        } finally {
+            // El stream ya cierra el descriptor; repetirlo es inofensivo y cubre el fallo
+            // al crearlo.
+            try {
+                descriptor.close()
+            } catch (ignored: IOException) {
+                // Nada que hacer: el descriptor ya no se usa.
+            }
         }
     }
 
-    private fun readLimited(input: InputStream): InputRead {
-        val collected = ByteArrayOutputStream()
+    /** Tamaño que declara el descriptor, o 0 si no lo da. Nunca negativo. */
+    private fun declaredSize(descriptor: AssetFileDescriptor): Long =
+        try {
+            // `UNKNOWN_LENGTH` (-1) y los 0 sin sentido se tratan como «no lo sé».
+            val length = descriptor.length
+            if (length > 0L) length else 0L
+        } catch (ignored: Exception) {
+            0L
+        }
+
+    /**
+     * Lee con tope y reserva de una vez lo que el proveedor haya declarado, para no
+     * duplicar el búfer al crecer. Comprueba la cancelación cada [CANCEL_CHECK_EVERY]
+     * lecturas: un proveedor lento o que no termina no deja el hilo de IO colgado.
+     */
+    private suspend fun readLimited(input: InputStream, capacity: Long): InputRead {
+        // `capacity` ya está acotada a [MAX_INPUT_BYTES], así que cabe en un Int.
+        val collected = ByteArrayOutputStream(capacity.toInt())
         val buffer = ByteArray(BUFFER_BYTES)
         var total = 0L
+        var reads = 0
         while (true) {
             val count = input.read(buffer)
             if (count < 0) break
@@ -186,6 +235,7 @@ class ImageRecoder(context: Context) {
             total += count
             if (total > MAX_INPUT_BYTES) return InputRead.TooBig
             collected.write(buffer, 0, count)
+            if (++reads % CANCEL_CHECK_EVERY == 0) currentCoroutineContext().ensureActive()
         }
         val bytes = collected.toByteArray()
         return if (bytes.isEmpty()) InputRead.Unreadable else InputRead.Read(bytes)
@@ -258,12 +308,16 @@ class ImageRecoder(context: Context) {
 
         /**
          * Tope del fichero de entrada. Una foto de móvil de 50 megapíxeles ronda los
-         * 25 MiB en JPEG; por encima de esto no es una foto de cámara normal y se
-         * rechaza antes de leerlo entero en memoria.
+         * 20-25 MiB en JPEG; 24 MiB deja margen para una foto normal y evita reservar de
+         * golpe más memoria de la que un móvil justo aguanta (se leen en RAM y luego se
+         * decodifican). Una foto que pase de aquí no es una foto de cámara normal.
          */
-        const val MAX_INPUT_BYTES = 32L * 1024 * 1024
+        const val MAX_INPUT_BYTES = 24L * 1024 * 1024
 
         private const val BUFFER_BYTES = 8 * 1024
+
+        /** Cada cuántas lecturas (de [BUFFER_BYTES]) se comprueba la cancelación: ~128 KiB. */
+        private const val CANCEL_CHECK_EVERY = 16
     }
 }
 

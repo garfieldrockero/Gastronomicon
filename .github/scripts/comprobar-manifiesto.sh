@@ -234,6 +234,48 @@ if [ "$launcher" != "si" ]; then
   exit 1
 fi
 
+# --- FileProvider de la cámara ----------------------------------------------
+# El único provider de la app es el FileProvider con el que la cámara del sistema deja la
+# foto en nuestra caché. Lista blanca exacta (clase, autoridad, no exportado y permiso
+# temporal por Uri): un provider añadido por una librería o a mano rompe el CI aunque no
+# pida permisos. La autoridad se deriva de `${applicationId}` en el manifiesto, así que se
+# compara con el nombre de paquete fijo de la app.
+proveedores=$(awk -F'\t' '
+  $1 == "provider" {
+    nombre = "(sin nombre)"
+    autoridades = ""
+    exportado = ""
+    concesion = ""
+    for (i = 2; i <= NF; i++) {
+      if (index($i, "name=") == 1) nombre = substr($i, 6)
+      if (index($i, "authorities=") == 1) autoridades = substr($i, 13)
+      if (index($i, "exported=") == 1) exportado = substr($i, 10)
+      if (index($i, "grantUriPermissions=") == 1) concesion = substr($i, 21)
+    }
+    print nombre "\t" autoridades "\t" exportado "\t" concesion
+  }
+' <<< "$registros")
+# `profileinstaller` (ya aprobado por su ProfileInstallReceiver) arrastra el provider de
+# `androidx.startup`, que no se exporta y no concede Uri. Se admite solo esa línea exacta
+# (clase, autoridad y exported=false); cualquier variante rompe el CI.
+inicio_esperado=$'androidx.startup.InitializationProvider\tio.github.garfieldrockero.gastronomicon.androidx-startup\tfalse\t'
+proveedores=$(grep -Fxv -- "$inicio_esperado" <<< "$proveedores" || true)
+proveedor_esperado=$'androidx.core.content.FileProvider\tio.github.garfieldrockero.gastronomicon.camara\tfalse\ttrue'
+if [ "$proveedores" != "$proveedor_esperado" ]; then
+  echo "::error::El provider del manifiesto de la APK no es el FileProvider aprobado (androidx.core.content.FileProvider, autoridad <applicationId>.camara, exported=false, grantUriPermissions=true)."
+  {
+    echo "Esperado:"
+    printf '%s\n' "$proveedor_esperado"
+    echo "Encontrado:"
+    if [ -z "$proveedores" ]; then
+      echo "  (ninguno)"
+    else
+      printf '%s\n' "$proveedores"
+    fi
+  } | volcar_seguro
+  exit 1
+fi
+
 # Los permisos del manifiesto deben coincidir con los de «dump permissions»: dos
 # lecturas independientes de la misma APK, para que una no tape un fallo de la otra.
 permisos_xml=$(awk -F'\t' '
@@ -363,14 +405,13 @@ arbol_esperado() {
   printf '\n'
 }
 
-# Ruta interna (res/xml/…) del recurso $2 («tipo/nombre») al que apunta el
-# atributo $1 del elemento application. Falla cerrado si la referencia no se
+# Ruta interna (res/xml/…) del recurso $2 («tipo/nombre») al que apunta la
+# referencia $1 («@0x7f…» o «@xml/nombre»). Falla cerrado si la referencia no se
 # entiende, si el recurso no aparece, si hay variantes o si el formato de aapt2 no
 # es el esperado. Lo único que imprime por la salida estándar es la ruta.
 ruta_recurso_apk() {
-  local atributo=$1 esperado=$2 referencia buscado id entradas filtro cuantas
+  local referencia=$1 esperado=$2 buscado id entradas filtro cuantas
   local entrada id_entrada tipo_entrada nombre variantes configuraciones marcador ruta
-  referencia=$(valor_de application "$atributo")
   case "$referencia" in
     @0x[0-9a-fA-F]*)
       id=$(printf '%s' "${referencia#@}" | tr 'A-F' 'a-f')
@@ -382,7 +423,7 @@ ruta_recurso_apk() {
       buscado=${referencia#@}
       ;;
     *)
-      echo "::error::«$atributo» del manifiesto no es una referencia a un recurso («$referencia»); no se puede resolver en la APK." >&2
+      echo "::error::«$referencia» no es una referencia a un recurso; no se puede resolver en la APK." >&2
       return 1
       ;;
   esac
@@ -406,7 +447,7 @@ ruta_recurso_apk() {
     filtro=$(awk -F'\t' -v n="$buscado" '$2 == n' <<< "$entradas")
     cuantas=$(grep -c . <<< "$filtro" || true)
     if [ "$cuantas" -ne 1 ]; then
-      echo "::error::«$atributo» sale como «$referencia» y «aapt2 dump resources» no tiene exactamente una entrada «$buscado» ($cuantas)." >&2
+      echo "::error::La referencia «$referencia» no tiene exactamente una entrada «$buscado» en «aapt2 dump resources» ($cuantas)." >&2
       volcar_seguro <<< "$entradas" >&2
       return 1
     fi
@@ -464,19 +505,20 @@ ruta_recurso_apk() {
   printf '%s\n' "$ruta"
 }
 
-# Compara el árbol compilado del recurso $2, al que apunta el atributo $1, con la
-# lista blanca $3.
+# Compara el árbol compilado del recurso con nombre $2, al que apunta la referencia
+# $1, con la lista blanca $3. $4 es cómo se llama en los mensajes (el atributo o el
+# elemento del que sale la referencia).
 comprobar_recurso_compilado() {
-  local atributo=$1 recurso=$2 esperado=$3 ruta salida_arbol arbol
-  ruta=$(ruta_recurso_apk "$atributo" "$recurso") || return 1
-  echo "Recurso empaquetado para $atributo: $ruta"
+  local referencia=$1 recurso=$2 esperado=$3 etiqueta=$4 ruta salida_arbol arbol
+  ruta=$(ruta_recurso_apk "$referencia" "$recurso") || return 1
+  echo "Recurso empaquetado para $etiqueta: $ruta"
   if ! salida_arbol=$("$aapt2" dump xmltree --file "$ruta" "$apk"); then
     echo "::error::aapt2 no pudo leer $ruta de $apk." >&2
     return 1
   fi
   arbol=$(normalizar_xmltree <<< "$salida_arbol")
   if [ "$arbol" != "$esperado" ]; then
-    echo "::error::El recurso $recurso empaquetado no coincide con la lista blanca esperada ($atributo)." >&2
+    echo "::error::El recurso $recurso empaquetado no coincide con la lista blanca esperada ($etiqueta)." >&2
     {
       echo "Esperado:"
       printf '%s\n' "$esperado"
@@ -499,7 +541,8 @@ arbol_red=$(
   arbol_esperado network-security-config/base-config/trust-anchors
   arbol_esperado network-security-config/base-config/trust-anchors/certificates src=system
 )
-comprobar_recurso_compilado networkSecurityConfig xml/seguridad_red "$arbol_red" || exit 1
+comprobar_recurso_compilado \
+  "$(valor_de application networkSecurityConfig)" xml/seguridad_red "$arbol_red" networkSecurityConfig || exit 1
 
 # Lista blanca de las reglas de extracción: solo «exclude» con path «.» y todos
 # los dominios, tanto en cloud-backup como en device-transfer. Un «include», un
@@ -513,7 +556,36 @@ arbol_extraccion=$(
     done
   done
 )
-comprobar_recurso_compilado dataExtractionRules xml/extraccion_datos "$arbol_extraccion" || exit 1
+comprobar_recurso_compilado \
+  "$(valor_de application dataExtractionRules)" xml/extraccion_datos "$arbol_extraccion" dataExtractionRules || exit 1
+
+# El FileProvider comparte solo `cacheDir/camara/`. Se exige que su meta-data apunte a un
+# único recurso `xml/rutas_camara` y que el árbol compilado sea exactamente un
+# `cache-path` llamado `camara` con la ruta `camara/`. Un `files-path`, un `root-path` o
+# un `external-path` añadido mañana (por una librería o por error) rompen el CI.
+rutas_ref=$(awk -F'\t' '
+  $1 == "meta-data" {
+    nombre = ""
+    recurso = ""
+    for (i = 2; i <= NF; i++) {
+      if (index($i, "name=") == 1) nombre = substr($i, 6)
+      if (index($i, "resource=") == 1) recurso = substr($i, 10)
+    }
+    if (nombre == "android.support.FILE_PROVIDER_PATHS" && recurso != "") print recurso
+  }
+' <<< "$registros")
+cuantas=$(grep -c . <<< "$rutas_ref" || true)
+if [ "$cuantas" -ne 1 ]; then
+  echo "::error::Se espera un único meta-data android.support.FILE_PROVIDER_PATHS con su recurso en la APK, y hay $cuantas."
+  volcar_seguro <<< "$rutas_ref"
+  exit 1
+fi
+arbol_rutas=$(
+  arbol_esperado paths
+  arbol_esperado paths/cache-path "name=camara" "path=camara/"
+)
+comprobar_recurso_compilado \
+  "$rutas_ref" xml/rutas_camara "$arbol_rutas" "el FileProvider (rutas_camara)" || exit 1
 
 # --- Recursos del repositorio -----------------------------------------------
 # Lista blanca exacta, no lista negra: si alguien cambia la configuración de
@@ -556,4 +628,18 @@ if ! cmp -s "$extraccion" "$extraccion_esperada"; then
   exit 1
 fi
 
-echo "APK correcta: permisos aprobados; manifiesto sin tráfico en claro global (el HTTP local lo regula la configuración de red aprobada y core/ServerUrl), sin depuración, sin copias y sin componentes exportados de más; configuración de red y reglas de extracción idénticas a las aprobadas, tanto en los ficheros del repositorio como en el recurso compilado de la APK (lista blanca, sin variantes de configuración)."
+# Y las rutas del FileProvider de la cámara: el árbol compilado ya se ha comparado con la
+# lista blanca; aquí se exige además que la fuente del repositorio sea idéntica a la copia
+# aprobada, para que ampliar lo que se comparte exija tocar las dos a propósito.
+rutas=app/src/main/res/xml/rutas_camara.xml
+rutas_esperadas=.github/scripts/rutas_camara.esperado.xml
+if [ ! -f "$rutas" ] || [ ! -f "$rutas_esperadas" ]; then
+  echo "::error::Falta $rutas o $rutas_esperadas."
+  exit 1
+fi
+if ! cmp -s "$rutas" "$rutas_esperadas"; then
+  echo "::error::rutas_camara.xml no coincide con las rutas aprobadas del FileProvider."
+  exit 1
+fi
+
+echo "APK correcta: permisos aprobados; manifiesto sin tráfico en claro global (el HTTP local lo regula la configuración de red aprobada y core/ServerUrl), sin depuración, sin copias y sin componentes exportados de más; un único provider (FileProvider de la cámara, no exportado y con permiso temporal por Uri); configuración de red, reglas de extracción y rutas del FileProvider idénticas a las aprobadas, tanto en los ficheros del repositorio como en el recurso compilado de la APK (lista blanca, sin variantes de configuración)."

@@ -23,7 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailState
 import io.github.garfieldrockero.gastronomicon.platform.AppContainer
-import io.github.garfieldrockero.gastronomicon.platform.purgeStaleCameraFilesAsync
+import io.github.garfieldrockero.gastronomicon.platform.purgeCameraFilesAsync
 import io.github.garfieldrockero.gastronomicon.ui.mealplan.MealPlanRoute
 import io.github.garfieldrockero.gastronomicon.ui.mealplan.MealPlanViewModel
 import io.github.garfieldrockero.gastronomicon.ui.navigation.MainTab
@@ -53,10 +53,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // La foto de la cámara vive en la caché mientras se recodifica: lo que quedara de
-        // una sesión anterior (app cerrada a medias) se borra al arrancar, fuera del hilo
-        // principal y sin tocar el fichero de ninguna foto elegida de la galería.
-        purgeStaleCameraFilesAsync(this)
+        // La foto de la cámara vive en la caché mientras se recodifica: al arrancar el
+        // proceso se vacía lo que hubiera quedado antes (una sola vez, aunque la actividad
+        // se recree), fuera del hilo principal y sin tocar la foto de la galería.
+        purgeCameraFilesAsync(this)
         enableEdgeToEdge()
         setContent {
             val appViewModel: AppViewModel = viewModel(

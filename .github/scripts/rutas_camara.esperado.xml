@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rutas que el FileProvider de la cámara puede compartir con la app de cámara del
+  sistema cuando se hace una foto con TakePicture.
+
+  Solo un subdirectorio de la caché (`camara/`): ni files/, ni la raíz, ni el
+  almacenamiento externo. Lo que hay ahí son fotos a medias que se borran en cuanto se
+  recodifican o se cancela, y la caché puede purgarla Android en cualquier momento.
+  Si el fichero no está, la app pide la foto otra vez: no hay nada que recuperar.
+-->
+<paths>
+    <cache-path
+        name="camara"
+        path="camara/" />
+</paths>
