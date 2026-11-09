@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ficha del widget de la compra.
+     - 4x3 por defecto, redimensionable en las dos direcciones hasta ocho filas.
+     - minResizeHeight=190dp: por debajo de 188 dp (CHROME_DP 140 + una fila de
+       48, ver core/widget/ShoppingWidgetLayout.kt) el pie del layout
+       —la línea de estado y la hora de la copia— se recorta por abajo. Si allí
+       cambia CHROME_DP, esto cambia con él.
+     - updatePeriodMillis=0: no hay refresco periódico. Se repinta al añadirlo, al
+       arrancar, cuando la app escribe la caché (difusión explícita) y con el
+       botón de actualizar (que sí consulta la red, a petición).
+     - Sin configure, sin vista previa y solo en la pantalla de inicio: la
+       decisión D15 y el diseño del widget piden no añadir más superficie. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_shopping"
+    android:minHeight="180dp"
+    android:minResizeHeight="190dp"
+    android:minResizeWidth="180dp"
+    android:minWidth="250dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

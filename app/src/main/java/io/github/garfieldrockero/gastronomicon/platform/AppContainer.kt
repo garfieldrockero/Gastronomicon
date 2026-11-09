@@ -7,6 +7,7 @@ import io.github.garfieldrockero.gastronomicon.core.network.ActiveNetworkProvide
 import io.github.garfieldrockero.gastronomicon.core.offline.DraftStore
 import io.github.garfieldrockero.gastronomicon.core.offline.MealPlanCache
 import io.github.garfieldrockero.gastronomicon.core.offline.RecipeCache
+import io.github.garfieldrockero.gastronomicon.core.offline.ShoppingListCache
 import io.github.garfieldrockero.gastronomicon.core.session.Session
 import io.github.garfieldrockero.gastronomicon.core.session.SessionStore
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClient
@@ -17,6 +18,7 @@ import io.github.garfieldrockero.gastronomicon.ui.settings.ConnectionTester
 import io.github.garfieldrockero.gastronomicon.ui.settings.ReminderAccess
 import io.github.garfieldrockero.gastronomicon.ui.shopping.ShoppingAccess
 import io.github.garfieldrockero.gastronomicon.ui.shopping.StoreShoppingAccess
+import io.github.garfieldrockero.gastronomicon.widget.ShoppingWidgetUpdater
 
 /**
  * Las piezas reales de Android que usa la app, montadas en un solo sitio.
@@ -94,6 +96,25 @@ class AppContainer(context: Context) {
     val offline: OfflineRecipes = StoreOfflineRecipes(recipeCache, draftStore) { offlineScope.current() }
 
     /**
+     * Copia cifrada de la lista de la compra abierta, para el widget. Reutiliza
+     * el mismo [KeystoreBlobStore]: un blob por servidor y cuenta (`wg1.`), sin
+     * URL, usuario ni token. Se borra con la sesión como el resto de lo offline.
+     */
+    val shoppingWidgetCache: ShoppingListCache = ShoppingListCache(offlineStore)
+
+    /**
+     * Publica la copia del widget cuando la pantalla de la compra cambia de
+     * estado. La escritura va en un hilo de fondo y se queda con el último
+     * estado; al guardar, avisa al widget con una difusión explícita
+     * ([ShoppingWidgetUpdater]). Sin red.
+     */
+    val shoppingWidgetSink: ShoppingWidgetSink = ShoppingWidgetPublisher(
+        cache = shoppingWidgetCache,
+        scope = { offlineScope.current() },
+        notifyWidget = { ShoppingWidgetUpdater.refresh(appContext) },
+    )
+
+    /**
      * La sesión guardada. Al cambiar de servidor o de token, y al borrarla, se
      * vacía además todo lo offline de la cuenta anterior (ver
      * [OfflineClearingSessionStore]): no queda caché de una sesión que ya no está.
@@ -104,7 +125,11 @@ class AppContainer(context: Context) {
         ScopeRecordingSessionStore(
             OfflineClearingSessionStore(keystoreSessionStore) {
                 offlineScope.clear()
-                offlineStore.clearAll()
+                val result = offlineStore.clearAll()
+                // La copia del widget ya no vale: que se repinte vacío aunque el
+                // borrado se quede marcado para el arranque siguiente.
+                ShoppingWidgetUpdater.refresh(appContext)
+                result
             },
             offlineScope,
         ),
@@ -165,4 +190,13 @@ class AppContainer(context: Context) {
      */
     fun newClient(session: Session): MealieClient =
         MealieClient.create(session, preferences.allowLocalHttp, activeNetwork)
+
+    /**
+     * Pide al widget que se repinte desde la copia cifrada. Se llama al abrir la
+     * app (`MainActivity.onStart`): así un widget recién añadido, o el que
+     * quedó con la copia anterior, se pone al día sin consultar la red.
+     */
+    fun refreshShoppingWidget() {
+        ShoppingWidgetUpdater.refresh(appContext)
+    }
 }

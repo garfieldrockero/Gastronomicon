@@ -17,6 +17,7 @@ import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListSource
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListState
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingProblem
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingText
+import io.github.garfieldrockero.gastronomicon.platform.ShoppingWidgetSink
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +86,12 @@ data class ShoppingUiState(
 class ShoppingViewModel(
     private val access: ShoppingAccess,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * Copia de la lista para el widget. Es opcional para no cambiar las
+     * previsualizaciones ni las pruebas; en la app siempre llega el publicador
+     * real. Decide si el estado es final y bueno el propio publicador.
+     */
+    private val widgetSink: ShoppingWidgetSink? = null,
 ) : ViewModel() {
 
     /**
@@ -205,6 +212,11 @@ class ShoppingViewModel(
 
     private fun publish() {
         _state.value = snapshot()
+        // El widget se queda con una copia cifrada de la lista abierta. Se llama
+        // en cada publicación (también mientras hay trabajo en vuelo) porque es
+        // el publicador quien decide si el estado es final y bueno; él agrupa
+        // las escrituras y no toca el hilo principal.
+        widgetSink?.onState(controller.state)
     }
 
     // ------------------------------------------------------------- lectura
@@ -376,6 +388,9 @@ class ShoppingViewModel(
         controller = newController()
         picker = newPicker()
         publish()
+        // Lo que hubiera en cola para el widget es de la sesión anterior; el
+        // cierre de sesión ya ha borrado la copia y el receptor pinta vacío.
+        widgetSink?.onReset()
     }
 
     // ------------------------------------------------------------- privados
@@ -498,11 +513,14 @@ class ShoppingViewModel(
         // Más corto que en recetas: el marcado optimista tiene que verse al toque.
         private const val POLL_MILLIS = 60L
 
-        fun factory(access: ShoppingAccess): ViewModelProvider.Factory =
+        fun factory(
+            access: ShoppingAccess,
+            widgetSink: ShoppingWidgetSink? = null,
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ShoppingViewModel(access) as T
+                    ShoppingViewModel(access, widgetSink = widgetSink) as T
             }
     }
 }

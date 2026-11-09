@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Textos del widget de la lista de la compra. Los contadores reutilizan los
+     plurales de strings_compra.xml (shopping_pending y shopping_checked): son la
+     misma frase que ve la persona dentro de la app. -->
+<resources>
+    <!-- Nombre en el selector de widgets y descripción del mismo. -->
+    <string name="widget_label">Compra</string>
+    <string name="widget_description">Tu lista de la compra de Mealie, sin abrir la app.</string>
+
+    <!-- Cabecera y acciones. -->
+    <string name="widget_refresh">Actualizar la lista</string>
+    <string name="widget_title_description">Lista: %1$s</string>
+    <string name="widget_header_description">Lista: %1$s. %2$s</string>
+    <string name="widget_counts_format">%1$s · %2$s</string>
+    <!-- La hora va delante del formato para que quepa cualquier hora: «a las
+         1:05» está mal dicho en castellano y «a la 1:05» obliga a dos formas. -->
+    <string name="widget_updated_at">Actualizado: %1$s</string>
+
+    <!-- Filas: la descripción de TalkBack de cada una. Dice lo que hace el
+         toque con las mismas palabras que la app («en el carro»), no «comprado». -->
+    <string name="widget_mark_item">Poner «%1$s» en el carro</string>
+
+    <!-- Estado vacío: sin copia, sin sesión o con la lista vacía. El título ya
+         dice qué hacer, así que no lleva una segunda línea de pista. -->
+    <string name="widget_empty_list">Tu lista está vacía</string>
+    <string name="widget_empty_open">Abre Gastronomicón para ver tu lista</string>
+</resources>

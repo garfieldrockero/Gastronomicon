@@ -127,6 +127,33 @@ class ShoppingWidgetViewTest {
     }
 
     @Test
+    fun `una fila nueva solo cuando cabe entera`() {
+        val pie = ShoppingWidgetLayout.CHROME_DP
+        val fila = ShoppingWidgetLayout.ROW_HEIGHT_DP
+
+        assertEquals(ShoppingWidgetLayout.MIN_ROWS, ShoppingWidgetLayout.rowsFor(pie + fila - 1, 1f))
+        assertEquals(1, ShoppingWidgetLayout.rowsFor(pie + fila, 1f))
+        assertEquals(1, ShoppingWidgetLayout.rowsFor(pie + 2 * fila - 1, 1f))
+        assertEquals(2, ShoppingWidgetLayout.rowsFor(pie + 2 * fila, 1f))
+    }
+
+    @Test
+    fun `el minimo de la ficha del widget da una fila con su pie`() {
+        // `minResizeHeight` de widget_shopping_info.xml. Si la ficha baja de
+        // aquí, el pie (línea de estado y hora) se recorta por abajo: es el
+        // bloqueante B1 de la revisión de interfaz del 9-11-2026.
+        val minimoDeLaFicha = 190
+
+        val filas = ShoppingWidgetLayout.rowsFor(minimoDeLaFicha, 1f)
+
+        assertEquals(ShoppingWidgetLayout.MIN_ROWS, filas)
+        assertTrue(
+            "con $filas filas no cabe el pie en $minimoDeLaFicha dp",
+            ShoppingWidgetLayout.CHROME_DP + filas * ShoppingWidgetLayout.ROW_HEIGHT_DP <= minimoDeLaFicha,
+        )
+    }
+
+    @Test
     fun `el texto grande reduce las filas`() {
         val normal = ShoppingWidgetLayout.rowsFor(500, 1f)
         val doble = ShoppingWidgetLayout.rowsFor(500, 2f)

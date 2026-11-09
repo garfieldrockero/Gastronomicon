@@ -60,6 +60,12 @@ class MainActivity : ComponentActivity() {
      */
     private val openMealPlan = MutableStateFlow(false)
 
+    /**
+     * Petición de abrir la pestaña Compra (el widget pulsado). Misma mecánica
+     * que [openMealPlan]: el `Intent` llega antes de que exista la composición.
+     */
+    private val openShopping = MutableStateFlow(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
@@ -78,7 +84,7 @@ class MainActivity : ComponentActivity() {
             // ELEGIDO, no el del sistema (el XML solo conoce este último).
             LaunchedEffect(dark) { applySystemBars(dark) }
             GastronomiconTheme(mode = themeMode) {
-                AppRoot(appViewModel, container, openMealPlan)
+                AppRoot(appViewModel, container, openMealPlan, openShopping)
             }
         }
     }
@@ -93,8 +99,22 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
+    /**
+     * Al volver a primer plano se repinta el widget desde su copia cifrada (sin
+     * red). Es la red de seguridad para el que se añadió con la app cerrada o
+     * para el que quedó con el estado vacío.
+     */
+    override fun onStart() {
+        super.onStart()
+        container.refreshShoppingWidget()
+    }
+
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action == ACTION_OPEN_MEAL_PLAN) openMealPlan.value = true
+        when (intent?.action) {
+            ACTION_OPEN_MEAL_PLAN -> openMealPlan.value = true
+            // El título del widget de la compra abre su pestaña, no un deep link.
+            ACTION_OPEN_SHOPPING -> openShopping.value = true
+        }
     }
 
     private fun applySystemBars(dark: Boolean) {
@@ -114,6 +134,14 @@ class MainActivity : ComponentActivity() {
          */
         const val ACTION_OPEN_MEAL_PLAN: String =
             "io.github.garfieldrockero.gastronomicon.action.ABRIR_PLANIFICADOR"
+
+        /**
+         * Acción del `PendingIntent` del widget de la compra: abre esta actividad
+         * y selecciona la pestaña Compra. Sin extras: no hay deep links ni URIs
+         * del servidor.
+         */
+        const val ACTION_OPEN_SHOPPING: String =
+            "io.github.garfieldrockero.gastronomicon.action.ABRIR_COMPRA"
 
         // Los mismos velos que usa `enableEdgeToEdge()` por defecto con la navegación de tres botones.
         private val LIGHT_NAV_SCRIM = AndroidColor.argb(0xe6, 0xFF, 0xFF, 0xFF)
@@ -137,6 +165,7 @@ private fun AppRoot(
     appViewModel: AppViewModel,
     container: AppContainer,
     openMealPlan: MutableStateFlow<Boolean>,
+    openShopping: MutableStateFlow<Boolean>,
 ) {
     val screen by appViewModel.screen.collectAsStateWithLifecycle()
     val setupViewModel: SetupViewModel = viewModel(
@@ -172,7 +201,7 @@ private fun AppRoot(
         factory = MealPlanViewModel.factory(container.mealPlanAccess, container.clientAccess),
     )
     val shoppingViewModel: ShoppingViewModel = viewModel(
-        factory = ShoppingViewModel.factory(container.shoppingAccess),
+        factory = ShoppingViewModel.factory(container.shoppingAccess, container.shoppingWidgetSink),
     )
 
     // Pulsar el aviso del recordatorio lleva al planificador (decisión D8). Con
@@ -187,6 +216,18 @@ private fun AppRoot(
             appViewModel.onCloseSettings()
         }
         openMealPlan.value = false
+    }
+
+    // El título del widget de la compra hace lo mismo con su pestaña.
+    val shoppingRequest by openShopping.collectAsStateWithLifecycle()
+    LaunchedEffect(shoppingRequest) {
+        if (!shoppingRequest) return@LaunchedEffect
+        appViewModel.onTabSelected(MainTab.Shopping)
+        if (appViewModel.screen.value == AppScreen.Settings) {
+            settingsViewModel.onLeave()
+            appViewModel.onCloseSettings()
+        }
+        openShopping.value = false
     }
 
     // El desplazamiento de la lista vive aquí, fuera de Recetas: así sobrevive a ir a Ajustes

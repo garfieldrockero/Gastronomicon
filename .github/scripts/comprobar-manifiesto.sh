@@ -398,13 +398,16 @@ normalizar_xmltree() {
   '
 }
 
-# --- Receptor del recordatorio ----------------------------------------------
+# --- Receptores del recordatorio y del widget -------------------------------
 # El manifiesto se vuelve a leer como árbol con rutas (normalizar_xmltree) para
 # comprobar los receptores. Lista blanca exacta:
 #  - receptores: el de AndroidX de profileinstaller (exportado, como ya estaba
-#    aprobado) y el recordatorio de la app, **no exportado**;
+#    aprobado), el recordatorio de la app y el widget de la compra, **los dos no
+#    exportados**;
 #  - acciones del receptor del recordatorio: las cuatro de reprogramación
 #    (reinicio, actualización de la APK, cambio de hora y de zona), ni una más;
+#  - acciones del receptor del widget: solo APPWIDGET_UPDATE. Sus acciones de
+#    actualizar y marcar viajan en PendingIntent explícitos, no en el filtro;
 #  - ningún <service> declarado.
 # El receptor va exportado=false y su acción de alarma no está en el filtro: viaja
 # en el PendingIntent explícito, así que no es una puerta que se pueda abrir desde
@@ -426,11 +429,12 @@ receptores=$(awk -F'\t' '
 receptores_esperados=$(
   printf '%s\n' \
     $'androidx.profileinstaller.ProfileInstallReceiver\ttrue' \
-    $'io.github.garfieldrockero.gastronomicon.platform.ReminderReceiver\tfalse' |
+    $'io.github.garfieldrockero.gastronomicon.platform.ReminderReceiver\tfalse' \
+    $'io.github.garfieldrockero.gastronomicon.widget.ShoppingWidgetProvider\tfalse' |
     LC_ALL=C sort
 )
 if [ "$receptores" != "$receptores_esperados" ]; then
-  echo "::error::Los receptores del manifiesto de la APK no son los aprobados (profileinstaller exportado y el recordatorio de la app no exportado)."
+  echo "::error::Los receptores del manifiesto de la APK no son los aprobados (profileinstaller exportado, el recordatorio de la app y el widget de la compra, no exportados)."
   {
     echo "Esperado:"
     printf '%s\n' "$receptores_esperados"
@@ -480,6 +484,41 @@ if [ "$acciones_recordatorio" != "$acciones_recordatorio_esperadas" ]; then
       echo "  (ninguna)"
     else
       printf '%s\n' "$acciones_recordatorio"
+    fi
+  } | volcar_seguro
+  exit 1
+fi
+
+# El widget solo declara APPWIDGET_UPDATE en el filtro. Actualizar y marcar son
+# acciones propias que viajan en PendingIntent explícitos: si alguna apareciera
+# aquí, sería una puerta abierta desde fuera y el CI falla.
+acciones_widget=$(awk -F'\t' '
+  $1 ~ /^(manifest|application|activity|activity-alias|service|provider|receiver)$/ {
+    actual = ""
+    if ($1 == "receiver") {
+      for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) actual = substr($i, 6)
+    }
+    next
+  }
+  $1 == "action" && actual == "io.github.garfieldrockero.gastronomicon.widget.ShoppingWidgetProvider" {
+    for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6)
+  }
+' <<< "$registros" | LC_ALL=C sort)
+
+acciones_widget_esperadas=$(
+  printf '%s\n' "android.appwidget.action.APPWIDGET_UPDATE" |
+    LC_ALL=C sort
+)
+if [ "$acciones_widget" != "$acciones_widget_esperadas" ]; then
+  echo "::error::El receptor del widget no tiene exactamente la acción APPWIDGET_UPDATE en el filtro del manifiesto."
+  {
+    echo "Esperado:"
+    printf '%s\n' "$acciones_widget_esperadas"
+    echo "Encontrado:"
+    if [ -z "$acciones_widget" ]; then
+      echo "  (ninguna)"
+    else
+      printf '%s\n' "$acciones_widget"
     fi
   } | volcar_seguro
   exit 1

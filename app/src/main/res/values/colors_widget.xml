@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colores del widget de la compra. Copian los roles de ui/theme/Colors.kt
+     (surface, onSurface, onSurfaceVariant, outline y primary) porque el layout
+     lo infla el launcher y no puede leer la paleta de Compose. Mantener
+     sincronizados con Colors.kt y con values-night/colors_widget.xml. -->
+<resources>
+    <color name="widget_background_color">#FFF8F0</color>
+    <color name="widget_text">#221A12</color>
+    <color name="widget_text_secondary">#52443A</color>
+    <color name="widget_outline">#D8C2B5</color>
+    <color name="widget_accent">#9C4A2F</color>
+    <!-- Pulsación sobre una fila: terracota con alfa bajo. -->
+    <color name="widget_ripple">#1F9C4A2F</color>
+</resources>

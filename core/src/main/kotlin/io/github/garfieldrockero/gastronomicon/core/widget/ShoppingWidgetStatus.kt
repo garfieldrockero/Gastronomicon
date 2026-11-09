@@ -66,9 +66,12 @@ sealed interface ShoppingWidgetStatus {
         override val text: String = "Conéctate a tu wifi o VPN de casa"
     }
 
-    /** 401/403: la copia se conserva y Ajustes pide un token nuevo. */
+    /**
+     * 401/403: la copia se conserva y se pide abrir la app. El toque abre la
+     * pestaña Compra (no Ajustes), así que el texto no manda a otra pantalla.
+     */
     data object SessionExpired : ShoppingWidgetStatus {
-        override val text: String = "Tu sesión ha caducado; abre Ajustes"
+        override val text: String = "Tu sesión ha caducado; abre la app"
     }
 
     /** La lista ya no existe en Mealie: hay que borrar la copia. */

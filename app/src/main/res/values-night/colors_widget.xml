@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colores del widget en modo oscuro: los mismos roles de DarkColors en
+     ui/theme/Colors.kt. Se eligen por configuración, así que el widget sigue al
+     tema del sistema sin que la app tenga que repintarlo. -->
+<resources>
+    <color name="widget_background_color">#241C16</color>
+    <color name="widget_text">#F2E5D8</color>
+    <color name="widget_text_secondary">#D7C7BC</color>
+    <color name="widget_outline">#4E463F</color>
+    <color name="widget_accent">#E8A587</color>
+    <color name="widget_ripple">#33E8A587</color>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Casilla de una fila pendiente del widget: vacía, como la de la pantalla
+     Compra. Un tic aquí diría «ya está hecho» y la fila es justo lo que queda
+     por comprar; el relleno sólido del marcado no se pinta nunca en el widget,
+     que solo enseña pendientes. Es decorativa: quien habla es la descripción de
+     la fila. El trazo sale de values/colors_widget.xml, así que cambia solo en
+     modo oscuro. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="4dp" />
+    <solid android:color="@android:color/transparent" />
+    <stroke
+        android:width="1.5dp"
+        android:color="@color/widget_text_secondary" />
+</shape>

@@ -48,6 +48,28 @@
         </receiver>
 
         <!--
+          Widget de la lista de la compra. No exportado: el sistema entrega
+          APPWIDGET_UPDATE de forma explícita y los PendingIntent del widget se
+          ejecutan con la identidad de la app. Las acciones propias (actualizar,
+          marcar) no están en el filtro: viajan en intents explícitos, así que no
+          son una puerta que se pueda abrir desde fuera. Solo pantalla de inicio
+          (widgetCategory=home_screen) y sin copia en claro: la lista vive cifrada
+          con el Keystore.
+        -->
+        <receiver
+            android:name=".widget.ShoppingWidgetProvider"
+            android:directBootAware="false"
+            android:exported="false"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_shopping_info" />
+        </receiver>
+
+        <!--
           Para hacer la foto con la cámara del sistema (TakePicture) sin permiso CAMERA:
           la app de cámara escribe en un fichero de nuestra caché y le damos permiso
           temporal solo para ese Uri. No exportado y sin permisos de almacenamiento.
