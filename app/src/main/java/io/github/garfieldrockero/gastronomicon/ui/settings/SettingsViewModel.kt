@@ -62,6 +62,19 @@ class SettingsViewModel(
      */
     var onSessionClearedListener: (() -> Unit)? = null
 
+    /**
+     * Aviso de «sesión cambiada»: se ha guardado otro servidor, otro token u otro valor
+     * del interruptor de HTTP local. Quien muestra las recetas las olvida entonces; si
+     * Ajustes solo se ha mirado (tema, «Acerca de», cambios no guardados) no se llama,
+     * y la lista conserva lo cargado y su posición. Se llama en el hilo principal, una
+     * vez por guardado, aunque se salga de Ajustes mientras termina de guardar.
+     */
+    var onSessionChangedListener: (() -> Unit)? = null
+
+    // Se pone en el hilo de fondo justo al guardar; se consume en el principal.
+    @Volatile
+    private var sessionChanged = false
+
     private val _state = MutableStateFlow(initialState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
@@ -197,28 +210,43 @@ class SettingsViewModel(
         if (!current.canSave || !current.dirty) return
         val snapshot = startBusy(SettingsStatus.Saving) ?: return
         actionJob = viewModelScope.launch {
-            val outcome = withContext(ioDispatcher) {
-                guarded({ SaveOutcome.Failed(it) }, saving = true) { save(snapshot) }
-            }
-            _state.update { latest ->
-                when (outcome) {
-                    is SaveOutcome.Done -> {
-                        val fields = fieldsFor(outcome.serverUrl, snapshot.allowLocalHttp)
-                        val saved = latest.copy(
-                            server = fields?.server ?: latest.server,
-                            port = fields?.port ?: latest.port,
-                            allowLocalHttp = snapshot.allowLocalHttp,
-                            tokenInput = "",
-                            hasSavedToken = true,
-                            status = SettingsStatus.Saved,
-                        )
-                        baseline = Baseline(saved.server, saved.port, saved.allowLocalHttp)
-                        saved.withCanSave()
-                    }
-                    is SaveOutcome.Failed -> latest.copy(status = outcome.status)
-                }
+            try {
+                saveAndPublish(snapshot)
+            } finally {
+                // También si se cancela: la sesión puede haberse guardado ya.
+                notifySessionChanged()
             }
         }
+    }
+
+    private suspend fun saveAndPublish(snapshot: SettingsUiState) {
+        val outcome = withContext(ioDispatcher) {
+            guarded({ SaveOutcome.Failed(it) }, saving = true) { save(snapshot) }
+        }
+        _state.update { latest ->
+            when (outcome) {
+                is SaveOutcome.Done -> {
+                    val fields = fieldsFor(outcome.serverUrl, snapshot.allowLocalHttp)
+                    val saved = latest.copy(
+                        server = fields?.server ?: latest.server,
+                        port = fields?.port ?: latest.port,
+                        allowLocalHttp = snapshot.allowLocalHttp,
+                        tokenInput = "",
+                        hasSavedToken = true,
+                        status = SettingsStatus.Saved,
+                    )
+                    baseline = Baseline(saved.server, saved.port, saved.allowLocalHttp)
+                    saved.withCanSave()
+                }
+                is SaveOutcome.Failed -> latest.copy(status = outcome.status)
+            }
+        }
+    }
+
+    private fun notifySessionChanged() {
+        if (!sessionChanged) return
+        sessionChanged = false
+        onSessionChangedListener?.invoke()
     }
 
     /** Pone el estado «ocupado» y devuelve la foto de lo que hay que usar; null si ya hay algo en marcha o no hay datos. */
@@ -294,10 +322,14 @@ class SettingsViewModel(
         }
         // Si se ha salido de Ajustes durante la prueba, no se guarda nada.
         currentCoroutineContext().ensureActive()
+        // Se marca ANTES de escribir: si el guardado se interrumpe o falla a medias, el
+        // almacén puede haber cambiado y lo cargado ya no se fía.
+        sessionChanged = true
         try {
             sessionStore.save(Session(url, token))
         } catch (e: IllegalArgumentException) {
-            // Session exige la URL canónica; si no lo es, la dirección no vale.
+            // Session exige la URL canónica; si no lo es, la dirección no vale y no se escribió nada.
+            sessionChanged = false
             return failed(ConnectionProblem.InvalidAddress)
         }
         preferences.allowLocalHttp = s.allowLocalHttp
@@ -381,6 +413,9 @@ class SettingsViewModel(
             if (cleared) {
                 finishCleared()
             } else {
+                // El almacén o el interruptor pueden haber cambiado aunque el borrado falle:
+                // lo cargado deja de valer (se avisa tras releer, más abajo).
+                sessionChanged = true
                 // Borrado a medias: SessionReset ya pudo apagar el interruptor y el
                 // almacén puede haber quedado de cualquier forma. Se vuelve a leer
                 // lo que hay de verdad y se reinicia la referencia de «sin cambios».
@@ -397,6 +432,7 @@ class SettingsViewModel(
                     // En realidad ya no hay sesión: es un borrado completo.
                     finishCleared()
                 } else {
+                    notifySessionChanged()
                     _state.update { current ->
                         val fresh = current.copy(
                             allowLocalHttp = preferences.allowLocalHttp,
@@ -416,6 +452,8 @@ class SettingsViewModel(
 
     /** Sesión borrada: campos a los valores de inicio, estado `Cleared` y aviso a quien navega. */
     private fun finishCleared() {
+        // El aviso de «sesión borrada» ya vacía todo; el de «cambiada» sobra.
+        sessionChanged = false
         _state.update { current ->
             baseline = Baseline("", ServerAddress.defaultPortFor(false).toString(), false)
             current.copy(

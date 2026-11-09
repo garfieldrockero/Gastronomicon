@@ -10,12 +10,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.garfieldrockero.gastronomicon.platform.AppContainer
-import io.github.garfieldrockero.gastronomicon.ui.recipes.RecipesPlaceholderScreen
+import io.github.garfieldrockero.gastronomicon.ui.recipes.RecipeDetailViewModel
+import io.github.garfieldrockero.gastronomicon.ui.recipes.RecipeListViewModel
+import io.github.garfieldrockero.gastronomicon.ui.recipes.RecipesRoute
 import io.github.garfieldrockero.gastronomicon.ui.settings.SettingsRoute
 import io.github.garfieldrockero.gastronomicon.ui.settings.SettingsViewModel
 import io.github.garfieldrockero.gastronomicon.ui.setup.SetupRoute
@@ -92,13 +96,41 @@ private fun AppRoot(appViewModel: AppViewModel, container: AppContainer) {
         ),
     )
 
+    val recipeListViewModel: RecipeListViewModel = viewModel(
+        factory = RecipeListViewModel.factory(container.clientAccess),
+    )
+    val recipeDetailViewModel: RecipeDetailViewModel = viewModel(
+        factory = RecipeDetailViewModel.factory(container.clientAccess),
+    )
+
+    // El desplazamiento de la lista vive aquí, fuera de Recetas: así sobrevive a ir a Ajustes
+    // y volver (mirar el tema o «Acerca de» no tira la posición). «Volver arriba» lo aplica
+    // RecipesRoute cuando la lista está en pantalla (ver `TopRequestMemo`), no desde aquí.
+    val recipesScroll = rememberLazyListState()
+    val topMemo = remember { TopRequestMemo(recipeListViewModel.state.value.topRequest) }
+
+    // Cancela lo que corra en Recetas y olvida lo cargado (lista, detalle y fotos). Se llama en
+    // todo camino que lleve a una sesión distinta: otro servidor, token o interruptor HTTP,
+    // borrado (también a medias), errores del almacén y entrada en la primera configuración.
+    // Lo que hay en memoria es del servidor o del token anteriores.
+    fun resetRecipes() {
+        recipeDetailViewModel.close()
+        recipeListViewModel.reset()
+        container.imageLoader.clear()
+    }
+
     // El «sesión borrada» lo da el propio SettingsViewModel al terminar, esté o
     // no Ajustes en pantalla; así la navegación nunca se queda sin enterarse.
     SideEffect {
+        // Guardar otro servidor, otro token u otro valor del HTTP local; nada más reinicia.
+        settingsViewModel.onSessionChangedListener = { resetRecipes() }
         settingsViewModel.onSessionClearedListener = {
             setupViewModel.onEnter()
             appViewModel.onSessionCleared()
         }
+        // Entrar en Setup o en el aviso del almacén, guardar desde Setup y borrar tras un fallo
+        // del almacén: AppViewModel avisa y se vacía todo (ver `AppViewModel.onSessionDiscarded`).
+        appViewModel.onSessionDiscarded = { resetRecipes() }
     }
 
     when (val current = screen) {
@@ -109,7 +141,12 @@ private fun AppRoot(appViewModel: AppViewModel, container: AppContainer) {
             onSaved = appViewModel::onSetupSaved,
         )
 
-        AppScreen.Recipes -> RecipesPlaceholderScreen(
+        AppScreen.Recipes -> RecipesRoute(
+            listViewModel = recipeListViewModel,
+            detailViewModel = recipeDetailViewModel,
+            imageLoader = container.imageLoader,
+            scroll = recipesScroll,
+            topMemo = topMemo,
             onOpenSettings = {
                 settingsViewModel.onEnter()
                 appViewModel.onOpenSettings()

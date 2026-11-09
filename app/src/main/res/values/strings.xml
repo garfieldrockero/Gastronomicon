@@ -31,16 +31,16 @@
 
     <!-- Motivos de fallo. Dicen qué pasa y qué hacer, y nunca repiten lo que
          escribió la persona. -->
-    <string name="setup_error_no_network">No hay conexión. Revisa la wifi o los datos y vuelve a probar.</string>
+    <string name="setup_error_no_network">No hay conexión. Revisa la wifi o los datos y vuelve a intentarlo.</string>
     <string name="setup_error_unauthorized">Mealie no acepta ese token. Crea uno nuevo en tu perfil y pégalo aquí.</string>
     <string name="setup_error_server_not_responding">Tu Mealie no responde. Comprueba que el servidor está encendido y que la dirección y el puerto son correctos.</string>
-    <string name="setup_error_server">El servidor ha respondido con un problema. Vuelve a probar en un rato.</string>
+    <string name="setup_error_server">El servidor ha respondido con un problema. Vuelve a intentarlo en un rato.</string>
     <string name="setup_error_invalid_address">Esa dirección no lleva a tu Mealie. Revisa el servidor y el puerto.</string>
     <string name="setup_error_not_local_address">Sin HTTPS solo puedes usar la IP de tu servidor en casa, como 192.168.1.50. Si tu Mealie tiene dominio, desactiva «Conectar sin HTTPS».</string>
-    <string name="setup_error_local_http_needs_home_network">Sin HTTPS solo se conecta desde la wifi de casa o con una VPN a ella. Conéctate a una de las dos y vuelve a probar.</string>
+    <string name="setup_error_local_http_needs_home_network">Sin HTTPS solo se conecta desde la wifi de casa o con una VPN a ella. Conéctate a una de las dos y vuelve a intentarlo.</string>
     <string name="setup_error_secure_connection">No se ha podido comprobar que la conexión sea segura. Si estás en una wifi pública, prueba con datos móviles.</string>
     <string name="setup_error_invalid_token">Ese token no parece completo. Copia el que te da Mealie tal cual, sin espacios.</string>
-    <string name="setup_error_unknown">Algo ha fallado. Vuelve a probar.</string>
+    <string name="setup_error_unknown">Algo ha fallado. Vuelve a intentarlo.</string>
     <!-- Lo que TalkBack dice del campo marcado; el motivo completo va en el aviso. -->
     <string name="setup_field_error_address">Revisa el servidor y el puerto</string>
     <string name="setup_field_error_token">Revisa el token</string>
@@ -89,9 +89,65 @@
     <string name="start_storage_retry">Reintentar</string>
     <string name="start_storage_clear">Borrar la sesión y volver a configurar</string>
 
-    <!-- Recetas (provisional hasta la fase 3). -->
+    <!-- Recetas: lista. -->
     <string name="recipes_title">Recetas</string>
-    <string name="recipes_placeholder_title">Tu Mealie está configurado</string>
-    <string name="recipes_placeholder_text">Aquí aparecerán tus recetas en cuanto estén listas. Mientras tanto, puedes revisar el servidor y el aspecto de la app en Ajustes.</string>
-    <string name="recipes_placeholder_action">Abrir Ajustes</string>
+    <string name="recipes_reload">Recargar</string>
+    <string name="recipes_search_label">Buscar receta</string>
+    <string name="recipes_search_clear_text">Borrar lo escrito</string>
+    <string name="recipes_search_submit">Buscar en todo tu Mealie</string>
+    <string name="recipes_search_all">Ver todas</string>
+    <string name="recipes_search_active">Resultados de «%1$s»</string>
+    <string name="recipes_search_all_hint">¿No está? Buscar «%1$s» en todo tu Mealie</string>
+    <string name="recipes_loading">Cargando tus recetas…</string>
+    <string name="recipes_loading_more">Cargando más recetas…</string>
+    <string name="recipes_refreshing">Actualizando tus recetas…</string>
+    <string name="recipes_empty_title">Todavía no hay recetas</string>
+    <string name="recipes_empty_text">Cuando añadas recetas a tu Mealie, aparecerán aquí. Si acabas de añadirlas, vuelve a cargar la lista.</string>
+    <string name="recipes_empty_search_title">Sin resultados</string>
+    <string name="recipes_empty_search_text">Ninguna receta de tu Mealie coincide con esa búsqueda. Prueba con otra palabra o vuelve a ver todas.</string>
+    <string name="recipes_no_match_title">Ninguna de las que ves coincide</string>
+    <string name="recipes_no_match_text">Solo se ha mirado en las recetas cargadas. Búscala en todo tu Mealie.</string>
+    <string name="recipes_no_match_action">Buscar en todo tu Mealie</string>
+    <string name="recipes_more_failed">No se han podido cargar más recetas.</string>
+    <string name="recipes_reload_failed">No se ha podido actualizar la lista.</string>
+
+    <!-- Fallos al cargar recetas (lista y detalle). El texto de cada motivo sale de setup_error_*. -->
+    <string name="problem_title_default">No se han podido cargar las recetas</string>
+    <string name="problem_title_recipe">No se ha podido abrir la receta</string>
+    <string name="problem_title_no_network">Sin cobertura</string>
+    <string name="problem_title_not_responding">Tu Mealie no responde</string>
+    <string name="problem_title_unauthorized">Tu sesión ya no es válida</string>
+    <string name="problem_text_unauthorized">Mealie ya no acepta el token guardado. Entra en Ajustes y pega uno nuevo. No se ha borrado nada.</string>
+    <string name="problem_retry">Volver a intentar</string>
+    <string name="problem_open_settings">Abrir Ajustes</string>
+    <string name="problem_offline_hint">Todavía no se guardan recetas para verlas sin conexión.</string>
+
+    <!-- Receta: detalle. -->
+    <string name="detail_title">Receta</string>
+    <string name="detail_loading">Abriendo la receta…</string>
+    <string name="detail_not_found_title">Esta receta ya no está</string>
+    <string name="detail_not_found_text">Puede que la hayan borrado o cambiado de sitio en tu Mealie.</string>
+    <string name="detail_not_found_action">Volver a las recetas</string>
+    <string name="detail_rating">Valoración: %1$s de 5</string>
+    <string name="detail_servings">Raciones</string>
+    <string name="detail_servings_value">Raciones: %1$s</string>
+    <string name="detail_servings_less">Una ración menos</string>
+    <string name="detail_servings_more">Una ración más</string>
+    <string name="detail_yield">Para: %1$s</string>
+    <string name="detail_time_total">Tiempo total</string>
+    <string name="detail_time_prep">Preparación</string>
+    <string name="detail_time_cook">Cocción</string>
+    <string name="detail_section_categories">Categorías</string>
+    <string name="detail_section_tags">Etiquetas</string>
+    <string name="detail_section_ingredients">Ingredientes</string>
+    <string name="detail_section_steps">Pasos</string>
+    <string name="detail_section_notes">Notas</string>
+    <string name="detail_section_source">Origen</string>
+    <string name="detail_ingredients_empty">Esta receta no tiene ingredientes anotados.</string>
+    <string name="detail_steps_empty">Esta receta no tiene pasos anotados.</string>
+    <string name="detail_step_number">Paso %1$d</string>
+    <string name="detail_html_truncated">Este texto es muy largo y se ha acortado.</string>
+    <string name="detail_source_text">Receta original en %1$s</string>
+    <string name="detail_source_open">Abrir en el navegador</string>
+    <string name="detail_source_open_failed">No se pudo abrir el enlace.</string>
 </resources>

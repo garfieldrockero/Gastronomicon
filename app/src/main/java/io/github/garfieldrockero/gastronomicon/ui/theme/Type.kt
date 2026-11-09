@@ -98,3 +98,13 @@ val GastronomiconTypography = Typography(
  * `MaterialTheme.typography.bodyLarge.merge(TabularNumbers)`.
  */
 val TabularNumbers = TextStyle(fontFeatureSettings = "tnum")
+
+/**
+ * Texto de los pasos de una receta: más grande que `bodyLarge` y con más
+ * interlineado, para leerlo de un vistazo de pie en la cocina, con el móvil
+ * apoyado lejos. Se mezcla con el base: `bodyLarge.merge(StepText)`.
+ */
+val StepText = TextStyle(
+    fontSize = 20.sp,
+    lineHeight = 32.sp,
+)

@@ -50,6 +50,13 @@ class AppViewModel(
     private val _screen = MutableStateFlow<AppScreen>(AppScreen.Loading)
     val screen: StateFlow<AppScreen> = _screen.asStateFlow()
 
+    /**
+     * Se llama antes de entrar en la primera configuración o en el aviso del almacén desde
+     * cualquier sitio: lo cargado (lista, detalle, fotos) es de una sesión que ya no vale.
+     * Lo pone la raíz de la interfaz, que es quien tiene los ViewModels de recetas.
+     */
+    var onSessionDiscarded: (() -> Unit)? = null
+
     private val _themeMode = MutableStateFlow(preferences.themeMode)
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
@@ -68,11 +75,14 @@ class AppViewModel(
                     AppScreen.StorageProblem(clearing = false, clearFailed = false)
                 }
             }
+            // Sin sesión legible no se enseña nada del servidor anterior, ni al volver a entrar.
+            if (next !is AppScreen.Recipes) onSessionDiscarded?.invoke()
             _screen.value = next
         }
     }
 
     fun onSetupSaved() {
+        onSessionDiscarded?.invoke()
         _screen.value = AppScreen.Recipes
     }
 
@@ -84,6 +94,7 @@ class AppViewModel(
     fun onCloseSettings() = start()
 
     fun onSessionCleared() {
+        onSessionDiscarded?.invoke()
         _screen.value = AppScreen.Setup
     }
 
@@ -95,6 +106,8 @@ class AppViewModel(
     fun onClearAfterStorageProblem() {
         val current = _screen.value
         if (current !is AppScreen.StorageProblem || current.clearing) return
+        // Aunque el borrado falle: lo que haya en memoria ya no se enseña.
+        onSessionDiscarded?.invoke()
         _screen.value = AppScreen.StorageProblem(clearing = true, clearFailed = false)
         viewModelScope.launch {
             val cleared = withContext(ioDispatcher) {
@@ -108,6 +121,7 @@ class AppViewModel(
                     false
                 }
             }
+            if (cleared) onSessionDiscarded?.invoke()
             _screen.value = if (cleared) {
                 AppScreen.Setup
             } else {

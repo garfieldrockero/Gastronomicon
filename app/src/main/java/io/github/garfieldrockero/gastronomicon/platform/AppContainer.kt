@@ -23,6 +23,12 @@ class AppContainer(context: Context) {
     val connectionTester: ConnectionTester = MealieConnectionTester(activeNetwork)
     val appVersion: String = appContext.appVersionName()
 
+    /** Un cliente nuevo por operación, sacado de la sesión guardada (ver [StoreClientAccess]). */
+    val clientAccess: ClientAccess = StoreClientAccess(sessionStore) { session -> newClient(session) }
+
+    /** Imágenes de receta: caché solo en memoria. Se vacía al cambiar de sesión. */
+    val imageLoader: ImageLoader = ImageLoader(clientAccess)
+
     /**
      * Cliente para una sesión ya cargada. Vuelve a leer el interruptor
      * «Conectar sin HTTPS» en cada llamada y pasa la red activa, que se
