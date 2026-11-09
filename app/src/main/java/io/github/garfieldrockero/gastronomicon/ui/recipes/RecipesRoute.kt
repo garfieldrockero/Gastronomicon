@@ -42,6 +42,12 @@ fun RecipesRoute(
     topMemo: TopRequestMemo,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Lleva a la pestaña Compra (aviso de «ya están en la lista»). Null mientras la
+     * navegación no lo cablee: entonces el aviso no ofrece el botón, en vez de
+     * dejar un botón que no hace nada.
+     */
+    onOpenShoppingTab: (() -> Unit)? = null,
     // Solo para la lista: cuando hay barra de pestañas debajo, el inset inferior lo
     // consume esa barra. Detalle, formulario e importación siguen con el de siempre
     // (se ven sin barra).
@@ -51,6 +57,7 @@ fun RecipesRoute(
     val detailState by detailViewModel.state.collectAsStateWithLifecycle()
     val offlineCopy by detailViewModel.offlineCopy.collectAsStateWithLifecycle()
     val deleteState by detailViewModel.deleteState.collectAsStateWithLifecycle()
+    val shoppingState by detailViewModel.shopping.collectAsStateWithLifecycle()
     val editorState by editorViewModel.state.collectAsStateWithLifecycle()
     val importState by importViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -125,6 +132,15 @@ fun RecipesRoute(
                 onCookTimeChange = editorViewModel::onCookTimeChange,
                 onIngredientQuantityChange = editorViewModel::onIngredientQuantityChange,
                 onIngredientNoteChange = editorViewModel::onIngredientNoteChange,
+                // Selector de unidad y alimento (el ViewModel busca, crea y elige; la
+                // pantalla solo avisa).
+                onOpenUnitPicker = editorViewModel::onOpenUnitPicker,
+                onOpenFoodPicker = editorViewModel::onOpenFoodPicker,
+                onCloseCatalogPicker = editorViewModel::onCloseCatalogPicker,
+                onCatalogQueryChange = editorViewModel::onCatalogQueryChange,
+                onRetryCatalogPicker = editorViewModel::onRetryCatalogPicker,
+                onPickCatalogEntry = editorViewModel::onPickCatalogEntry,
+                onCreateCatalogEntry = editorViewModel::onCreateCatalogEntry,
                 onAddIngredient = editorViewModel::onAddIngredient,
                 onRemoveIngredient = editorViewModel::onRemoveIngredient,
                 onMoveIngredientUp = editorViewModel::onMoveIngredientUp,
@@ -242,6 +258,17 @@ fun RecipesRoute(
                 onDeleteClick = detailViewModel::onDeleteClick,
                 onDeleteDismiss = detailViewModel::onDeleteDismiss,
                 onDeleteConfirm = detailViewModel::onDeleteConfirm,
+                shopping = shoppingState,
+                shoppingActions = RecipeShoppingActions(
+                    onOpenClick = detailViewModel::onAddToShoppingClick,
+                    onSelectList = detailViewModel::onAddToShoppingListSelected,
+                    onScaleChange = detailViewModel::onAddToShoppingScaleChange,
+                    onRetryLists = detailViewModel::onAddToShoppingRetryLists,
+                    onConfirm = detailViewModel::onAddToShoppingConfirm,
+                    onDismiss = detailViewModel::onAddToShoppingDismiss,
+                    onNoticeDismiss = detailViewModel::onAddToShoppingNoticeDismiss,
+                    onOpenShopping = onOpenShoppingTab,
+                ),
                 modifier = modifier,
             )
         }

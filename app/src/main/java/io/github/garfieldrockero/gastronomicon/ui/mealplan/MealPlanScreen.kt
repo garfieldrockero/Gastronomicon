@@ -67,6 +67,9 @@ import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingNoticeCard
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingOutcome
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingUi
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
@@ -87,6 +90,11 @@ class MealPlanActions(
     val onNoticeShown: () -> Unit = {},
     /** «Ver esa semana» del aviso: la comida se guardó en otra semana. */
     val onShowNoticeWeek: () -> Unit = {},
+    // «Añadir la semana a la compra» (fase 9, extra 1).
+    val onAddToShoppingClick: () -> Unit = {},
+    val onAddToShoppingNoticeDismiss: () -> Unit = {},
+    /** Lleva a la pestaña Compra; null si la navegación aún no lo cablea. */
+    val onOpenShopping: (() -> Unit)? = null,
     val sheets: MealPlanSheetActions = MealPlanSheetActions(),
 )
 
@@ -242,6 +250,7 @@ private fun MealPlanBody(
         else -> WeekContent(
             plan = plan,
             week = week,
+            addToShopping = state.addToShopping,
             // Con una hoja abierta, el fallo de esa escritura se enseña dentro de ella.
             showActionFailure = state.dialog is MealPlanDialog.None,
             actions = actions,
@@ -254,6 +263,7 @@ private fun MealPlanBody(
 private fun WeekContent(
     plan: MealPlanState,
     week: MealPlanWeekView,
+    addToShopping: AddToShoppingUi,
     showActionFailure: Boolean,
     actions: MealPlanActions,
     modifier: Modifier = Modifier,
@@ -295,6 +305,22 @@ private fun WeekContent(
             )
         }
 
+        // «Ya están en la lista»: encima de la semana y sin taparla, con su acción.
+        val shoppingNotice = addToShopping.notice
+        if (shoppingNotice != null) {
+            AddToShoppingNoticeCard(
+                notice = shoppingNotice,
+                onLook = actions.onOpenShopping,
+                onDismiss = actions.onAddToShoppingNoticeDismiss,
+                modifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small),
+            )
+        }
+
+        // Añadir la semana a la compra: solo si la pantalla tiene transporte de la
+        // compra. El recuento de recetas lo dice el núcleo al abrir el diálogo.
+        val addWeekToShopping: (() -> Unit)? =
+            if (addToShopping.available) actions.onAddToShoppingClick else null
+
         if (!week.hasMeals) {
             // Semana en blanco: un texto útil y una acción, no siete tarjetas vacías.
             WeekHeader(week = week, onToday = actions.onToday, enabled = !plan.isBusy)
@@ -318,7 +344,13 @@ private fun WeekContent(
                 verticalArrangement = Arrangement.spacedBy(Spacing.medium),
             ) {
                 item(key = "header") {
-                    WeekHeader(week = week, onToday = actions.onToday, enabled = !plan.isBusy, inList = true)
+                    WeekHeader(
+                        week = week,
+                        onToday = actions.onToday,
+                        enabled = !plan.isBusy,
+                        inList = true,
+                        onAddToShopping = addWeekToShopping,
+                    )
                 }
                 items(items = week.days, key = { it.date.toString() }) { day ->
                     DayCard(
@@ -341,6 +373,8 @@ private fun WeekHeader(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     inList: Boolean = false,
+    /** «Añadir la semana a la compra»; null si esta pantalla no puede hacerlo. */
+    onAddToShopping: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -367,6 +401,25 @@ private fun WeekHeader(
                     .heightIn(min = Sizes.MinTouchTarget),
             ) {
                 Text(stringResource(R.string.plan_week_today))
+            }
+        }
+        if (onAddToShopping != null) {
+            // Objetivo grande y al alcance: se usa de pie, antes de ir al súper.
+            OutlinedButton(
+                onClick = onAddToShopping,
+                enabled = enabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_tab_shopping),
+                    contentDescription = null,
+                )
+                Text(
+                    text = stringResource(R.string.extras_compra_week_action),
+                    modifier = Modifier.padding(start = Spacing.small),
+                )
             }
         }
     }
@@ -895,4 +948,30 @@ private fun MealPlanActionFailedPreview() {
 @Composable
 private fun MealPlanSavingPreview() {
     GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.ready(phase = MealPlanPhase.Saving), MealPlanActions()) }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 780)
+@Composable
+private fun MealPlanShoppingAddedPreview() {
+    GastronomiconTheme {
+        MealPlanScreen(
+            MealPlanPreviewData.ready(
+                shoppingNotice = AddToShoppingOutcome.Added("Compra de la semana", 4),
+            ),
+            MealPlanActions(onOpenShopping = {}),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 780, fontScale = 2f)
+@Composable
+private fun MealPlanShoppingMaybeAddedLargeTextPreview() {
+    GastronomiconTheme {
+        MealPlanScreen(
+            MealPlanPreviewData.ready(
+                shoppingNotice = AddToShoppingOutcome.MaybeAdded(ConnectionProblem.ServerNotResponding),
+            ),
+            MealPlanActions(onOpenShopping = {}),
+        )
+    }
 }

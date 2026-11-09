@@ -189,7 +189,11 @@ private fun AppRoot(
         factory = RecipeListViewModel.factory(container.clientAccess, container.offline),
     )
     val recipeDetailViewModel: RecipeDetailViewModel = viewModel(
-        factory = RecipeDetailViewModel.factory(container.clientAccess, container.offline),
+        factory = RecipeDetailViewModel.factory(
+            container.clientAccess,
+            container.offline,
+            container.shoppingAccess,
+        ),
     )
     val recipeEditorViewModel: RecipeEditorViewModel = viewModel(
         factory = RecipeEditorViewModel.factory(container.clientAccess, container.imageRecoder, container.offline),
@@ -198,7 +202,11 @@ private fun AppRoot(
         factory = RecipeImportViewModel.factory(container.clientAccess),
     )
     val mealPlanViewModel: MealPlanViewModel = viewModel(
-        factory = MealPlanViewModel.factory(container.mealPlanAccess, container.clientAccess),
+        factory = MealPlanViewModel.factory(
+            container.mealPlanAccess,
+            container.clientAccess,
+            container.shoppingAccess,
+        ),
     )
     val shoppingViewModel: ShoppingViewModel = viewModel(
         factory = ShoppingViewModel.factory(container.shoppingAccess, container.shoppingWidgetSink),
@@ -320,6 +328,12 @@ private fun AppRoot(
                         scroll = recipesScroll,
                         topMemo = topMemo,
                         onOpenSettings = openSettings,
+                        // «Ver la compra» del detalle: se cierra la receta (el detalle ocupa la
+                        // pantalla entera y su aviso ya no hace falta) y se cambia de pestaña.
+                        onOpenShoppingTab = {
+                            recipeDetailViewModel.close()
+                            appViewModel.onTabSelected(MainTab.Shopping)
+                        },
                         modifier = contentModifier,
                         listContentWindowInsets = tabInsets,
                     )
@@ -327,6 +341,12 @@ private fun AppRoot(
                     MainTab.MealPlan -> MealPlanRoute(
                         viewModel = mealPlanViewModel,
                         onOpenSettings = openSettings,
+                        // El aviso de la semana lleva a la compra: no hace falta volver a verlo
+                        // al regresar al planificador.
+                        onOpenShoppingTab = {
+                            mealPlanViewModel.onAddToShoppingNoticeDismiss()
+                            appViewModel.onTabSelected(MainTab.Shopping)
+                        },
                         modifier = contentModifier,
                         contentWindowInsets = tabInsets,
                     )

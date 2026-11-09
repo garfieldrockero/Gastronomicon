@@ -20,7 +20,17 @@ import io.github.garfieldrockero.gastronomicon.core.network.toConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListController
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListSource
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
+import io.github.garfieldrockero.gastronomicon.core.shopping.RecipeAddition
+import io.github.garfieldrockero.gastronomicon.core.shopping.RecipeAdditions
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerController
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerPhase
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerState
 import io.github.garfieldrockero.gastronomicon.platform.ClientAccess
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShopping
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingOutcome
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingUi
+import io.github.garfieldrockero.gastronomicon.ui.recipes.guardedBy
+import io.github.garfieldrockero.gastronomicon.ui.shopping.ShoppingAccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -55,10 +65,20 @@ import java.time.LocalDate
  *   del núcleo); el planificador no tiene un selector propio en `core/`.
  * - [reset] cancela todo, sube la época y empieza de cero: lo que ya estaba en
  *   vuelo no puede usar la sesión nueva (ver [epoch]).
+ *
+ * Fase 9, extra 1: «añadir los ingredientes de esta semana a la compra». Qué
+ * recetas entran (y cómo se suman las escalas de una receta repetida) lo decide
+ * `RecipeAdditions`; aquí solo se pide el plan al abrir el diálogo y se manda al
+ * confirmar, sin reintentos.
  */
 class MealPlanViewModel(
     private val planAccess: MealPlanAccess,
     private val recipeAccess: ClientAccess,
+    /**
+     * Transporte de la compra. Sin él (null) la acción de la semana ni se
+     * ofrece: no hay de dónde sacar la sesión para el `POST`.
+     */
+    private val shoppingAccess: ShoppingAccess? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
@@ -86,6 +106,12 @@ class MealPlanViewModel(
     private var noticeDate: LocalDate? = null
     private var noticeSeq = 0L
 
+    // «Añadir a la compra» (fase 9, extra 1): el diálogo, el envío y su aviso. Las
+    // recetas y sus escalas las fija el núcleo al abrir el diálogo.
+    private var addToShopping = AddToShoppingUi(available = shoppingAccess != null)
+    private var shoppingPicker: ShoppingListPickerController? = null
+    private var shoppingAdditions: List<RecipeAddition> = emptyList()
+
     private val _state = MutableStateFlow(snapshot())
     val state: StateFlow<MealPlanUiState> = _state.asStateFlow()
 
@@ -112,6 +138,7 @@ class MealPlanViewModel(
         notice = notice,
         noticeId = noticeSeq,
         noticeDate = noticeDate,
+        addToShopping = addToShopping,
     )
 
     private fun publish() {
@@ -322,6 +349,121 @@ class MealPlanViewModel(
         publish()
     }
 
+    // ---------------------------------------- añadir la semana a la compra
+
+    /**
+     * Abre el diálogo de «añadir esta semana a la compra». Qué recetas entran,
+     * cómo se suman las escalas de una receta repetida y el tope de 30 lo decide
+     * el núcleo ([RecipeAdditions.plan]) sobre la última semana leída: aquí no se
+     * cuenta nada. Sin ninguna receta el diálogo se abre explicándolo, sin pedir
+     * listas.
+     */
+    fun onAddToShoppingClick() {
+        val store = shoppingAccess ?: return
+        if (controller.state.isBusy) return
+        val plan = RecipeAdditions.plan(planSource.weekEntries())
+        controller.clearActionFailure()
+        shoppingPicker = null
+        shoppingAdditions = plan.additions
+        addToShopping = AddToShoppingUi(
+            available = true,
+            open = true,
+            recipes = plan.additions.size,
+            skipped = plan.skippedRecipes,
+            truncated = plan.truncated,
+            // El aviso de un envío anterior se queda hasta que la persona lo cierre.
+            notice = addToShopping.notice,
+            picker = if (plan.isEmpty) {
+                ShoppingListPickerState()
+            } else {
+                ShoppingListPickerState(phase = ShoppingListPickerPhase.Loading)
+            },
+        )
+        publish()
+        if (!plan.isEmpty) loadShoppingLists(store)
+    }
+
+    /** Elige a qué lista van los ingredientes de la semana. No toca la red. */
+    fun onAddToShoppingListSelected(listId: String) {
+        if (!addToShopping.open) return
+        val picker = shoppingPicker ?: return
+        addToShopping = addToShopping.copy(picker = picker.rememberOpenList(listId), problem = null)
+        publish()
+    }
+
+    /** «Volver a mirar» de las listas: las vuelve a leer. */
+    fun onAddToShoppingRetryLists() {
+        val store = shoppingAccess ?: return
+        if (!addToShopping.open || addToShopping.sending) return
+        addToShopping = addToShopping.copy(problem = null)
+        publish()
+        loadShoppingLists(store)
+    }
+
+    /** Cierra el diálogo; con el `POST` en vuelo no hace nada. */
+    fun onAddToShoppingDismiss() {
+        if (addToShopping.sending) return
+        addToShopping = addToShopping.copy(open = false, problem = null, sending = false)
+        publish()
+    }
+
+    /** Cierra el aviso de después de añadir. */
+    fun onAddToShoppingNoticeDismiss() {
+        addToShopping = addToShopping.copy(notice = null)
+        publish()
+    }
+
+    /**
+     * Confirma: manda las recetas que ya fijó el núcleo a la lista elegida. La
+     * tanda se valida otra vez antes de enviar y no se reintenta nunca sola: un
+     * desenlace dudoso es el aviso de mirar la lista antes de repetir.
+     */
+    fun onAddToShoppingConfirm() {
+        val store = shoppingAccess ?: return
+        val current = addToShopping
+        if (!current.open || current.sending) return
+        val listId = current.picker.openListId ?: return
+        val additions = shoppingAdditions
+        val invalid = RecipeAdditions.check(additions)
+        if (invalid != null) {
+            addToShopping = current.copy(problem = AddToShoppingOutcome.Invalid(invalid))
+            publish()
+            return
+        }
+        val listName = current.picker.openList?.displayName.orEmpty()
+        addToShopping = current.copy(sending = true, problem = null)
+        publish()
+        val bornEpoch = epoch
+        // La sesión se lee solo si sigue siendo la de este envío: tras `reset()`
+        // no se abre conexión ni se usa el token nuevos.
+        val session = store.guardedBy { epoch == bornEpoch }
+        launchTracked<AddToShoppingOutcome>(
+            isCurrent = { epoch == bornEpoch },
+            onResult = { outcome ->
+                addToShopping = when (outcome) {
+                    is AddToShoppingOutcome.Added, is AddToShoppingOutcome.MaybeAdded ->
+                        addToShopping.copy(open = false, sending = false, problem = null, notice = outcome)
+                    else -> addToShopping.copy(sending = false, problem = outcome)
+                }
+            },
+        ) {
+            withContext(ioDispatcher) { AddToShopping.add(session, listId, additions, listName) }
+        }
+    }
+
+    /** Lee la página de listas en segundo plano; el selector es del núcleo. */
+    private fun loadShoppingLists(store: ShoppingAccess) {
+        val bornEpoch = epoch
+        val picker = AddToShopping.newPicker(store.guardedBy { epoch == bornEpoch })
+        shoppingPicker = picker
+        launchTracked<ShoppingListPickerState>(
+            isCurrent = { shoppingPicker === picker },
+            onResult = { loaded -> addToShopping = addToShopping.copy(picker = loaded) },
+        ) {
+            withContext(ioDispatcher) { picker.load() }
+        }
+    }
+
     /** Cancela lo que corra y empieza de cero: sesión cambiada, borrada o primera configuración. */
     fun reset() {
         running.forEach { it.cancel() }
@@ -335,6 +477,9 @@ class MealPlanViewModel(
         dialog = MealPlanDialog.None
         notice = null
         noticeDate = null
+        shoppingPicker = null
+        shoppingAdditions = emptyList()
+        addToShopping = AddToShoppingUi(available = shoppingAccess != null)
         controller = newController()
         picker = newPicker()
         publish()
@@ -464,11 +609,22 @@ class MealPlanViewModel(
         /** Tope del texto de raciones: el número útil no llega ni a cinco caracteres. */
         private const val MAX_SCALE_INPUT = 10
 
-        fun factory(planAccess: MealPlanAccess, recipeAccess: ClientAccess): ViewModelProvider.Factory =
+        /**
+         * @param shoppingAccess transporte de la compra para «añadir la semana a
+         *   la compra». Sin él la acción no se ofrece: quien monte el ViewModel
+         *   tiene que pasar el `ShoppingAccess` de la app (en `MainActivity`,
+         *   `container.shoppingAccess`). Pendiente de cablear: el alcance de esta
+         *   tarea no incluía la actividad.
+         */
+        fun factory(
+            planAccess: MealPlanAccess,
+            recipeAccess: ClientAccess,
+            shoppingAccess: ShoppingAccess? = null,
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    MealPlanViewModel(planAccess, recipeAccess) as T
+                    MealPlanViewModel(planAccess, recipeAccess, shoppingAccess) as T
             }
     }
 }
@@ -498,8 +654,18 @@ private class PlanSource(
 
     private val remembered = HashMap<Long, PlannedMeal>()
 
+    /**
+     * Última semana leída, en el orden en que la mandó el servidor. La usa
+     * «añadir la semana a la compra»: el plan de recetas lo compone el núcleo y
+     * el orden de la lista tiene que ser estable.
+     */
+    private var week: List<PlannedMeal> = emptyList()
+
     /** La última entrada leída con ese id, o null si esta sesión no la ha visto. */
     fun entry(id: Long): PlannedMeal? = synchronized(remembered) { remembered[id] }
+
+    /** La semana tal como se leyó (vacía si esta sesión no ha leído ninguna). */
+    fun weekEntries(): List<PlannedMeal> = synchronized(remembered) { week }
 
     override fun listEntries(start: LocalDate, end: LocalDate): MealPlanResult<List<PlannedMeal>> =
         guarded { it.listEntries(start, end) }.also { rememberAll(it) }
@@ -530,6 +696,7 @@ private class PlanSource(
         synchronized(remembered) {
             remembered.clear()
             for (meal in result.value) remembered[meal.id] = meal
+            week = result.value.toList()
         }
     }
 

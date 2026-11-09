@@ -13,6 +13,8 @@ import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummary
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeTimes
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingOutcome
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingUi
 import java.time.LocalDate
 
 /**
@@ -65,12 +67,16 @@ internal object MealPlanPreviewData {
     private fun week(start: LocalDate, list: List<PlannedMeal>, today: LocalDate = TODAY) =
         MealPlanWeekView.of(start, list, today)
 
-    private fun uiState(plan: MealPlanState) = MealPlanUiState(
+    private fun uiState(
+        plan: MealPlanState,
+        addToShopping: AddToShoppingUi = AddToShoppingUi(available = true),
+    ) = MealPlanUiState(
         plan = plan,
         dialog = MealPlanDialog.None,
         picker = picker(),
         notice = null,
         noticeId = 0L,
+        addToShopping = addToShopping,
     )
 
     /** Semana con comidas; los parámetros dejan probar la recarga fallida, un fallo al guardar o «guardando». */
@@ -78,6 +84,7 @@ internal object MealPlanPreviewData {
         phase: MealPlanPhase = MealPlanPhase.Idle,
         loadProblem: MealPlanProblem? = null,
         actionFailure: MealPlanActionFailure? = null,
+        shoppingNotice: AddToShoppingOutcome? = null,
     ): MealPlanUiState = uiState(
         MealPlanState(
             weekStart = WEEK_START,
@@ -86,6 +93,11 @@ internal object MealPlanPreviewData {
             phase = phase,
             loadProblem = loadProblem,
             actionFailure = actionFailure,
+        ),
+        addToShopping = AddToShoppingUi(
+            // En la app, «disponible» cuando está cableado el transporte de la compra.
+            available = true,
+            notice = shoppingNotice,
         ),
     )
 

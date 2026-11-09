@@ -27,6 +27,8 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.DraftNote
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftOrganizer
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftStep
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftValidation
+import io.github.garfieldrockero.gastronomicon.core.recipes.IngredientFood
+import io.github.garfieldrockero.gastronomicon.core.recipes.IngredientUnit
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraft
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraftValidator
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlug
@@ -39,6 +41,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,7 +71,10 @@ internal class UiIdSource {
     }
 }
 
-/** Una línea de ingredientes tal como se edita: cantidad y nota; unidad y alimento solo se leen. */
+/**
+ * Una línea de ingredientes tal como se edita: cantidad, nota y la unidad y el
+ * alimento elegidos del catálogo del servidor ([unitId]/[foodId]).
+ */
 data class IngredientForm(
     val quantity: String = "",
     val unit: String = "",
@@ -76,6 +82,13 @@ data class IngredientForm(
     val note: String = "",
     val title: String = "",
     val sourceId: String? = null,
+    /**
+     * Referencia al catálogo ([IngredientUnit]/[IngredientFood]). Es nula
+     * cuando la línea solo tiene el nombre (una receta antigua, un borrador de
+     * antes de esta tanda) y entonces el núcleo reenvía el nombre tal cual.
+     */
+    val unitId: String? = null,
+    val foodId: String? = null,
     /**
      * Id estable solo de interfaz (`key` de Compose): la tarjeta conserva su foco, su
      * scroll y su sitio en el orden de TalkBack al moverse. No viaja al borrador ni al
@@ -91,6 +104,64 @@ data class StepForm(
     val sourceId: String? = null,
     /** Igual que [IngredientForm.uiId]: solo para la interfaz, fuera del borrador. */
     val uiId: Long = 0L,
+)
+
+/** Qué catálogo se está eligiendo: la unidad o el alimento de un ingrediente. */
+enum class IngredientCatalogKind { Unit, Food }
+
+/**
+ * Una entrada del catálogo ya como la pinta el selector: el id (UUID que da
+ * Mealie), el nombre ya saneado por el núcleo y, si la tiene, la abreviatura
+ * (solo para enseñarla). Sin token, sin URL y sin ningún dato del servidor más.
+ */
+data class CatalogEntry(val id: String, val name: String, val hint: String = "")
+
+/**
+ * El selector de unidad o de alimento que está abierto, con lo que ha dicho el
+ * servidor. Se cierra al elegir o al cerrar con la X: nunca cambia la línea
+ * hasta que la persona elige.
+ *
+ * [loaded] distingue «todavía no se ha preguntado» de «se preguntó y no hay
+ * nada»; [truncated] dice que el servidor tiene más de los que caben en una
+ * página (lo calcula el núcleo con `Page.hasNext`). [maybeCreated] es el aviso
+ * de que la creación quedó en el aire: **no se reintenta sola**.
+ */
+data class CatalogPicker(
+    val kind: IngredientCatalogKind,
+    val index: Int,
+    /**
+     * Id de interfaz de la fila ([IngredientForm.uiId]) a la que se aplica lo
+     * elegido o lo creado. Se apunta al abrir el selector: la fila se busca por
+     * este id y no por la posición, así que un cambio de orden mientras el
+     * selector está abierto no manda la unidad a otro ingrediente. Vale cero en
+     * las previews, que no tienen filas de verdad.
+     */
+    val uiId: Long = 0L,
+    val query: String = "",
+    val items: List<CatalogEntry> = emptyList(),
+    /**
+     * La búsqueda que produjo [items]. Si no coincide con [query], la lista que
+     * hay es de una búsqueda anterior: sigue a la vista (con el aviso de espera
+     * encima) para que la hoja no se quede en blanco en cada letra.
+     */
+    val itemsQuery: String = "",
+    val loading: Boolean = false,
+    val problem: ConnectionProblem? = null,
+    val truncated: Boolean = false,
+    val loaded: Boolean = false,
+    val creating: Boolean = false,
+    val createProblem: ConnectionProblem? = null,
+    /** El servidor ha rechazado el nombre nuevo (400/409/422…). */
+    val createRejected: Boolean = false,
+    /** El nombre nuevo no pasa la validación del núcleo: no se ha enviado nada. */
+    val createErrors: List<DraftError> = emptyList(),
+    val maybeCreated: Boolean = false,
+    /**
+     * El servidor creó la unidad o el alimento, pero la fila del ingrediente ya no
+     * estaba: se avisa en vez de perder el resultado en silencio. Con el selector
+     * abierto y la creación en vuelo no debería pasar.
+     */
+    val createdNotApplied: Boolean = false,
 )
 
 /**
@@ -125,6 +196,10 @@ data class RecipeForm(
                 note = row.note,
                 title = row.title,
                 sourceId = row.sourceId,
+                // La referencia al catálogo viaja para que el núcleo reenvíe la
+                // misma unidad o alimento en vez de crearlo por nombre.
+                unitId = row.unitId,
+                foodId = row.foodId,
             )
         }
         val parsedSteps = steps.map { DraftStep(title = it.title, text = it.text, sourceId = it.sourceId) }
@@ -165,6 +240,8 @@ data class RecipeForm(
                     note = row.note,
                     title = row.title,
                     sourceId = row.sourceId,
+                    unitId = row.unitId,
+                    foodId = row.foodId,
                     uiId = uiIds.next(),
                 )
             },
@@ -326,6 +403,11 @@ sealed interface RecipeEditorState {
         val showDraftDiscardConfirm: Boolean = false,
         /** El borrador ofrecido no pasa el validador: se dice en la propia caja. */
         val draftInvalid: Boolean = false,
+        /**
+         * Selector de unidad o de alimento abierto (o null). Nada de la línea
+         * cambia hasta que la persona elige una entrada del catálogo.
+         */
+        val catalogPicker: CatalogPicker? = null,
     ) : RecipeEditorState
 
     /**
@@ -346,7 +428,13 @@ sealed interface RecipeEditorState {
  *
  * - Cada operación crea su cliente con [ClientAccess] y corre en un hilo de fondo.
  * - [openEdit] lee el borrador con `loadDraft` y conserva los `sourceId` para que
- *   el núcleo no pierda lo que el formulario no muestra (unidad, alimento, notas).
+ *   el núcleo no pierda lo que el formulario no muestra (notas, la sección del
+ *   ingrediente…), más la referencia al catálogo de la unidad y el alimento.
+ * - La unidad y el alimento se eligen del catálogo del servidor ([CatalogPicker]):
+ *   se busca con un retardo corto y se puede crear lo que no esté
+ *   (`createUnit`/`createFood`), que **nunca** se reintenta solo. Ninguna regla
+ *   se calcula aquí: el saneado, el tope de resultados y la validación del
+ *   nombre nuevo los pone el núcleo.
  * - Crear son dos pasos: `createRecipe(name)` y luego `updateRecipe` con el resto.
  *   Si el segundo falla, la receta ya existe: se avisa y se sigue editando.
  * - Si crear queda en el aire ([ApiResult.MaybeCreated]), se avisa de que puede
@@ -382,6 +470,15 @@ class RecipeEditorViewModel(
     private var saveJob: Job? = null
     private var photoJob: Job? = null
     private var draftJob: Job? = null
+    private var pickerJob: Job? = null
+
+    /**
+     * La creación de una unidad o un alimento va en su propio trabajo, separado de
+     * [pickerJob]: empezar a crear no cancela la búsqueda que estuviera en marcha
+     * (dejaría un «buscando» sin nadie detrás) y cerrar el selector no cancela el
+     * `POST` ya enviado.
+     */
+    private var createJob: Job? = null
 
     /**
      * Cambia solo al reiniciar por otra sesión ([reset]). Los guardados de
@@ -729,6 +826,163 @@ class RecipeEditorViewModel(
 
     fun onMoveIngredientDown(index: Int) = updateForm { form ->
         form.copy(ingredients = move(form.ingredients, index, index + 1))
+    }
+
+    // ------------------------------------------- unidad y alimento (catálogo)
+
+    /**
+     * Abre el selector de unidades del ingrediente [index]. Se pregunta al
+     * catálogo nada más abrirlo y, después, con lo que se escriba y un retardo
+     * corto (no una petición por letra). Nada de la línea cambia hasta que se
+     * elige una entrada.
+     */
+    fun onOpenUnitPicker(index: Int) = openCatalogPicker(IngredientCatalogKind.Unit, index)
+
+    /** Igual que [onOpenUnitPicker], con los alimentos. */
+    fun onOpenFoodPicker(index: Int) = openCatalogPicker(IngredientCatalogKind.Food, index)
+
+    /**
+     * Cierra el selector sin tocar la línea. Con una creación en vuelo no hace
+     * nada: el `POST` ya está enviado y, si se cerrara, el servidor tendría una
+     * unidad o un alimento que la app no conocería (al repetir, se duplicaría).
+     */
+    fun onCloseCatalogPicker() {
+        val current = _state.value as? RecipeEditorState.Editing
+        if (current?.catalogPicker?.creating == true) return
+        pickerJob?.cancel()
+        pickerJob = null
+        _state.update { latest ->
+            if (latest is RecipeEditorState.Editing && latest.catalogPicker != null) {
+                latest.copy(catalogPicker = null)
+            } else {
+                latest
+            }
+        }
+    }
+
+    /**
+     * Lo escrito en la búsqueda del selector. Quien sanea, acota y decide
+     * cuántas entradas caben es el núcleo (`listUnits`/`listFoods`); aquí solo
+     * se espera un poco antes de preguntar.
+     */
+    fun onCatalogQueryChange(value: String) {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        val picker = current.catalogPicker ?: return
+        if (picker.creating || picker.query == value) return
+        _state.value = current.copy(
+            catalogPicker = picker.copy(
+                query = value,
+                loading = true,
+                problem = null,
+                // Se vuelve a mirar el catálogo: el aviso de «puede que ya exista»
+                // ya ha cumplido su función.
+                maybeCreated = false,
+                createErrors = emptyList(),
+                createdNotApplied = false,
+            ),
+        )
+        searchCatalog(picker.kind, value, debounced = true)
+    }
+
+    /**
+     * «Volver a intentar» la búsqueda. También es lo que se ofrece después de un
+     * «puede que ya exista»: mirar el catálogo antes de repetir la creación.
+     */
+    fun onRetryCatalogPicker() {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        val picker = current.catalogPicker ?: return
+        if (picker.creating) return
+        _state.value = current.copy(
+            catalogPicker = picker.copy(
+                loading = true,
+                problem = null,
+                maybeCreated = false,
+                createProblem = null,
+                createRejected = false,
+                createErrors = emptyList(),
+                createdNotApplied = false,
+            ),
+        )
+        searchCatalog(picker.kind, picker.query, debounced = false)
+    }
+
+    /**
+     * Elige una entrada del catálogo para el ingrediente del selector abierto.
+     * [entry] nula quita la unidad o el alimento, que es algo que el esquema
+     * admite (`null` en la línea).
+     */
+    fun onPickCatalogEntry(entry: CatalogEntry?) {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        val picker = current.catalogPicker ?: return
+        if (current.saving) return
+        // Con una creación en vuelo, elegir cerraría el selector y el resultado del
+        // `POST` se perdería (ver [onCloseCatalogPicker]): se ignora el toque.
+        if (picker.creating) return
+        applyCatalogEntry(picker, entry)
+        onCloseCatalogPicker()
+    }
+
+    /**
+     * Crea en el catálogo el nombre escrito en el selector. Valida y clasifica
+     * el núcleo (`createUnit`/`createFood`): **nunca se reintenta solo**, y si
+     * el desenlace es ambiguo ([ApiResult.MaybeCreated]) se avisa de que puede
+     * existir y el botón de crear no vuelve a responder hasta mirar la lista.
+     *
+     * La creación corre en su propio trabajo ([createJob]): no cancela la búsqueda
+     * que hubiera en marcha, así que no queda un «buscando» sin nadie detrás.
+     */
+    fun onCreateCatalogEntry(name: String) {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        val picker = current.catalogPicker ?: return
+        if (current.saving || picker.creating || picker.maybeCreated || picker.createdNotApplied) return
+        _state.value = current.copy(
+            catalogPicker = picker.copy(
+                creating = true,
+                createProblem = null,
+                createRejected = false,
+                createErrors = emptyList(),
+                createdNotApplied = false,
+            ),
+        )
+        val gen = generation
+        createJob = viewModelScope.launch {
+            val outcome = withContext(ioDispatcher) { createCatalogEntry(picker.kind, name) }
+            if (gen != generation) return@launch
+            when (outcome) {
+                is CatalogCreation.Created -> {
+                    // Se aplica a la fila correcta (por su id de interfaz) y se cierra
+                    // el selector; el id nuevo ya viaja en el borrador, así que el `PUT`
+                    // no crea otra por nombre. Si la fila ya no estaba, se avisa: el
+                    // resultado no se tira en silencio.
+                    if (applyCatalogEntry(picker, outcome.entry)) {
+                        _state.update { latest ->
+                            if (latest is RecipeEditorState.Editing) {
+                                latest.copy(catalogPicker = null)
+                            } else {
+                                latest
+                            }
+                        }
+                    } else {
+                        updateCatalogPicker(picker.kind) {
+                            it.copy(creating = false, createdNotApplied = true)
+                        }
+                    }
+                }
+                is CatalogCreation.Invalid -> updateCatalogPicker(picker.kind) {
+                    it.copy(creating = false, createErrors = outcome.errors)
+                }
+                is CatalogCreation.Problem -> updateCatalogPicker(picker.kind) {
+                    it.copy(
+                        creating = false,
+                        createProblem = if (outcome.rejected) null else outcome.problem,
+                        createRejected = outcome.rejected,
+                    )
+                }
+                CatalogCreation.MaybeCreated -> updateCatalogPicker(picker.kind) {
+                    it.copy(creating = false, maybeCreated = true)
+                }
+            }
+        }
     }
 
     fun onStepTitleChange(index: Int, value: String) = updateStep(index) { it.copy(title = value) }
@@ -1336,6 +1590,160 @@ class RecipeEditorViewModel(
         )
     }
 
+    // ----------------------------------- catálogo de unidades y alimentos
+
+    /** Abre el selector de [kind] en la fila [index] y pide la primera página del catálogo. */
+    private fun openCatalogPicker(kind: IngredientCatalogKind, index: Int) {
+        val current = _state.value as? RecipeEditorState.Editing ?: return
+        if (current.saving || index !in current.form.ingredients.indices) return
+        // El id de la fila se apunta ahora: lo elegido y lo creado se aplicarán a
+        // esta fila aunque el orden cambie mientras el selector está abierto.
+        val uiId = current.form.ingredients[index].uiId
+        _state.value = current.copy(
+            catalogPicker = CatalogPicker(kind = kind, index = index, uiId = uiId, loading = true),
+        )
+        searchCatalog(kind, "", debounced = false)
+    }
+
+    /** Posición de la fila del selector: por id de interfaz, o por índice en las previews. */
+    private fun pickerRowIndex(form: RecipeForm, picker: CatalogPicker): Int? =
+        if (picker.uiId != 0L) {
+            form.ingredients.indexOfFirst { it.uiId == picker.uiId }.takeIf { it >= 0 }
+        } else {
+            picker.index.takeIf { it in form.ingredients.indices }
+        }
+
+    /**
+     * Pasa la entrada elegida a la fila del selector (o la quita, si [entry] es
+     * nula). La fila se busca por su id de interfaz: si el orden cambió mientras
+     * el selector estaba abierto, la unidad no acaba en otro ingrediente.
+     * Devuelve si la fila seguía existiendo.
+     */
+    private fun applyCatalogEntry(picker: CatalogPicker, entry: CatalogEntry?): Boolean {
+        val current = _state.value as? RecipeEditorState.Editing ?: return false
+        val index = pickerRowIndex(current.form, picker) ?: return false
+        updateIngredient(index) { row ->
+            when (picker.kind) {
+                IngredientCatalogKind.Unit -> row.copy(unit = entry?.name.orEmpty(), unitId = entry?.id)
+                IngredientCatalogKind.Food -> row.copy(food = entry?.name.orEmpty(), foodId = entry?.id)
+            }
+        }
+        return true
+    }
+
+    private fun updateCatalogPicker(kind: IngredientCatalogKind, change: (CatalogPicker) -> CatalogPicker) {
+        _state.update { current ->
+            if (current !is RecipeEditorState.Editing) return@update current
+            val picker = current.catalogPicker ?: return@update current
+            if (picker.kind != kind) return@update current
+            current.copy(catalogPicker = change(picker))
+        }
+    }
+
+    /**
+     * Pregunta al catálogo en un hilo de fondo. Con [debounced] se espera un poco
+     * antes de salir a la red; cualquier búsqueda anterior se cancela, así que
+     * solo se pinta la última.
+     */
+    private fun searchCatalog(kind: IngredientCatalogKind, query: String, debounced: Boolean) {
+        pickerJob?.cancel()
+        val gen = generation
+        pickerJob = viewModelScope.launch {
+            if (debounced) delay(CATALOG_SEARCH_DELAY_MS)
+            val outcome = withContext(ioDispatcher) { fetchCatalog(kind, query) }
+            if (gen != generation) return@launch
+            _state.update { current ->
+                if (current !is RecipeEditorState.Editing) return@update current
+                val picker = current.catalogPicker ?: return@update current
+                if (picker.kind != kind || picker.query != query) return@update current
+                current.copy(
+                    catalogPicker = when (outcome) {
+                        is CatalogResult.Loaded -> picker.copy(
+                            items = outcome.items,
+                            itemsQuery = query,
+                            truncated = outcome.truncated,
+                            loading = false,
+                            problem = null,
+                            loaded = true,
+                        )
+                        is CatalogResult.Problem -> picker.copy(
+                            loading = false,
+                            problem = outcome.problem,
+                            loaded = true,
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    /** Una página del catálogo. El tope y el saneado de la búsqueda los pone el núcleo. */
+    private fun fetchCatalog(kind: IngredientCatalogKind, query: String): CatalogResult {
+        val client = try {
+            access.newClient()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: NetworkError) {
+            return CatalogResult.Problem(networkProblem(e))
+        } catch (e: Exception) {
+            return CatalogResult.Problem(ConnectionProblem.Unknown)
+        }
+        // Un espacio en blanco no viaja: el núcleo lo descarta igual, pero así no
+        // se le pide una búsqueda vacía.
+        val search = query.trim().ifEmpty { null }
+        return when (kind) {
+            IngredientCatalogKind.Unit -> when (val result = client.listUnits(search = search)) {
+                is ApiResult.Success -> CatalogResult.Loaded(
+                    items = result.value.items.map { it.toEntry() },
+                    truncated = result.value.hasNext,
+                )
+                else -> CatalogResult.Problem(problemOf(result))
+            }
+            IngredientCatalogKind.Food -> when (val result = client.listFoods(search = search)) {
+                is ApiResult.Success -> CatalogResult.Loaded(
+                    items = result.value.items.map { it.toEntry() },
+                    truncated = result.value.hasNext,
+                )
+                else -> CatalogResult.Problem(problemOf(result))
+            }
+        }
+    }
+
+    /** Crea la unidad o el alimento, ya saneado y validado por el núcleo. */
+    private fun createCatalogEntry(kind: IngredientCatalogKind, name: String): CatalogCreation {
+        val client = try {
+            access.newClient()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: NetworkError) {
+            return CatalogCreation.Problem(networkProblem(e), false)
+        } catch (e: Exception) {
+            return CatalogCreation.Problem(ConnectionProblem.Unknown, false)
+        }
+        return when (kind) {
+            IngredientCatalogKind.Unit -> creationOutcome(client.createUnit(name)) { it.toEntry() }
+            IngredientCatalogKind.Food -> creationOutcome(client.createFood(name)) { it.toEntry() }
+        }
+    }
+
+    /**
+     * Traduce lo que devuelve crear al catálogo. Un fallo ambiguo después de
+     * enviar es [CatalogCreation.MaybeCreated]: no se reintenta y se pide mirar.
+     */
+    private fun <T> creationOutcome(result: ApiResult<T>, entry: (T) -> CatalogEntry): CatalogCreation =
+        when (result) {
+            is ApiResult.Success -> CatalogCreation.Created(entry(result.value))
+            is ApiResult.DraftInvalid -> CatalogCreation.Invalid(result.errors)
+            is ApiResult.Invalid -> CatalogCreation.Problem(ConnectionProblem.Unknown, true)
+            ApiResult.Unauthorized -> CatalogCreation.Problem(ConnectionProblem.Unauthorized, false)
+            ApiResult.Forbidden, ApiResult.NotFound, ApiResult.Conflict,
+            is ApiResult.Rejected, is ApiResult.InputRejected ->
+                CatalogCreation.Problem(ConnectionProblem.Unknown, true)
+            is ApiResult.SavedButNotReloaded -> CatalogCreation.Problem(result.problem, false)
+            is ApiResult.MaybeCreated -> CatalogCreation.MaybeCreated
+            is ApiResult.Failure -> CatalogCreation.Problem(result.problem, false)
+        }
+
     // ------------------------------------------------------------- navegación
 
     /** Atrás: si hay cambios sin guardar, pide confirmación; si no, cierra. */
@@ -1343,6 +1751,9 @@ class RecipeEditorViewModel(
         val current = _state.value
         if (current is RecipeEditorState.Editing) {
             if (current.saving) return
+            // Con una unidad o un alimento creándose no se sale: cerrar cancelaría el
+            // `POST` ya enviado y la app no sabría lo que el servidor tiene.
+            if (current.catalogPicker?.creating == true) return
             if (current.dirty) {
                 _state.value = current.copy(showDiscardConfirm = true)
                 return
@@ -1389,11 +1800,15 @@ class RecipeEditorViewModel(
         saveJob?.cancel()
         photoJob?.cancel()
         draftJob?.cancel()
+        pickerJob?.cancel()
+        createJob?.cancel()
         loadJob = null
         catalogJob = null
         saveJob = null
         photoJob = null
         draftJob = null
+        pickerJob = null
+        createJob = null
         pendingPhoto = null
         return ++generation
     }
@@ -1454,6 +1869,25 @@ class RecipeEditorViewModel(
         data class Problem(val problem: ConnectionProblem) : CatalogsResult
     }
 
+    /** Lo que ha contestado el catálogo de unidades o alimentos al buscarlo. */
+    private sealed interface CatalogResult {
+        class Loaded(val items: List<CatalogEntry>, val truncated: Boolean) : CatalogResult
+        data class Problem(val problem: ConnectionProblem) : CatalogResult
+    }
+
+    /** Lo que ha pasado al crear una unidad o un alimento nuevos. */
+    private sealed interface CatalogCreation {
+        class Created(val entry: CatalogEntry) : CatalogCreation
+        class Invalid(val errors: List<DraftError>) : CatalogCreation
+        data class Problem(val problem: ConnectionProblem, val rejected: Boolean) : CatalogCreation
+
+        /**
+         * El servidor no ha confirmado la creación: puede existir ya. Nunca se
+         * reintenta solo; hay que mirar el catálogo antes.
+         */
+        data object MaybeCreated : CatalogCreation
+    }
+
     private sealed interface CreateResult {
         data class Created(val slug: String) : CreateResult
         data class Failed(val outcome: SaveOutcome) : CreateResult
@@ -1486,6 +1920,12 @@ class RecipeEditorViewModel(
     companion object {
         /** Lado máximo de la vista previa que se guarda en el estado, en píxeles. */
         private const val PREVIEW_SIDE = 480
+
+        /**
+         * Cuánto se espera antes de preguntar al catálogo mientras se escribe.
+         * Corto: la lista tiene que seguir el ritmo de quien busca de pie.
+         */
+        private const val CATALOG_SEARCH_DELAY_MS = 350L
 
         fun factory(
             access: ClientAccess,
@@ -1522,9 +1962,20 @@ private fun RecipeForm.hasContent(): Boolean =
         ingredients.any { it.hasContent() } || steps.any { it.hasContent() } ||
         notes.isNotEmpty() || tags.isNotEmpty() || categories.isNotEmpty()
 
-/** Una fila de ingrediente con algo escrito (la unidad y el alimento no se editan). */
+/** Una fila de ingrediente con algo escrito (contando la unidad y el alimento elegidos). */
 private fun IngredientForm.hasContent(): Boolean =
-    quantity.isNotBlank() || note.isNotBlank() || title.isNotBlank()
+    quantity.isNotBlank() || note.isNotBlank() || title.isNotBlank() ||
+        unit.isNotBlank() || food.isNotBlank() || unitId != null || foodId != null
+
+/** Lo que el selector enseña de una unidad: su nombre y, si la tiene, la abreviatura. */
+private fun IngredientUnit.toEntry(): CatalogEntry = CatalogEntry(
+    id = id,
+    name = name,
+    hint = abbreviation.takeIf { it.isNotEmpty() && it != name }.orEmpty(),
+)
+
+/** Lo que el selector enseña de un alimento: su nombre. */
+private fun IngredientFood.toEntry(): CatalogEntry = CatalogEntry(id = id, name = name)
 
 /** Un paso con algo escrito. */
 private fun StepForm.hasContent(): Boolean = title.isNotBlank() || text.isNotBlank()

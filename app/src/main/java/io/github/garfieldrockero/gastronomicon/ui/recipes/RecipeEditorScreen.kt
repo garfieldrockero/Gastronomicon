@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -61,14 +62,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -76,6 +80,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -114,6 +120,19 @@ class RecipeEditorActions(
     val onCookTimeChange: (String) -> Unit = {},
     val onIngredientQuantityChange: (Int, String) -> Unit = { _, _ -> },
     val onIngredientNoteChange: (Int, String) -> Unit = { _, _ -> },
+    /** Abre el selector de unidades (o de alimentos) de ese ingrediente. */
+    val onOpenUnitPicker: (Int) -> Unit = {},
+    val onOpenFoodPicker: (Int) -> Unit = {},
+    /** Cierra el selector sin tocar la línea. */
+    val onCloseCatalogPicker: () -> Unit = {},
+    /** Lo que se escribe en la búsqueda del selector (el ViewModel espera antes de preguntar). */
+    val onCatalogQueryChange: (String) -> Unit = {},
+    /** Repite la búsqueda del catálogo (también vale para mirar antes de repetir una creación). */
+    val onRetryCatalogPicker: () -> Unit = {},
+    /** Elige una entrada del catálogo; `null` quita la unidad o el alimento de la línea. */
+    val onPickCatalogEntry: (CatalogEntry?) -> Unit = {},
+    /** Crea en el catálogo el nombre escrito: nunca se reintenta solo. */
+    val onCreateCatalogEntry: (String) -> Unit = {},
     val onAddIngredient: () -> Unit = {},
     val onRemoveIngredient: (Int) -> Unit = {},
     val onMoveIngredientUp: (Int) -> Unit = {},
@@ -293,6 +312,26 @@ fun RecipeEditorScreen(
         DiscardDraftDialog(
             onConfirm = actions.onConfirmDiscardRecoveredDraft,
             onDismiss = actions.onDismissDiscardRecoveredDraft,
+        )
+    }
+
+    // Selector de unidad o de alimento: se pinta encima del formulario y no cambia
+    // nada de la línea hasta que la persona elige una entrada.
+    val picker = editing?.catalogPicker
+    if (editing != null && picker != null) {
+        val row = editing.form.ingredients.getOrNull(picker.index)
+        CatalogPickerDialog(
+            picker = picker,
+            ingredientNumber = picker.index + 1,
+            currentValue = when (picker.kind) {
+                IngredientCatalogKind.Unit -> row?.unit.orEmpty()
+                IngredientCatalogKind.Food -> row?.food.orEmpty()
+            },
+            currentId = when (picker.kind) {
+                IngredientCatalogKind.Unit -> row?.unitId
+                IngredientCatalogKind.Food -> row?.foodId
+            },
+            actions = actions,
         )
     }
 
@@ -955,10 +994,10 @@ private fun IngredientsSection(
 
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.medium)) {
         SectionTitle(stringResource(R.string.editor_section_ingredients))
-        // Una vez, no en cada tarjeta: qué parte del ingrediente decide el servidor.
-        if (rows.any { it.unit.isNotEmpty() || it.food.isNotEmpty() }) {
+        // Una vez, no en cada tarjeta: de dónde salen la unidad y el alimento.
+        if (rows.isNotEmpty()) {
             Text(
-                text = stringResource(R.string.editor_ingredient_fixed_help),
+                text = stringResource(R.string.editor_ingredient_catalog_help),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1028,10 +1067,10 @@ private fun IngredientCard(
 ) {
     val quantityError = firstError(state, DraftField.IngredientQuantity, index)
     val noteError = firstError(state, DraftField.IngredientNote, index)
-    val fixedError = firstError(state, DraftField.IngredientUnit, index)
-        ?: firstError(state, DraftField.IngredientFood, index)
-        ?: firstError(state, DraftField.IngredientTitle, index)
-    val rowError = quantityError ?: noteError ?: fixedError
+    val unitError = firstError(state, DraftField.IngredientUnit, index)
+    val foodError = firstError(state, DraftField.IngredientFood, index)
+    val titleError = firstError(state, DraftField.IngredientTitle, index)
+    val rowError = quantityError ?: noteError ?: unitError ?: foodError ?: titleError
 
     val bringIntoView = remember { BringIntoViewRequester() }
     val quantityFocus = remember { FocusRequester() }
@@ -1133,18 +1172,53 @@ private fun IngredientCard(
                 ),
             )
 
-            if (row.unit.isNotEmpty() || row.food.isNotEmpty()) {
-                val fixed = listOf(row.unit, row.food).filter { it.isNotEmpty() }.joinToString(" ")
+            // La unidad y el alimento se eligen del catálogo del servidor: la tarjeta
+            // nunca deja escribirlos a mano, para no inventar referencias nuevas.
+            val noUnit = stringResource(R.string.editor_ingredient_unit_none)
+            val noFood = stringResource(R.string.editor_ingredient_food_none)
+            CatalogField(
+                label = stringResource(R.string.editor_ingredient_unit_label),
+                value = row.unit,
+                placeholder = noUnit,
+                description = stringResource(
+                    R.string.editor_ingredient_unit_field,
+                    index + 1,
+                    row.unit.ifEmpty { noUnit },
+                ),
+                enabled = !state.saving,
+                onClick = { actions.onOpenUnitPicker(index) },
+                modifier = Modifier.fieldError(unitError != null, unitError.orEmpty()),
+            )
+            if (unitError != null) {
                 Text(
-                    text = stringResource(R.string.editor_ingredient_fixed, fixed),
+                    text = unitError,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
-
-            if (fixedError != null) {
+            CatalogField(
+                label = stringResource(R.string.editor_ingredient_food_label),
+                value = row.food,
+                placeholder = noFood,
+                description = stringResource(
+                    R.string.editor_ingredient_food_field,
+                    index + 1,
+                    row.food.ifEmpty { noFood },
+                ),
+                enabled = !state.saving,
+                onClick = { actions.onOpenFoodPicker(index) },
+                modifier = Modifier.fieldError(foodError != null, foodError.orEmpty()),
+            )
+            if (foodError != null) {
                 Text(
-                    text = fixedError,
+                    text = foodError,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (titleError != null) {
+                Text(
+                    text = titleError,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -1155,10 +1229,494 @@ private fun IngredientCard(
 
 /** ¿Hay algo escrito en el ingrediente? Solo entonces quitar pide confirmación. */
 private fun hasIngredientText(row: IngredientForm): Boolean =
-    row.quantity.isNotBlank() || row.note.isNotBlank()
+    row.quantity.isNotBlank() || row.note.isNotBlank() ||
+        row.unit.isNotBlank() || row.food.isNotBlank()
+
+// ------------------------------------------------- catálogo (unidad y alimento)
+
+/**
+ * Campo de la unidad o el alimento: se lee, no se escribe. Detrás hay un
+ * selector, porque Mealie guarda una referencia al catálogo y no un texto
+ * suelto. No baja de 48 dp y TalkBack dice de qué ingrediente es y qué hay
+ * elegido, que con varias filas iguales hace falta.
+ */
+@Composable
+private fun CatalogField(
+    label: String,
+    value: String,
+    placeholder: String,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizes.MinTouchTarget)
+            .semantics(mergeDescendants = true) { contentDescription = description },
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.small),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = value.ifEmpty { placeholder },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (value.isEmpty()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
+            Icon(
+                painter = painterResource(R.drawable.ic_arrow_down),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Selector de unidad o de alimento: busca en el catálogo del servidor mientras
+ * se escribe (con retardo, en el ViewModel) y deja crear lo que no esté.
+ *
+ * - Cargando, sin resultados, sin conexión (con «Volver a intentar») y sesión
+ *   caducada (con «Abrir Ajustes») se dicen aquí, sin dejar el hueco vacío.
+ * - Crear nunca se reintenta solo: si el servidor no confirma, se avisa de que
+ *   puede existir y se pide mirar el catálogo antes de repetir. Tras un fallo de
+ *   creación, el botón repite la **búsqueda**, no el alta: crear otra vez es
+ *   siempre un toque aparte y a propósito.
+ * - Mientras llega una búsqueda nueva, los resultados de la anterior siguen a la
+ *   vista con el aviso de espera encima: la hoja no se queda en blanco en cada letra.
+ * - Con una creación en vuelo no se puede cerrar ni elegir: el resultado del
+ *   servidor tiene que llegar a la línea, o se avisa de que no se pudo aplicar.
+ * - El nombre escrito para crear es de esta pantalla y de nadie más (`remember`):
+ *   no es un dato del servidor y no se guarda al girar el móvil. Empieza con lo
+ *   que se ha buscado, que es justo lo que se quiere crear cuando no aparece.
+ */
+@Composable
+private fun CatalogPickerDialog(
+    picker: CatalogPicker,
+    ingredientNumber: Int,
+    currentValue: String,
+    currentId: String?,
+    actions: RecipeEditorActions,
+) {
+    val isUnit = picker.kind == IngredientCatalogKind.Unit
+    // El nombre a crear es de esta pantalla y de nadie más (`remember`, no
+    // `rememberSaveable`). Empieza con lo buscado y, en cuanto la persona escribe
+    // en el campo, manda lo suyo (también si lo deja vacío a propósito).
+    var typedName by remember(picker.kind, picker.index) { mutableStateOf<String?>(null) }
+    val createName = typedName ?: picker.query
+    val trimmedName = createName.trim()
+    val firstCreateError = if (picker.createErrors.isEmpty()) {
+        null
+    } else {
+        catalogCreateErrorText(picker.createErrors.first())
+    }
+    val createProblem = picker.createProblem
+
+    Dialog(
+        // Con una creación en vuelo, atrás o un toque fuera no cierran: el `POST` ya
+        // está enviado y el resultado tiene que llegar a la línea (si no, al repetir
+        // se podría duplicar la entrada). El ViewModel lo comprueba también.
+        onDismissRequest = { if (!picker.creating) actions.onCloseCatalogPicker() },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        // Todo el contenido se desplaza: con el texto del sistema al doble, la
+        // lista y el bloque de crear no caben a la vez y nada puede quedar cortado.
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.medium),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(Spacing.medium),
+                verticalArrangement = Arrangement.spacedBy(Spacing.small),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(
+                                if (isUnit) R.string.editor_catalog_unit_title else R.string.editor_catalog_food_title,
+                            ),
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.semantics { heading() },
+                        )
+                        Text(
+                            text = stringResource(R.string.editor_ingredient_number, ingredientNumber),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = actions.onCloseCatalogPicker, enabled = !picker.creating) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_close),
+                            contentDescription = stringResource(R.string.editor_catalog_close),
+                        )
+                    }
+                }
+
+                if (currentValue.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.editor_catalog_current, currentValue),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                OutlinedTextField(
+                    value = picker.query,
+                    onValueChange = actions.onCatalogQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !picker.creating,
+                    label = { Text(stringResource(R.string.editor_catalog_search_label)) },
+                    leadingIcon = {
+                        Icon(painter = painterResource(R.drawable.ic_search), contentDescription = null)
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                )
+
+                // Con resultados a la vista, la espera es una línea más y la lista no
+                // parpadea en cada letra.
+                if (picker.loading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.small),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(
+                            text = stringResource(
+                                if (isUnit) R.string.editor_catalog_loading_unit else R.string.editor_catalog_loading_food,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                val problem = picker.problem
+                if (problem != null) {
+                    ProblemBanner(
+                        problem = problem,
+                        message = stringResource(
+                            if (isUnit) R.string.editor_catalog_failed_unit else R.string.editor_catalog_failed_food,
+                        ),
+                        onRetry = actions.onRetryCatalogPicker,
+                        onOpenSettings = actions.onOpenSettings,
+                        showDetail = false,
+                    )
+                }
+                // Lo que ya estaba a la vista no desaparece al teclear ni porque falle
+                // una búsqueda nueva: los resultados de la búsqueda anterior siguen ahí
+                // (con el aviso de espera encima) y el fallo se cuenta arriba. Así la
+                // hoja no se queda en blanco entre letra y letra.
+                if (picker.items.isNotEmpty()) {
+                    for (entry in picker.items) {
+                        val isCurrent = currentId?.let { it == entry.id } ?: (entry.name == currentValue)
+                        CatalogChoiceRow(
+                            entry = entry,
+                            isSelected = isCurrent,
+                            enabled = !picker.creating,
+                            onClick = { actions.onPickCatalogEntry(entry) },
+                        )
+                    }
+                    if (picker.truncated) {
+                        Text(
+                            text = stringResource(R.string.editor_catalog_truncated),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (!picker.loading && picker.loaded && problem == null) {
+                    Text(
+                        text = stringResource(
+                            when {
+                                picker.query.isNotBlank() && isUnit -> R.string.editor_catalog_empty_unit
+                                picker.query.isNotBlank() -> R.string.editor_catalog_empty_food
+                                isUnit -> R.string.editor_catalog_catalog_empty_unit
+                                else -> R.string.editor_catalog_catalog_empty_food
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+
+                if (currentValue.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = { actions.onPickCatalogEntry(null) },
+                        enabled = !picker.creating,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Sizes.MinTouchTarget),
+                    ) {
+                        Text(
+                            stringResource(
+                                if (isUnit) R.string.editor_catalog_clear_unit else R.string.editor_catalog_clear_food,
+                            ),
+                        )
+                    }
+                }
+
+                Text(
+                    text = stringResource(
+                        if (isUnit) R.string.editor_catalog_create_title_unit else R.string.editor_catalog_create_title_food,
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading() },
+                )
+                OutlinedTextField(
+                    value = createName,
+                    onValueChange = { typedName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    // Tras «puede que ya exista» o si la entrada creada no se pudo
+                    // aplicar, crear otra vez a ciegas puede duplicar: no se escribe más.
+                    enabled = !picker.creating && !picker.maybeCreated && !picker.createdNotApplied,
+                    label = {
+                        Text(
+                            stringResource(
+                                if (isUnit) R.string.editor_catalog_create_label_unit else R.string.editor_catalog_create_label_food,
+                            ),
+                        )
+                    },
+                    singleLine = true,
+                    isError = firstCreateError != null,
+                    supportingText = if (firstCreateError != null) {
+                        { Text(firstCreateError) }
+                    } else {
+                        null
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                )
+                Button(
+                    onClick = { actions.onCreateCatalogEntry(trimmedName) },
+                    // Tras un «puede que ya exista» no se repite a ciegas: primero se
+                    // mira el catálogo (el aviso de abajo lo dice y ofrece buscarlo).
+                    enabled = trimmedName.isNotEmpty() && !picker.creating &&
+                        !picker.maybeCreated && !picker.createdNotApplied,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = Sizes.MinTouchTarget),
+                ) {
+                    if (picker.creating) BusyIndicator()
+                    Text(
+                        text = when {
+                            picker.creating -> stringResource(R.string.editor_catalog_creating)
+                            trimmedName.isEmpty() -> stringResource(R.string.editor_catalog_create_idle)
+                            else -> stringResource(R.string.editor_catalog_create_action, trimmedName)
+                        },
+                    )
+                }
+
+                if (picker.maybeCreated) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.medium),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.small),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.editor_catalog_maybe_created),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            OutlinedButton(
+                                onClick = actions.onRetryCatalogPicker,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = Sizes.MinTouchTarget),
+                            ) {
+                                Text(stringResource(R.string.editor_catalog_search_again))
+                            }
+                        }
+                    }
+                }
+
+                if (createProblem != null || picker.createRejected) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.medium),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.small),
+                        ) {
+                            Text(
+                                text = if (picker.createRejected) {
+                                    stringResource(R.string.editor_catalog_create_rejected)
+                                } else {
+                                    stringResource(R.string.editor_catalog_create_failed)
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            if (createProblem != null) {
+                                Text(
+                                    text = stringResource(errorTextRes(createProblem)),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                            if (createProblem == ConnectionProblem.Unauthorized) {
+                                Button(
+                                    onClick = actions.onOpenSettings,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = Sizes.MinTouchTarget),
+                                ) {
+                                    Text(stringResource(R.string.problem_open_settings))
+                                }
+                            } else {
+                                // Repetir el alta a ciegas puede dejar dos entradas: el
+                                // botón vuelve a leer el catálogo y, si no está, se crea
+                                // a propósito con «Crear», que sigue justo arriba.
+                                if (!picker.createRejected) {
+                                    Text(
+                                        text = stringResource(R.string.editor_catalog_create_check_first),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = actions.onRetryCatalogPicker,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = Sizes.MinTouchTarget),
+                                ) {
+                                    Text(stringResource(R.string.editor_catalog_search_again))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // La entrada se creó en el servidor pero la fila ya no estaba: se dice
+                // en vez de dejar el resultado perdido (no debería pasar con el selector
+                // abierto, que no deja tocar nada mientras se crea).
+                if (picker.createdNotApplied) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.medium),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.small),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.editor_catalog_created_not_applied),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            OutlinedButton(
+                                onClick = actions.onCloseCatalogPicker,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = Sizes.MinTouchTarget),
+                            ) {
+                                Text(stringResource(R.string.editor_catalog_close))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Una entrada del catálogo en el selector. Con marca, no solo con color, si es la elegida. */
+@Composable
+private fun CatalogChoiceRow(
+    entry: CatalogEntry,
+    isSelected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizes.MinTouchTarget)
+            .semantics(mergeDescendants = true) { selected = isSelected },
+        shape = MaterialTheme.shapes.small,
+        color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+        contentColor = if (isSelected) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.small),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = entry.name, style = MaterialTheme.typography.bodyLarge)
+                if (entry.hint.isNotEmpty()) {
+                    Text(
+                        text = entry.hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (isSelected) {
+                Icon(painter = painterResource(R.drawable.ic_check), contentDescription = null)
+            }
+        }
+    }
+}
 
 /** ¿Hay algo escrito en el paso? */
 private fun hasStepText(row: StepForm): Boolean = row.title.isNotBlank() || row.text.isNotBlank()
+
+/**
+ * Error del nombre nuevo del catálogo. No es un campo del formulario, así que
+ * «falta este dato» se dice en genérico (el botón además está apagado en
+ * blanco) y solo se concreta lo que tiene un tope conocido.
+ */
+@Composable
+private fun catalogCreateErrorText(error: DraftError): String = when (error.kind) {
+    DraftErrorKind.TooLong -> if (error.field == DraftField.IngredientFood) {
+        stringResource(R.string.editor_error_ingredient_food_too_long)
+    } else {
+        stringResource(R.string.editor_error_ingredient_unit_too_long)
+    }
+    else -> genericErrorText(error.kind)
+}
 
 // --------------------------------------------------------------------- pasos
 
@@ -1821,12 +2379,18 @@ private fun draftErrorText(error: DraftError): String = when (error.field) {
         } else {
             genericErrorText(error.kind)
         }
-    DraftField.IngredientUnit, DraftField.IngredientFood ->
-        if (error.kind == DraftErrorKind.NotEditable) {
-            stringResource(R.string.editor_error_ingredient_not_editable)
-        } else {
-            genericErrorText(error.kind)
-        }
+    DraftField.IngredientUnit -> when (error.kind) {
+        DraftErrorKind.Required -> stringResource(R.string.editor_error_ingredient_unit_required)
+        DraftErrorKind.Invalid -> stringResource(R.string.editor_error_ingredient_unit_invalid)
+        DraftErrorKind.TooLong -> stringResource(R.string.editor_error_ingredient_unit_too_long)
+        else -> genericErrorText(error.kind)
+    }
+    DraftField.IngredientFood -> when (error.kind) {
+        DraftErrorKind.Required -> stringResource(R.string.editor_error_ingredient_food_required)
+        DraftErrorKind.Invalid -> stringResource(R.string.editor_error_ingredient_food_invalid)
+        DraftErrorKind.TooLong -> stringResource(R.string.editor_error_ingredient_food_too_long)
+        else -> genericErrorText(error.kind)
+    }
     DraftField.Steps ->
         if (error.kind == DraftErrorKind.TooMany) {
             stringResource(R.string.editor_error_steps_too_many)
@@ -2247,3 +2811,179 @@ private fun RecipeEditorRemoveStepPreview() {
         RemoveRowDialog(isStep = true, onConfirm = {}, onDismiss = {})
     }
 }
+
+// Selector de unidad y de alimento: resultados, espera, nada encontrado, sin
+// conexión y el bloque de crear (también con «puede que ya exista»).
+
+/** Entradas inventadas del catálogo: ids con forma de UUID, ningún dato real. */
+private fun previewCatalogEntries(): List<CatalogEntry> = listOf(
+    CatalogEntry("11111111-1111-4111-8111-111111111111", "gramos", "g"),
+    CatalogEntry("22222222-2222-4222-8222-222222222222", "cucharadas", "cdas"),
+    CatalogEntry("33333333-3333-4333-8333-333333333333", "mililitros", "ml"),
+    CatalogEntry("44444444-4444-4444-8444-444444444444", "pizca"),
+)
+
+private fun previewPicker(
+    kind: IngredientCatalogKind = IngredientCatalogKind.Unit,
+    query: String = "",
+    itemsQuery: String = query,
+    items: List<CatalogEntry> = previewCatalogEntries(),
+    loading: Boolean = false,
+    problem: ConnectionProblem? = null,
+    truncated: Boolean = false,
+    loaded: Boolean = true,
+    creating: Boolean = false,
+    createProblem: ConnectionProblem? = null,
+    createRejected: Boolean = false,
+    createErrors: List<DraftError> = emptyList(),
+    maybeCreated: Boolean = false,
+    createdNotApplied: Boolean = false,
+): RecipeEditorState.Editing = RecipePreviewData.editorState().copy(
+    catalogPicker = CatalogPicker(
+        kind = kind,
+        index = 0,
+        query = query,
+        items = items,
+        itemsQuery = itemsQuery,
+        loading = loading,
+        problem = problem,
+        truncated = truncated,
+        loaded = loaded,
+        creating = creating,
+        createProblem = createProblem,
+        createRejected = createRejected,
+        createErrors = createErrors,
+        maybeCreated = maybeCreated,
+        createdNotApplied = createdNotApplied,
+    ),
+)
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeEditorUnitPickerPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(state = previewPicker(query = "gra"), actions = previewActions())
+    }
+}
+
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeEditorFoodPickerDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        RecipeEditorScreen(
+            state = previewPicker(kind = IngredientCatalogKind.Food, query = "hari", truncated = true),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeEditorUnitPickerLargeTextPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(createErrors = listOf(DraftError(DraftField.IngredientUnit, DraftErrorKind.TooLong))),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorPickerLoadingPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(items = emptyList(), loading = true, loaded = false),
+            actions = previewActions(),
+        )
+    }
+}
+
+/** Se está buscando otra cosa: los resultados anteriores siguen a la vista, no en blanco. */
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeEditorPickerRefreshingPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(query = "gram", itemsQuery = "", loading = true),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorPickerEmptyPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(query = "kombu", items = emptyList()),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorPickerNoNetworkPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(items = emptyList(), problem = ConnectionProblem.NoNetwork),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorPickerMaybeCreatedPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(maybeCreated = true, query = "harina"),
+            actions = previewActions(),
+        )
+    }
+}
+
+/** Se creó en el servidor pero la fila del ingrediente ya no estaba: se avisa. */
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeEditorPickerCreatedNotAppliedPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(createdNotApplied = true, query = "harina"),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeEditorPickerCreateFailedPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        RecipeEditorScreen(
+            state = previewPicker(
+                kind = IngredientCatalogKind.Food,
+                createRejected = true,
+                items = emptyList(),
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+
+/** Fallo al crear sin rechazo del nombre: se pide mirar el catálogo antes de repetir. */
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeEditorPickerCreateProblemPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = previewPicker(
+                query = "harina de fuerza",
+                items = emptyList(),
+                createProblem = ConnectionProblem.NoNetwork,
+            ),
+            actions = previewActions(),
+        )
+    }
+}
+

@@ -16,8 +16,16 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailControll
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailSource
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailState
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailView
+import io.github.garfieldrockero.gastronomicon.core.shopping.RecipeAddition
+import io.github.garfieldrockero.gastronomicon.core.shopping.RecipeAdditionProblem
+import io.github.garfieldrockero.gastronomicon.core.shopping.RecipeAdditions
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingIds
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerController
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerPhase
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerState
 import io.github.garfieldrockero.gastronomicon.platform.ClientAccess
 import io.github.garfieldrockero.gastronomicon.platform.OfflineRecipes
+import io.github.garfieldrockero.gastronomicon.ui.shopping.ShoppingAccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -80,10 +88,29 @@ data class OfflineCopyUi(
  *   escalar (es cálculo local) y la copia no guarda fotos.
  * - La [epoch] sube al reiniciar el ViewModel: un guardado que llegue tarde, de
  *   la sesión anterior, se descarta por el camino.
+ *
+ * Fase 9, extra 1: [shopping] lleva el diálogo de «añadir a la lista de la
+ * compra» y su aviso. Qué recetas entran, cómo se escala y si se puede enviar
+ * lo decide `core/shopping` (`RecipeAdditions`, `ShoppingListPickerController`);
+ * aquí solo se lanzan en segundo plano y se publica el desenlace, sin
+ * reintentos. Con la copia sin conexión no se ofrece: es una escritura y hace
+ * falta el servidor.
+ *
+ * Desde el detalle se piden **raciones** (las que se hayan escalado, si la
+ * receta dice para cuántas es): la conversión a escala la hace
+ * `RecipeAdditions.scaleForServings`, no esta clase. El aviso de después
+ * (también el «puede que ya se hayan añadido») **no se pierde** al cerrar la
+ * receta, al abrir otra ni al volver a abrir el diálogo: solo lo cierra la
+ * persona, porque es la única prueba de un posible duplicado.
  */
 class RecipeDetailViewModel(
     private val access: ClientAccess,
     private val offline: OfflineRecipes? = null,
+    /**
+     * Transporte de la compra para «añadir a la lista». Sin él (null) la acción
+     * ni se ofrece: no hay de dónde sacar la sesión para el `POST`.
+     */
+    private val shoppingAccess: ShoppingAccess? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
@@ -104,8 +131,55 @@ class RecipeDetailViewModel(
     private var job: Job? = null
     private var deleteJob: Job? = null
 
-    /** Receta abierta (para poder reintentar y buscar su copia sin depender del estado). */
+    /**
+     * Receta abierta (para poder reintentar y buscar su copia sin depender del
+     * estado). Se lee también desde el hilo de fondo al cargar, para no dejar el
+     * identificador de una receta que ya no está a la vista.
+     */
+    @Volatile
     private var openSlug: String? = null
+
+    // ------------------------------------------------- compra (fase 9, extra 1)
+
+    private val _shopping = MutableStateFlow(AddToShoppingUi(available = shoppingAccess != null))
+
+    /**
+     * «Añadir a la lista de la compra»: el diálogo, el envío y el aviso de
+     * después. [AddToShoppingUi.available] dice si esta pantalla puede hacerlo.
+     */
+    val shopping: StateFlow<AddToShoppingUi> = _shopping.asStateFlow()
+
+    /** Lectura de las listas del diálogo. */
+    private var shoppingJob: Job? = null
+
+    /** Envío en curso del diálogo (no se corta al abrir o cerrar otra receta). */
+    private var shoppingSendJob: Job? = null
+
+    /** Selector de listas de esta apertura del diálogo (lo lleva el núcleo). */
+    private var shoppingPicker: ShoppingListPickerController? = null
+
+    /**
+     * Raciones de la receta abierta, tal como las dio el núcleo; null si la
+     * receta no dice para cuántas es. Se fija al abrir el diálogo y es lo que
+     * convierte las raciones escritas en escala (`RecipeAdditions.scaleForServings`).
+     */
+    private var shoppingServings: Double? = null
+
+    /**
+     * Identificador del envío que corresponde al diálogo que se está viendo. Si
+     * mientras el `POST` viaja se cierra el diálogo o se abre otra receta, el
+     * desenlace ya no es suyo: solo publica el aviso, sin tocar lo que la
+     * persona tenga delante. Se toca solo desde el hilo principal.
+     */
+    private var shoppingSend = 0L
+    private var shoppingSendSeq = 0L
+
+    /**
+     * UUID de la receta abierta, para pedir sus ingredientes a la compra. Se lee
+     * en el hilo de fondo al cargar y se consulta en el principal al confirmar.
+     */
+    @Volatile
+    private var openRecipeId: String? = null
 
     /** Sube al reiniciar (otra sesión): lo que traiga una carga vieja ya no vale. */
     @Volatile
@@ -115,6 +189,10 @@ class RecipeDetailViewModel(
         job?.cancel()
         deleteJob?.cancel()
         deleteJob = null
+        // Cerrar o cambiar de receta no borra el aviso de un envío anterior, ni
+        // corta el `POST` que esté en vuelo: es la única prueba de que puede
+        // haber ingredientes añadidos.
+        resetShopping(keepNotice = true)
         openSlug = slug
         _deleteState.value = RecipeDeleteUiState()
         _offlineCopy.value = null
@@ -189,6 +267,8 @@ class RecipeDetailViewModel(
         job = null
         deleteJob?.cancel()
         deleteJob = null
+        // Igual que al abrir otra receta: el aviso y el envío en vuelo se quedan.
+        resetShopping(keepNotice = true)
         openSlug = null
         _deleteState.value = RecipeDeleteUiState()
         _offlineCopy.value = null
@@ -202,10 +282,33 @@ class RecipeDetailViewModel(
         job = null
         deleteJob?.cancel()
         deleteJob = null
+        resetShopping(keepNotice = false)
         openSlug = null
         _deleteState.value = RecipeDeleteUiState()
         _offlineCopy.value = null
         _state.value = controller.close()
+    }
+
+    /** Cierra el diálogo de la compra y olvida la receta y el selector: otra sesión u otra receta. */
+    private fun resetShopping(keepNotice: Boolean) {
+        shoppingJob?.cancel()
+        shoppingJob = null
+        // Un envío en vuelo no se corta al abrir o cerrar la receta: el `POST`
+        // que ya salió puede haber añadido los ingredientes y su aviso («puede
+        // que ya se hayan añadido») tiene que llegar hasta que la persona lo
+        // cierre. Al cambiar de sesión sí se corta: esa respuesta ya no es suya.
+        if (!keepNotice) {
+            shoppingSendJob?.cancel()
+            shoppingSendJob = null
+        }
+        shoppingSend = 0
+        shoppingPicker = null
+        openRecipeId = null
+        shoppingServings = null
+        _shopping.value = AddToShoppingUi(
+            available = shoppingAccess != null,
+            notice = if (keepNotice) _shopping.value.notice else null,
+        )
     }
 
     // Instantáneas (no tocan la red): el núcleo acota y recalcula las raciones.
@@ -314,12 +417,192 @@ class RecipeDetailViewModel(
         }
     }
 
+    // ------------------------------------------- añadir a la compra (fase 9)
+
+    /**
+     * Abre el diálogo de «Añadir a la lista de la compra» y lee las listas.
+     * Con la copia sin conexión no se abre: añadir es una escritura y hace falta
+     * el servidor. Sin UUID de la receta el diálogo se abre explicándolo: es
+     * mejor que esconder el botón y no decir por qué.
+     *
+     * El campo arranca con las raciones que estén elegidas en el detalle. Si la
+     * receta no dice para cuántas es, se abre como «veces la receta» con 1.
+     */
+    fun onAddToShoppingClick() {
+        val store = shoppingAccess ?: return
+        if (_offlineCopy.value != null) return
+        val view = (_state.value as? RecipeDetailState.Ready)?.view ?: return
+        if (_shopping.value.open) return
+        val recipeId = openRecipeId
+        val servings = view.originalServings
+        shoppingServings = servings
+        _shopping.value = AddToShoppingUi(
+            available = true,
+            open = true,
+            usesServings = servings != null,
+            scaleText = if (servings != null) {
+                servingsInputText(view.selectedServings ?: servings)
+            } else {
+                TIMES_DEFAULT_TEXT
+            },
+            // Un aviso anterior que la persona no ha cerrado no se pierde por abrir otra vez.
+            notice = _shopping.value.notice,
+            picker = if (recipeId == null) {
+                ShoppingListPickerState()
+            } else {
+                // Se ve «Buscando tus listas…» hasta que el núcleo conteste.
+                ShoppingListPickerState(phase = ShoppingListPickerPhase.Loading)
+            },
+            problem = if (recipeId == null) {
+                AddToShoppingOutcome.Invalid(RecipeAdditionProblem.InvalidRecipeId)
+            } else {
+                null
+            },
+        )
+        if (recipeId != null) loadShoppingLists(store)
+    }
+
+    /** Elige la lista a la que irán los ingredientes. No toca la red. */
+    fun onAddToShoppingListSelected(listId: String) {
+        if (!_shopping.value.open) return
+        val picker = shoppingPicker ?: return
+        val state = picker.rememberOpenList(listId)
+        _shopping.update { it.copy(picker = state, problem = null) }
+    }
+
+    /** Raciones escritas; el núcleo decide si el número vale al enviar. */
+    fun onAddToShoppingScaleChange(text: String) {
+        if (!_shopping.value.open) return
+        _shopping.update { it.copy(scaleText = text.take(MAX_SCALE_INPUT), problem = null) }
+    }
+
+    /** «Volver a mirar» de las listas: las vuelve a leer. */
+    fun onAddToShoppingRetryLists() {
+        val store = shoppingAccess ?: return
+        if (!_shopping.value.open || _shopping.value.sending) return
+        _shopping.update { it.copy(problem = null) }
+        loadShoppingLists(store)
+    }
+
+    /** Cierra el diálogo; con el `POST` en vuelo no hace nada. */
+    fun onAddToShoppingDismiss() {
+        if (_shopping.value.sending) return
+        _shopping.update { it.copy(open = false, problem = null, sending = false) }
+    }
+
+    /** Cierra el aviso de después de añadir. */
+    fun onAddToShoppingNoticeDismiss() {
+        _shopping.update { it.copy(notice = null) }
+    }
+
+    /**
+     * Confirma el diálogo. La tanda se valida con el núcleo antes de enviar
+     * (`RecipeAdditions.check`): si no vale, no sale nada y el motivo se queda
+     * en el diálogo. Nunca se reintenta solo: un desenlace dudoso es un aviso
+     * fijo para mirar la lista antes de repetir.
+     *
+     * El número que escribe la persona son **raciones** (si la receta dice para
+     * cuántas es) o **veces la receta**. La conversión a escala la hace el
+     * núcleo (`RecipeAdditions.scaleForServings`); aquí no se divide.
+     */
+    fun onAddToShoppingConfirm() {
+        val store = shoppingAccess ?: return
+        val current = _shopping.value
+        if (!current.open || current.sending) return
+        val listId = current.picker.openListId ?: return
+
+        val recipeId = openRecipeId
+        if (recipeId == null) {
+            _shopping.update {
+                it.copy(problem = AddToShoppingOutcome.Invalid(RecipeAdditionProblem.InvalidRecipeId))
+            }
+            return
+        }
+        val written = numberOrNull(current.scaleText)
+        val scale = if (current.usesServings) {
+            RecipeAdditions.scaleForServings(shoppingServings, written)
+        } else {
+            written?.takeIf { RecipeAdditions.validScale(it) }
+        }
+        if (scale == null) {
+            _shopping.update {
+                it.copy(problem = AddToShoppingOutcome.Invalid(RecipeAdditionProblem.InvalidScale))
+            }
+            return
+        }
+        val additions = listOf(RecipeAddition(recipeId, scale))
+        val invalid = RecipeAdditions.check(additions)
+        if (invalid != null) {
+            _shopping.update { it.copy(problem = AddToShoppingOutcome.Invalid(invalid)) }
+            return
+        }
+
+        val listName = current.picker.openList?.displayName.orEmpty()
+        val send = ++shoppingSendSeq
+        shoppingSend = send
+        _shopping.update { it.copy(sending = true, problem = null) }
+        val bornEpoch = epoch
+        // La sesión se lee solo si sigue siendo la de este envío: tras `reset()`
+        // no se abre conexión ni se usa el token nuevos.
+        val session = store.guardedBy { bornEpoch == epoch }
+        shoppingSendJob = viewModelScope.launch {
+            val outcome = withContext(ioDispatcher) {
+                AddToShopping.add(session, listId, additions, listName)
+            }
+            if (bornEpoch != epoch) return@launch
+            val mine = shoppingSend == send
+            _shopping.update { latest ->
+                when (outcome) {
+                    is AddToShoppingOutcome.Added, is AddToShoppingOutcome.MaybeAdded -> if (mine) {
+                        latest.copy(open = false, sending = false, problem = null, notice = outcome)
+                    } else {
+                        // El diálogo de ese envío ya no está (se cerró o se abrió
+                        // otra receta): solo se publica el aviso, y se queda hasta
+                        // que la persona lo cierre. Es la prueba de un posible
+                        // duplicado: no se puede perder.
+                        latest.copy(notice = outcome)
+                    }
+                    else -> if (mine) latest.copy(sending = false, problem = outcome) else latest
+                }
+            }
+            if (mine) shoppingSend = 0L
+        }
+    }
+
+    /** Lee la página de listas en segundo plano; el selector es del núcleo. */
+    private fun loadShoppingLists(store: ShoppingAccess) {
+        val bornEpoch = epoch
+        val picker = AddToShopping.newPicker(store.guardedBy { bornEpoch == epoch })
+        shoppingPicker = picker
+        shoppingJob?.cancel()
+        shoppingJob = viewModelScope.launch {
+            val loaded = withContext(ioDispatcher) { picker.load() }
+            if (bornEpoch != epoch) return@launch
+            _shopping.update { if (it.open) it.copy(picker = loaded) else it }
+        }
+    }
+
+    /**
+     * El número escrito, como raciones o como veces la receta. Coma o punto,
+     * como en el planificador. Null si no hay número (campo vacío o texto que
+     * no lo es): el núcleo decide entonces qué decir, aquí no se adivina un 1.
+     */
+    private fun numberOrNull(text: String): Double? {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return null
+        return trimmed.replace(',', '.').toDoubleOrNull()
+    }
+
     // ------------------------------------------------- sin conexión (fase 8)
 
     /** Carga la receta y, si sale bien, deja una copia para verla sin conexión. */
     private fun loadRecipe(slug: String): Recipe {
         val bornEpoch = epoch
         val recipe = clientOrFail(access).getRecipe(slug)
+        // El UUID solo sirve para la compra; el núcleo comprueba que tiene forma de
+        // UUID. Se apunta solo si esta carga sigue siendo la receta abierta: una
+        // carga vieja que termina tarde no deja su id mientras se ve otra receta.
+        if (bornEpoch == epoch && slug == openSlug) openRecipeId = ShoppingIds.valid(recipe.id)
         rememberForOffline(bornEpoch, recipe)
         return recipe
     }
@@ -388,6 +671,12 @@ class RecipeDetailViewModel(
     }
 
     companion object {
+        /** Tope del texto de raciones: el número útil no llega ni a cinco caracteres. */
+        private const val MAX_SCALE_INPUT = 10
+
+        /** Sin raciones en la receta, el campo cuenta «veces la receta» y empieza en 1. */
+        private const val TIMES_DEFAULT_TEXT = "1"
+
         /**
          * El núcleo lee un `IllegalArgumentException` como «slug no válido» (= la receta no
          * existe). Pero el que sale de crear el cliente (HTTP local apagado, red no permitida)
@@ -400,11 +689,22 @@ class RecipeDetailViewModel(
             throw IllegalStateException("No se puede crear el cliente con la configuración actual.")
         }
 
-        fun factory(access: ClientAccess, offline: OfflineRecipes? = null): ViewModelProvider.Factory =
+        /**
+         * @param shoppingAccess transporte de la compra para «añadir a la lista».
+         *   Sin él la acción no se ofrece: quien monte el ViewModel tiene que
+         *   pasar el `ShoppingAccess` de la app (en `MainActivity`,
+         *   `container.shoppingAccess`). Está pendiente de cablear porque el
+         *   alcance de esta tarea no incluía la actividad.
+         */
+        fun factory(
+            access: ClientAccess,
+            offline: OfflineRecipes? = null,
+            shoppingAccess: ShoppingAccess? = null,
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    RecipeDetailViewModel(access, offline) as T
+                    RecipeDetailViewModel(access, offline, shoppingAccess) as T
             }
     }
 }

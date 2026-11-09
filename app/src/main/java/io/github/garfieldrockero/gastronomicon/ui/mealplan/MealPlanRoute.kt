@@ -24,6 +24,11 @@ fun MealPlanRoute(
     viewModel: MealPlanViewModel,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Lleva a la pestaña Compra desde el aviso de «ya están en la lista». Null
+     * mientras la navegación no lo cablee: entonces el aviso no ofrece el botón.
+     */
+    onOpenShoppingTab: (() -> Unit)? = null,
     // Con la barra de pestañas debajo, quien la pinta quita el inset inferior (ya lo
     // consume la barra). Suelto, el valor por defecto es el de siempre.
     contentWindowInsets: WindowInsets = WindowInsets.safeDrawing,
@@ -33,7 +38,7 @@ fun MealPlanRoute(
     // Primera carga al entrar; si la semana ya está cargada, no hace nada.
     LaunchedEffect(viewModel) { viewModel.onShown() }
 
-    val actions = remember(viewModel, onOpenSettings) {
+    val actions = remember(viewModel, onOpenSettings, onOpenShoppingTab) {
         MealPlanActions(
             onRefresh = viewModel::onRefresh,
             onRetry = viewModel::onRetry,
@@ -47,6 +52,9 @@ fun MealPlanRoute(
             onDismissActionFailure = viewModel::onDismissActionFailure,
             onNoticeShown = viewModel::onNoticeShown,
             onShowNoticeWeek = viewModel::onShowNoticeWeek,
+            onAddToShoppingClick = viewModel::onAddToShoppingClick,
+            onAddToShoppingNoticeDismiss = viewModel::onAddToShoppingNoticeDismiss,
+            onOpenShopping = onOpenShoppingTab,
             sheets = MealPlanSheetActions(
                 onDismiss = viewModel::onDismissDialog,
                 onAddDateChange = viewModel::onAddDateChange,
@@ -64,6 +72,10 @@ fun MealPlanRoute(
                 onPickerLoadMore = viewModel::onPickerLoadMore,
                 onConfirmAdd = viewModel::onConfirmAdd,
                 onConfirmDelete = viewModel::onConfirmDelete,
+                onAddToShoppingSelectList = viewModel::onAddToShoppingListSelected,
+                onAddToShoppingRetryLists = viewModel::onAddToShoppingRetryLists,
+                onAddToShoppingConfirm = viewModel::onAddToShoppingConfirm,
+                onAddToShoppingDismiss = viewModel::onAddToShoppingDismiss,
             ),
         )
     }

@@ -2,6 +2,7 @@ package io.github.garfieldrockero.gastronomicon.core.shopping
 
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDraftValidator
 import io.github.garfieldrockero.gastronomicon.core.mealplan.PlannedMeal
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailView
 
 /**
  * Una receta que se va a añadir a la lista de la compra con
@@ -99,6 +100,31 @@ object RecipeAdditions {
     /** La escala sirve: finita, positiva y sin pasarse del tope. */
     fun validScale(scale: Double): Boolean =
         scale.isFinite() && scale > 0.0 && scale <= MAX_SCALE
+
+    /**
+     * Escala que deja la receta en [wantedServings] raciones, partiendo de las
+     * que dice la receta ([originalServings]).
+     *
+     * Es la conversión que necesita «añadir a la compra» desde el detalle, donde
+     * la persona escribe **raciones** y el `POST` espera una escala
+     * (`recipeIncrementQuantity`). La pantalla no divide: llama aquí.
+     *
+     * Devuelve null —y entonces la interfaz dice que ese número no vale— cuando:
+     * - la receta no dice para cuántas raciones es (sin proporción que aplicar;
+     *   la pantalla ofrece «veces la receta»),
+     * - algún número falta, no es finito, es cero o es negativo,
+     * - se piden más de [RecipeDetailView.MAX_SERVINGS] raciones (el mismo tope
+     *   que el selector del detalle), o
+     * - la escala resultante se sale de [MAX_SCALE]: mejor decirlo que mandar
+     *   una cantidad que el servidor no espera.
+     */
+    fun scaleForServings(originalServings: Double?, wantedServings: Double?): Double? {
+        val original = originalServings?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        val wanted = wantedServings?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        if (wanted > RecipeDetailView.MAX_SERVINGS) return null
+        val scale = wanted / original
+        return scale.takeIf { validScale(it) }
+    }
 
     /**
      * Fusiona las entradas con el mismo `recipeId` sumando sus escalas, en el

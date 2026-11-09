@@ -2,6 +2,7 @@ package io.github.garfieldrockero.gastronomicon.ui.recipes
 
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -105,6 +106,11 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
  * Sin conexión ([offline] no nulo): se pinta la copia guardada, con un aviso que
  * lleva su fecha y «Volver a intentar», sin foto (no se guardan), sin editar y sin
  * borrar. Las raciones se siguen pudiendo escalar.
+ *
+ * Fase 9, extra 1: en el menú, «Añadir a la lista de la compra», con un diálogo
+ * que elige la lista y las raciones. Al terminar, un aviso con región viva dice
+ * qué ha pasado y ofrece ver la compra; con un desenlace dudoso no se ofrece
+ * repetir, solo mirar. Las listas, las recetas y el envío son del núcleo.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,6 +130,8 @@ fun RecipeDetailScreen(
     onDeleteConfirm: () -> Unit,
     modifier: Modifier = Modifier,
     offline: OfflineCopyUi? = null,
+    shopping: AddToShoppingUi = AddToShoppingUi(),
+    shoppingActions: RecipeShoppingActions = RecipeShoppingActions(),
 ) {
     // Lo que se pinta: la copia guardada manda sobre lo que diga el estado del núcleo.
     val shownName = offline?.view?.name ?: (state as? RecipeDetailState.Ready)?.view?.name
@@ -182,6 +190,22 @@ fun RecipeDetailScreen(
                             expanded = menuOpen && online,
                             onDismissRequest = { menuOpen = false },
                         ) {
+                            // Añadir a la compra: secundaria y no destructiva, antes de borrar.
+                            if (shopping.available) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.extras_compra_menu_add)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_tab_shopping),
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        shoppingActions.onOpenClick()
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -207,62 +231,78 @@ fun RecipeDetailScreen(
             )
         },
     ) { innerPadding ->
-        val contentModifier = Modifier
-            .fillMaxSize()
-            .padding(innerPadding)
-        if (offline != null) {
-            RecipeDetailContent(
-                view = offline.view,
-                // Sin red no se pueden pedir fotos: la copia no las guarda.
-                imageLoader = null,
-                onMoreServings = onMoreServings,
-                onFewerServings = onFewerServings,
-                onOpenSource = onOpenSource,
-                modifier = contentModifier,
-                offline = offline,
-                onRetry = onRetry,
-            )
-        } else {
-            when (state) {
-                // Closed no se ve nunca (la ruta enseña la lista), pero el «when» ha de ser completo.
-                RecipeDetailState.Closed, RecipeDetailState.Loading -> LoadingBlock(
-                    text = stringResource(R.string.detail_loading),
-                    modifier = contentModifier,
+        val contentModifier = Modifier.fillMaxSize()
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            // Aviso de «añadir a la compra»: fijo encima del contenido, sin taparlo.
+            val shoppingNotice = shopping.notice
+            if (shoppingNotice != null) {
+                AddToShoppingNoticeCard(
+                    notice = shoppingNotice,
+                    onLook = shoppingActions.onOpenShopping,
+                    onDismiss = shoppingActions.onNoticeDismiss,
+                    modifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small),
                 )
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                if (offline != null) {
+                    RecipeDetailContent(
+                        view = offline.view,
+                        // Sin red no se pueden pedir fotos: la copia no las guarda.
+                        imageLoader = null,
+                        onMoreServings = onMoreServings,
+                        onFewerServings = onFewerServings,
+                        onOpenSource = onOpenSource,
+                        modifier = contentModifier,
+                        offline = offline,
+                        onRetry = onRetry,
+                    )
+                } else {
+                    when (state) {
+                        // Closed no se ve nunca (la ruta enseña la lista), pero el «when» ha de ser completo.
+                        RecipeDetailState.Closed, RecipeDetailState.Loading -> LoadingBlock(
+                            text = stringResource(R.string.detail_loading),
+                            modifier = contentModifier,
+                        )
 
-                is RecipeDetailState.Failed -> ProblemBlock(
-                    problem = state.problem,
-                    defaultTitle = R.string.problem_title_recipe,
-                    onRetry = onRetry,
-                    onOpenSettings = onOpenSettings,
-                    modifier = contentModifier,
-                )
+                        is RecipeDetailState.Failed -> ProblemBlock(
+                            problem = state.problem,
+                            defaultTitle = R.string.problem_title_recipe,
+                            onRetry = onRetry,
+                            onOpenSettings = onOpenSettings,
+                            modifier = contentModifier,
+                        )
 
-                // 401 y 403: lleva a Ajustes, no a reintentar.
-                RecipeDetailState.Unauthorized -> ProblemBlock(
-                    problem = ConnectionProblem.Unauthorized,
-                    defaultTitle = R.string.problem_title_recipe,
-                    onRetry = onRetry,
-                    onOpenSettings = onOpenSettings,
-                    modifier = contentModifier,
-                )
+                        // 401 y 403: lleva a Ajustes, no a reintentar.
+                        RecipeDetailState.Unauthorized -> ProblemBlock(
+                            problem = ConnectionProblem.Unauthorized,
+                            defaultTitle = R.string.problem_title_recipe,
+                            onRetry = onRetry,
+                            onOpenSettings = onOpenSettings,
+                            modifier = contentModifier,
+                        )
 
-                RecipeDetailState.NotFound -> MessageBlock(
-                    title = stringResource(R.string.detail_not_found_title),
-                    text = stringResource(R.string.detail_not_found_text),
-                    primaryLabel = stringResource(R.string.detail_not_found_action),
-                    onPrimary = onBack,
-                    modifier = contentModifier,
-                )
+                        RecipeDetailState.NotFound -> MessageBlock(
+                            title = stringResource(R.string.detail_not_found_title),
+                            text = stringResource(R.string.detail_not_found_text),
+                            primaryLabel = stringResource(R.string.detail_not_found_action),
+                            onPrimary = onBack,
+                            modifier = contentModifier,
+                        )
 
-                is RecipeDetailState.Ready -> RecipeDetailContent(
-                    view = state.view,
-                    imageLoader = imageLoader,
-                    onMoreServings = onMoreServings,
-                    onFewerServings = onFewerServings,
-                    onOpenSource = onOpenSource,
-                    modifier = contentModifier,
-                )
+                        is RecipeDetailState.Ready -> RecipeDetailContent(
+                            view = state.view,
+                            imageLoader = imageLoader,
+                            onMoreServings = onMoreServings,
+                            onFewerServings = onFewerServings,
+                            onOpenSource = onOpenSource,
+                            modifier = contentModifier,
+                        )
+                    }
+                }
             }
         }
     }
@@ -275,6 +315,32 @@ fun RecipeDetailScreen(
             rejected = deleteState.rejected,
             onConfirm = onDeleteConfirm,
             onDismiss = onDeleteDismiss,
+            onOpenSettings = onOpenSettings,
+        )
+    }
+
+    // Añadir a la compra: el diálogo se pinta solo si está abierto (y con la receta a la vista).
+    val ready = state as? RecipeDetailState.Ready
+    if (shopping.open && ready != null) {
+        AddToShoppingDialog(
+            state = shopping,
+            title = stringResource(R.string.extras_compra_dialog_title),
+            // Con raciones o por veces: lo dice el estado, que lo fijó el detalle.
+            lead = stringResource(
+                if (shopping.usesServings) {
+                    R.string.extras_compra_dialog_lead
+                } else {
+                    R.string.extras_compra_dialog_lead_times
+                },
+                ready.view.name,
+            ),
+            showScale = true,
+            showLists = true,
+            onSelectList = shoppingActions.onSelectList,
+            onScaleChange = shoppingActions.onScaleChange,
+            onRetryLists = shoppingActions.onRetryLists,
+            onConfirm = shoppingActions.onConfirm,
+            onDismiss = shoppingActions.onDismiss,
             onOpenSettings = onOpenSettings,
         )
     }
@@ -909,6 +975,8 @@ private fun DetailPreview(
     state: RecipeDetailState,
     deleteState: RecipeDeleteUiState = RecipeDeleteUiState(),
     offline: OfflineCopyUi? = null,
+    shopping: AddToShoppingUi = AddToShoppingUi(),
+    shoppingActions: RecipeShoppingActions = RecipeShoppingActions(),
 ) {
     RecipeDetailScreen(
         state = state,
@@ -925,6 +993,8 @@ private fun DetailPreview(
         onDeleteClick = {},
         onDeleteDismiss = {},
         onDeleteConfirm = {},
+        shopping = shopping,
+        shoppingActions = shoppingActions,
     )
 }
 
@@ -1066,6 +1136,46 @@ private fun RecipeDetailDeleteFailedPreview() {
                 confirming = true,
                 problem = ConnectionProblem.NoNetwork,
             ),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 780)
+@Composable
+private fun RecipeDetailAddToShoppingPreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Ready(RecipePreviewData.detail),
+            shopping = AddToShoppingPreviewData.ui(open = true, scaleText = "2"),
+            shoppingActions = RecipeShoppingActions(onOpenShopping = {}),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 780, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeDetailShoppingAddedDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        DetailPreview(
+            state = RecipeDetailState.Ready(RecipePreviewData.detail),
+            shopping = AddToShoppingPreviewData.ui(
+                notice = AddToShoppingOutcome.Added("Compra de la semana", 1),
+            ),
+            shoppingActions = RecipeShoppingActions(onOpenShopping = {}),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 780, fontScale = 2f)
+@Composable
+private fun RecipeDetailShoppingMaybeAddedLargeTextPreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Ready(RecipePreviewData.detail),
+            shopping = AddToShoppingPreviewData.ui(
+                notice = AddToShoppingOutcome.MaybeAdded(ConnectionProblem.ServerNotResponding),
+            ),
+            shoppingActions = RecipeShoppingActions(onOpenShopping = {}),
         )
     }
 }

@@ -4,6 +4,7 @@ import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanMealView
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanState
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealType
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingUi
 import java.time.LocalDate
 
 /** Qué se apunta en una comida nueva: una receta del servidor o texto libre. */
@@ -99,4 +100,10 @@ class MealPlanUiState(
      * semana» cuando no es null. Sin él, el aviso no lleva acción.
      */
     val noticeDate: LocalDate? = null,
+    /**
+     * Fase 9, extra 1: «añadir los ingredientes de esta semana a la compra». El
+     * recuento de recetas distintas, el tope y las escalas los da el núcleo; aquí
+     * solo se pinta el diálogo y su aviso.
+     */
+    val addToShopping: AddToShoppingUi = AddToShoppingUi(),
 )

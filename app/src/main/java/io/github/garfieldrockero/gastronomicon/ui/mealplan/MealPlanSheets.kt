@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -82,6 +83,7 @@ import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
+import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingDialog
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
@@ -106,6 +108,11 @@ class MealPlanSheetActions(
     val onPickerLoadMore: () -> Unit = {},
     val onConfirmAdd: () -> Unit = {},
     val onConfirmDelete: () -> Unit = {},
+    // «Añadir la semana a la compra» (fase 9, extra 1).
+    val onAddToShoppingSelectList: (String) -> Unit = {},
+    val onAddToShoppingRetryLists: () -> Unit = {},
+    val onAddToShoppingConfirm: () -> Unit = {},
+    val onAddToShoppingDismiss: () -> Unit = {},
 )
 
 /** La hoja o el diálogo que toque según [MealPlanUiState.dialog]; nada si no hay ninguno. */
@@ -140,6 +147,39 @@ fun MealPlanSheets(
             actions = actions,
             onOpenSettings = onOpenSettings,
             onReload = onReload,
+        )
+    }
+
+    // «Añadir la semana a la compra»: es un diálogo, no una hoja, y va aparte de
+    // la hoja de comida para que las dos no se pisen.
+    val shopping = state.addToShopping
+    if (shopping.open) {
+        AddToShoppingDialog(
+            state = shopping,
+            title = stringResource(R.string.extras_compra_week_title),
+            // El recuento de recetas distintas lo da el núcleo al abrir el diálogo.
+            lead = if (shopping.recipes == 0) {
+                stringResource(R.string.extras_compra_week_nothing)
+            } else {
+                pluralStringResource(R.plurals.extras_compra_week_lead, shopping.recipes, shopping.recipes)
+            },
+            note = when {
+                shopping.truncated -> stringResource(R.string.extras_compra_week_truncated)
+                shopping.skipped > 0 -> pluralStringResource(
+                    R.plurals.extras_compra_week_skipped,
+                    shopping.skipped,
+                    shopping.skipped,
+                )
+                else -> null
+            },
+            showScale = false,
+            showLists = shopping.recipes > 0,
+            onSelectList = actions.onAddToShoppingSelectList,
+            onScaleChange = {},
+            onRetryLists = actions.onAddToShoppingRetryLists,
+            onConfirm = actions.onAddToShoppingConfirm,
+            onDismiss = actions.onAddToShoppingDismiss,
+            onOpenSettings = onOpenSettings,
         )
     }
 }

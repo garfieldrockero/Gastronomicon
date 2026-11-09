@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Unidad y alimento de un ingrediente: se eligen del catálogo de Mealie.
+
+         Van en su propio fichero porque son textos del selector y de la tarjeta
+         del ingrediente, y así no se pisan con los de otras tandas que también
+         tocan `strings.xml`. Los motivos de fallo de red se reutilizan de
+         `setup_error_*` (ver `errorTextRes`). -->
+
+    <!-- La tarjeta del ingrediente -->
+    <string name="editor_ingredient_unit_label">Unidad</string>
+    <string name="editor_ingredient_food_label">Alimento</string>
+    <string name="editor_ingredient_unit_none">Sin unidad</string>
+    <string name="editor_ingredient_food_none">Sin alimento</string>
+    <string name="editor_ingredient_catalog_help">La unidad y el alimento se eligen del catálogo de tu Mealie. Si no está el tuyo, puedes crearlo desde el selector.</string>
+
+    <!-- Lo que lee TalkBack al posarse en cada campo (el nombre del ingrediente
+         va dentro: hay varios iguales en la lista). -->
+    <string name="editor_ingredient_unit_field">Unidad del ingrediente %1$d: %2$s</string>
+    <string name="editor_ingredient_food_field">Alimento del ingrediente %1$d: %2$s</string>
+
+    <!-- El selector -->
+    <string name="editor_catalog_unit_title">Elige la unidad</string>
+    <string name="editor_catalog_food_title">Elige el alimento</string>
+    <string name="editor_catalog_close">Cerrar</string>
+    <string name="editor_catalog_search_label">Buscar en el catálogo</string>
+    <string name="editor_catalog_current">Elegido ahora: %1$s</string>
+    <string name="editor_catalog_clear_unit">Quitar la unidad</string>
+    <string name="editor_catalog_clear_food">Quitar el alimento</string>
+    <string name="editor_catalog_loading_unit">Buscando unidades…</string>
+    <string name="editor_catalog_loading_food">Buscando alimentos…</string>
+    <string name="editor_catalog_failed_unit">No se han podido cargar las unidades.</string>
+    <string name="editor_catalog_failed_food">No se han podido cargar los alimentos.</string>
+    <string name="editor_catalog_empty_unit">Ninguna unidad coincide. Si la tuya no está, créala abajo.</string>
+    <string name="editor_catalog_empty_food">Ningún alimento coincide. Si el tuyo no está, créalo abajo.</string>
+    <string name="editor_catalog_catalog_empty_unit">Tu Mealie todavía no tiene unidades. Crea la primera abajo.</string>
+    <string name="editor_catalog_catalog_empty_food">Tu Mealie todavía no tiene alimentos. Crea el primero abajo.</string>
+    <string name="editor_catalog_truncated">Hay más resultados de los que caben. Escribe más para afinar la búsqueda.</string>
+    <string name="editor_catalog_search_again">Buscar otra vez</string>
+
+    <!-- Crear lo que no está. Nunca se reintenta solo: si el servidor no
+         confirma, se avisa de que puede existir y se pide mirar antes. -->
+    <string name="editor_catalog_create_title_unit">¿No está? Crea la unidad</string>
+    <string name="editor_catalog_create_title_food">¿No está? Crea el alimento</string>
+    <string name="editor_catalog_create_label_unit">Nombre de la unidad nueva</string>
+    <string name="editor_catalog_create_label_food">Nombre del alimento nuevo</string>
+    <string name="editor_catalog_create_action">Crear «%1$s»</string>
+    <string name="editor_catalog_create_idle">Crear</string>
+    <string name="editor_catalog_creating">Creando…</string>
+    <string name="editor_catalog_maybe_created">Puede que ya exista; busca antes de repetir.</string>
+    <string name="editor_catalog_create_failed">No se ha podido crear.</string>
+    <string name="editor_catalog_create_rejected">Tu Mealie no ha aceptado ese nombre. Mira el catálogo antes de repetir o prueba con otro.</string>
+    <!-- Tras un fallo al crear no se repite el alta a ciegas: primero se relee el
+         catálogo (botón «Buscar otra vez») y solo después se crea a propósito. -->
+    <string name="editor_catalog_create_check_first">Antes de repetir, mira el catálogo: así no se crea dos veces.</string>
+    <string name="editor_catalog_created_not_applied">Se ha creado, pero el ingrediente al que iba ya no está en el formulario.</string>
+
+    <!-- Errores de la unidad y el alimento (los pone el núcleo). -->
+    <string name="editor_error_ingredient_unit_required">Elige una unidad del catálogo.</string>
+    <string name="editor_error_ingredient_food_required">Elige un alimento del catálogo.</string>
+    <string name="editor_error_ingredient_unit_invalid">Esa unidad ya no vale. Vuelve a elegirla del catálogo.</string>
+    <string name="editor_error_ingredient_food_invalid">Ese alimento ya no vale. Vuelve a elegirlo del catálogo.</string>
+    <string name="editor_error_ingredient_unit_too_long">El nombre de la unidad es demasiado largo (máximo 100 caracteres).</string>
+    <string name="editor_error_ingredient_food_too_long">El nombre del alimento es demasiado largo (máximo 100 caracteres).</string>
+</resources>

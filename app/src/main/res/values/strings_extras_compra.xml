@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Fase 9, extra 1: añadir ingredientes de recetas a la lista de la compra.
+    Prefijo `extras_compra_`. Los motivos de conexión reutilizan `problem_*` y
+    `setup_error_*`; estos textos no llevan nunca nada que mande el servidor.
+-->
+<resources>
+    <!-- Detalle de una receta -->
+    <string name="extras_compra_menu_add">Añadir a la lista de la compra</string>
+    <string name="extras_compra_dialog_title">Añadir a la compra</string>
+    <string name="extras_compra_dialog_lead">Los ingredientes de «%1$s» irán a la lista que elijas, con las raciones que pongas.</string>
+    <!-- La receta no dice para cuántas raciones es: se cuenta por veces. -->
+    <string name="extras_compra_dialog_lead_times">Los ingredientes de «%1$s» irán a la lista que elijas. La receta no dice para cuántas raciones es, así que se cuenta por veces la receta.</string>
+    <string name="extras_compra_scale_label">Raciones</string>
+    <string name="extras_compra_scale_placeholder">1</string>
+    <string name="extras_compra_scale_hint">Para cuántas raciones quieres los ingredientes. Las cantidades se ajustan solas.</string>
+    <string name="extras_compra_times_label">Veces la receta</string>
+    <string name="extras_compra_times_hint">Esta receta no dice para cuántas raciones es. Deja 1 para la receta tal cual.</string>
+
+    <!-- Elegir la lista -->
+    <string name="extras_compra_lists_title">¿A qué lista?</string>
+    <string name="extras_compra_lists_loading">Buscando tus listas…</string>
+    <string name="extras_compra_lists_empty">No tienes ninguna lista. Crea una en la pestaña Compra y vuelve aquí.</string>
+    <string name="extras_compra_lists_retry">Volver a mirar</string>
+    <string name="extras_compra_lists_rejected">Tu Mealie no ha aceptado la consulta de tus listas. Vuelve a mirarlas.</string>
+
+    <!-- Enviar -->
+    <string name="extras_compra_send">Añadir a la lista</string>
+    <string name="extras_compra_sending">Añadiendo…</string>
+    <string name="extras_compra_cancel">Cancelar</string>
+
+    <!-- Aviso de después -->
+    <plurals name="extras_compra_added">
+        <item quantity="one">Los ingredientes de %1$d receta ya están en «%2$s».</item>
+        <item quantity="other">Ingredientes de %1$d recetas añadidos a «%2$s».</item>
+    </plurals>
+    <string name="extras_compra_maybe_added">Puede que ya se hayan añadido. Mira la lista antes de repetir.</string>
+    <string name="extras_compra_notice_open">Ver la compra</string>
+    <string name="extras_compra_notice_look">Volver a mirar</string>
+    <string name="extras_compra_notice_dismiss">Entendido</string>
+
+    <!-- Lo que puede salir mal -->
+    <string name="extras_compra_rejected">Tu Mealie no ha aceptado los ingredientes. Vuelve a intentarlo.</string>
+    <string name="extras_compra_list_missing">Esa lista ya no está en tu Mealie. Vuelve a mirar tus listas.</string>
+    <string name="extras_compra_nothing_to_add">No hay ninguna receta que añadir.</string>
+    <string name="extras_compra_too_many">Son demasiadas recetas de una vez. Prueba con menos.</string>
+    <string name="extras_compra_invalid_recipe">Esa receta no se puede añadir. Recarga la receta y vuelve a intentarlo.</string>
+    <string name="extras_compra_invalid_scale">Esas raciones no son válidas.</string>
+    <string name="extras_compra_invalid_times">Ese número no vale. Escribe cuántas veces quieres la receta.</string>
+
+    <!-- Planificador: los ingredientes de la semana -->
+    <string name="extras_compra_week_action">Añadir la semana a la compra</string>
+    <string name="extras_compra_week_title">Añadir esta semana a la compra</string>
+    <plurals name="extras_compra_week_lead">
+        <item quantity="one">Se añadirán los ingredientes de %1$d receta de esta semana a la lista que elijas.</item>
+        <item quantity="other">Se añadirán los ingredientes de %1$d recetas distintas a la lista que elijas.</item>
+    </plurals>
+    <plurals name="extras_compra_week_skipped">
+        <item quantity="one">Se quedará fuera %d receta.</item>
+        <item quantity="other">Se quedarán fuera %d recetas.</item>
+    </plurals>
+    <string name="extras_compra_week_truncated">Se añaden como mucho 30 recetas de una vez; el resto se queda para otra.</string>
+    <string name="extras_compra_week_nothing">Esta semana no hay ninguna comida con receta: no hay ingredientes que añadir.</string>
+</resources>

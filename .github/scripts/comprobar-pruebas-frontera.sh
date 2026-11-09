@@ -65,6 +65,7 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRawJsonTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRecipeAddTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRecipeAdditionsTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRecipeScaleForServingsTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRecipeControllerTest
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanClientTest
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanControllerTest
