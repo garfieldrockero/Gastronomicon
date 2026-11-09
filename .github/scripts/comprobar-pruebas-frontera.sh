@@ -52,15 +52,20 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.recipes.ImageMetadataTest
   io.github.garfieldrockero.gastronomicon.core.recipes.ImageRecodePlanTest
   io.github.garfieldrockero.gastronomicon.core.client.RecipeDraftMergeTest
+  io.github.garfieldrockero.gastronomicon.core.client.RecipeDraftIngredientMergeTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientWriteTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientImportUploadTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientMaybeCreatedTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientCatalogTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClientTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListControllerTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerControllerTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListViewTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingTextTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRawJsonTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRecipeAddTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRecipeAdditionsTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRecipeControllerTest
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanClientTest
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanControllerTest
   io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDraftTest

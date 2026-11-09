@@ -1,8 +1,5 @@
 package io.github.garfieldrockero.gastronomicon.core.client
 
-import io.github.garfieldrockero.gastronomicon.core.recipes.DraftError
-import io.github.garfieldrockero.gastronomicon.core.recipes.DraftErrorKind
-import io.github.garfieldrockero.gastronomicon.core.recipes.DraftField
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftIngredient
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftNote
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftOrganizer
@@ -43,11 +40,6 @@ internal object RecipeDraftJson {
      */
     val SERVER_MANAGED_KEYS: Set<String> = setOf("dateUpdated", "updatedAt", "update_at", "createdAt")
 
-    sealed interface Merge {
-        class Body(val json: JsonObject) : Merge
-        class Errors(val errors: List<DraftError>) : Merge
-    }
-
     // ---------------------------------------------------------------- leer
 
     fun toDraft(obj: JsonObject): RecipeDraft = RecipeDraft(
@@ -71,14 +63,32 @@ internal object RecipeDraftJson {
     private fun timeOf(obj: JsonObject, key: String): String =
         RecipeDraftValidator.plain(obj.string(key), RecipeDraftValidator.MAX_TIME_TEXT)
 
-    private fun ingredientOf(o: JsonObject) = DraftIngredient(
-        quantity = RecipeDraftValidator.validQuantity(o.number("quantity")),
-        unit = RecipeDraftValidator.plain((o["unit"] as? JsonObject)?.string("name"), RecipeDraftValidator.MAX_UNIT_FOOD),
-        food = RecipeDraftValidator.plain((o["food"] as? JsonObject)?.string("name"), RecipeDraftValidator.MAX_UNIT_FOOD),
-        note = RecipeDraftValidator.plain(o.string("note"), RecipeDraftValidator.MAX_INGREDIENT_TEXT),
-        title = RecipeDraftValidator.plain(o.string("title"), RecipeDraftValidator.MAX_INGREDIENT_TEXT),
-        sourceId = RecipeDraftValidator.validUuid(o.string("referenceId")),
-    )
+    private fun ingredientOf(o: JsonObject): DraftIngredient {
+        val unit = RecipeDraftValidator.plain(
+            (o["unit"] as? JsonObject)?.string("name"),
+            RecipeDraftValidator.MAX_UNIT_FOOD,
+        )
+        val food = RecipeDraftValidator.plain(
+            (o["food"] as? JsonObject)?.string("name"),
+            RecipeDraftValidator.MAX_UNIT_FOOD,
+        )
+        return DraftIngredient(
+            quantity = RecipeDraftValidator.validQuantity(o.number("quantity")),
+            unit = unit,
+            food = food,
+            note = RecipeDraftValidator.plain(o.string("note"), RecipeDraftValidator.MAX_INGREDIENT_TEXT),
+            title = RecipeDraftValidator.plain(o.string("title"), RecipeDraftValidator.MAX_INGREDIENT_TEXT),
+            sourceId = RecipeDraftValidator.validUuid(o.string("referenceId")),
+            // Un id sin nombre no se puede ni mostrar ni reenviar: se descarta al
+            // leer. Así una línea del servidor con el nombre vacío o ilegible
+            // tras sanear no bloquea el guardado por un `Required` al no haberse
+            // tocado (y la línea sale idéntica en el `PUT`).
+            unitId = RecipeDraftValidator.validUuid((o["unit"] as? JsonObject)?.string("id"))
+                ?.takeIf { unit.isNotEmpty() },
+            foodId = RecipeDraftValidator.validUuid((o["food"] as? JsonObject)?.string("id"))
+                ?.takeIf { food.isNotEmpty() },
+        )
+    }
 
     private fun stepOf(o: JsonObject) = DraftStep(
         title = RecipeDraftValidator.plain(o.string("title"), RecipeDraftValidator.MAX_STEP_TITLE),
@@ -109,11 +119,10 @@ internal object RecipeDraftJson {
      * El cuerpo del `PUT`: [original] con las claves editadas sustituidas.
      * [draft] tiene que haber pasado ya por `RecipeDraftValidator`.
      *
-     * Devuelve [Merge.Errors] solo para lo que no se puede escribir sin
-     * inventar la API: cambiar la unidad o el alimento de una línea.
+     * No puede fallar: la validación previa ya ha rechazado lo que no se puede
+     * escribir (un id de unidad sin nombre, por ejemplo).
      */
-    fun merge(original: JsonObject, draft: RecipeDraft): Merge {
-        val errors = ArrayList<DraftError>()
+    fun merge(original: JsonObject, draft: RecipeDraft): JsonObject {
         val before = toDraft(original)
         val out = LinkedHashMap<String, JsonElement>(original)
         for (key in SERVER_MANAGED_KEYS) out.remove(key)
@@ -136,15 +145,19 @@ internal object RecipeDraftJson {
             out, original, "recipeIngredient", draft.ingredients,
             parse = { ingredientOf(it) },
             idOf = { it.sourceId },
-            strip = { it.copy(sourceId = null) },
-            build = { wanted, index -> newIngredient(wanted, index, errors) },
-            rebuild = { base, was, wanted, index -> editedIngredient(base, was, wanted, index, errors) },
+            // Se comparan cantidad, nota, título y las dos referencias: un id
+            // distinto con el mismo nombre sí es un cambio, y un borrador sin
+            // ids (de una versión anterior) sigue contando como «sin cambio»
+            // porque solo se miran los nombres.
+            same = { was, wanted -> !ingredientChanged(was, wanted) },
+            build = { wanted, _ -> newIngredient(wanted) },
+            rebuild = { base, was, wanted, _ -> editedIngredient(base, was, wanted) },
         )
         mergeList(
             out, original, "recipeInstructions", draft.steps,
             parse = { stepOf(it) },
             idOf = { it.sourceId },
-            strip = { it.copy(sourceId = null) },
+            same = { was, wanted -> was == wanted },
             build = { wanted, _ -> JsonObject(mapOf("title" to JsonPrimitive(wanted.title), "text" to JsonPrimitive(wanted.text))) },
             rebuild = { base, was, wanted, _ ->
                 val b = LinkedHashMap<String, JsonElement>(base)
@@ -157,7 +170,7 @@ internal object RecipeDraftJson {
             out, original, "notes", draft.notes,
             parse = { noteOf(it) },
             idOf = { it.sourceId },
-            strip = { it.copy(sourceId = null) },
+            same = { was, wanted -> was == wanted },
             build = { wanted, _ -> JsonObject(mapOf("title" to JsonPrimitive(wanted.title), "text" to JsonPrimitive(wanted.text))) },
             rebuild = { base, was, wanted, _ ->
                 val b = LinkedHashMap<String, JsonElement>(base)
@@ -169,7 +182,7 @@ internal object RecipeDraftJson {
         mergeOrganizers(out, original, "tags", draft.tags)
         mergeOrganizers(out, original, "recipeCategory", draft.categories)
 
-        return if (errors.isEmpty()) Merge.Body(JsonObject(out)) else Merge.Errors(errors)
+        return JsonObject(out)
     }
 
     private fun time(
@@ -185,38 +198,106 @@ internal object RecipeDraftJson {
         if (secondsKey != null && original.containsKey(secondsKey)) out[secondsKey] = JsonNull
     }
 
-    private fun newIngredient(wanted: DraftIngredient, index: Int, errors: MutableList<DraftError>): JsonObject {
-        // Sin línea original no hay objeto de unidad o alimento que conservar.
-        if (wanted.unit.isNotEmpty()) errors += DraftError(DraftField.IngredientUnit, DraftErrorKind.NotEditable, index)
-        if (wanted.food.isNotEmpty()) errors += DraftError(DraftField.IngredientFood, DraftErrorKind.NotEditable, index)
+    /**
+     * Una línea nueva: solo lo que la persona ha escrito. La unidad y el
+     * alimento van como referencia al catálogo (`{"id":…,"name":…}`) o, si
+     * solo hay nombre, como `CreateIngredientUnit`/`CreateIngredientFood`
+     * (`{"name":…}`), que es lo que admite `RecipeIngredient-Input`.
+     */
+    private fun newIngredient(wanted: DraftIngredient): JsonObject {
         val fields = LinkedHashMap<String, JsonElement>()
         wanted.quantity?.let { fields["quantity"] = JsonPrimitive(it) }
+        referenceValue(wanted.unitId, wanted.unit)?.let { fields["unit"] = it }
+        referenceValue(wanted.foodId, wanted.food)?.let { fields["food"] = it }
         fields["note"] = JsonPrimitive(wanted.note)
         if (wanted.title.isNotEmpty()) fields["title"] = JsonPrimitive(wanted.title)
         return JsonObject(fields)
     }
 
-    private fun editedIngredient(
-        base: JsonObject,
-        was: DraftIngredient,
-        wanted: DraftIngredient,
-        index: Int,
-        errors: MutableList<DraftError>,
-    ): JsonObject {
-        if (wanted.unit != was.unit) errors += DraftError(DraftField.IngredientUnit, DraftErrorKind.NotEditable, index)
-        if (wanted.food != was.food) errors += DraftError(DraftField.IngredientFood, DraftErrorKind.NotEditable, index)
+    /**
+     * Una línea que ya existía: se parte de su JSON y solo se toca lo editado.
+     * Cambiar la unidad o el alimento NO pierde el resto de la línea (nota,
+     * título, receta referenciada, campos que esta versión no conoce).
+     */
+    private fun editedIngredient(base: JsonObject, was: DraftIngredient, wanted: DraftIngredient): JsonObject {
         val b = LinkedHashMap<String, JsonElement>(base)
         if (wanted.quantity != was.quantity) {
             b["quantity"] = wanted.quantity?.let { JsonPrimitive(it) } ?: JsonNull
         }
         if (wanted.note != was.note) b["note"] = JsonPrimitive(wanted.note)
         if (wanted.title != was.title) b["title"] = if (wanted.title.isEmpty()) JsonNull else JsonPrimitive(wanted.title)
+        if (referenceChanged(was.unit, was.unitId, wanted.unit, wanted.unitId)) {
+            b["unit"] = editedReference(was.unitId, wanted.unitId, wanted.unit)
+        }
+        if (referenceChanged(was.food, was.foodId, wanted.food, wanted.foodId)) {
+            b["food"] = editedReference(was.foodId, wanted.foodId, wanted.food)
+        }
         // «display» es el texto que Mealie compone con cantidad, unidad,
         // alimento y nota: tras editar la línea ya no corresponde y se deja que
         // lo recalcule el servidor.
         b.remove("display")
         return JsonObject(b)
     }
+
+    /**
+     * ¿Ha cambiado la referencia al catálogo?
+     *
+     * - Mismo nombre y sin id nuevo no es un cambio (un borrador que perdió los
+     *   ids, por ejemplo de una versión anterior, no reescribe la línea).
+     * - Con id en el borrador, cambia si el id o el nombre no coinciden: el
+     *   nombre distinto con el mismo id no se ignora (se manda solo la
+     *   referencia por id) y el id distinto con el mismo nombre tampoco.
+     * - Solo nombre: es una creación por nombre, cuenta si el nombre cambia.
+     */
+    private fun referenceChanged(wasName: String, wasId: String?, wantedName: String, wantedId: String?): Boolean =
+        when {
+            wantedName.isEmpty() && wantedId == null -> wasName.isNotEmpty() || wasId != null
+            wantedId != null -> wantedId != wasId || wantedName != wasName
+            // Solo nombre: es una creación por nombre, cuenta si el nombre cambia.
+            else -> wantedName != wasName
+        }
+
+    /**
+     * ¿Hay algo que escribir en esta línea? Se comparan los datos visibles y las
+     * referencias con [referenceChanged], no la igualdad entera: un borrador
+     * sin ids con los mismos nombres tiene que salir sin tocar.
+     */
+    private fun ingredientChanged(was: DraftIngredient, wanted: DraftIngredient): Boolean =
+        was.quantity != wanted.quantity ||
+            was.note != wanted.note ||
+            was.title != wanted.title ||
+            referenceChanged(was.unit, was.unitId, wanted.unit, wanted.unitId) ||
+            referenceChanged(was.food, was.foodId, wanted.food, wanted.foodId)
+
+    /**
+     * El `unit`/`food` que se envía.
+     *
+     * - Mismo id que el original: se manda **solo** `{"id":…}`. Reenviar el id
+     *   con un nombre nuevo podría renombrar la entrada del catálogo para todas
+     *   las recetas (o, si Mealie solo mira el id, perder el cambio sin avisar):
+     *   el nombre que se ve en la línea no se escribe en el catálogo.
+     * - Id distinto (o ninguno): referencia mínima con id y nombre, o solo
+     *   nombre (`CreateIngredientUnit`/`CreateIngredientFood`).
+     */
+    private fun editedReference(wasId: String?, wantedId: String?, name: String): JsonElement {
+        if (wantedId != null && wantedId == wasId) {
+            return JsonObject(mapOf("id" to JsonPrimitive(wantedId)))
+        }
+        return referenceValue(wantedId, name) ?: JsonNull
+    }
+
+    /** Referencia al catálogo, o null si la línea no lleva unidad o alimento. */
+    private fun referenceValue(id: String?, name: String): JsonElement? =
+        when {
+            id != null -> JsonObject(
+                linkedMapOf<String, JsonElement>(
+                    "id" to JsonPrimitive(id),
+                    "name" to JsonPrimitive(name),
+                ),
+            )
+            name.isNotEmpty() -> JsonObject(mapOf("name" to JsonPrimitive(name)))
+            else -> null
+        }
 
     private fun mergeOrganizers(
         out: MutableMap<String, JsonElement>,
@@ -230,7 +311,7 @@ internal object RecipeDraftJson {
             // de aquí solo se usa para casar por id, y un nombre vacío no casa.
             parse = { organizerOf(it) ?: DraftOrganizer() },
             idOf = { it.id },
-            strip = { it },
+            same = { was, wanted -> was == wanted },
             build = { wanted, _ ->
                 val f = LinkedHashMap<String, JsonElement>()
                 wanted.id?.let { f["id"] = JsonPrimitive(it) }
@@ -265,7 +346,7 @@ internal object RecipeDraftJson {
         drafts: List<D>,
         parse: (JsonObject) -> D,
         idOf: (D) -> String?,
-        strip: (D) -> D,
+        same: (D, D) -> Boolean,
         build: (D, Int) -> JsonObject,
         rebuild: (JsonObject, D, D, Int) -> JsonObject,
     ) {
@@ -288,7 +369,7 @@ internal object RecipeDraftJson {
             }
             used += position
             val match = existing[position]
-            result += if (strip(match.draft) == strip(wanted)) match.json else rebuild(match.json, match.draft, wanted, index)
+            result += if (same(match.draft, wanted)) match.json else rebuild(match.json, match.draft, wanted, index)
         }
         // Sin nada que escribir y sin nada que borrar, la clave se deja como venía
         // (ausente, null o vacía): no se inventa un «[]» donde el servidor no lo puso.

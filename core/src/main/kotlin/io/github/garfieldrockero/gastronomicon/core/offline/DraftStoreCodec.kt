@@ -56,6 +56,11 @@ internal class StoredDraftIngredient(
     val note: String = "",
     val title: String = "",
     val sourceId: String? = null,
+    // Referencias al catálogo del servidor, validadas como UUID. Son opcionales
+    // con valor por defecto para que un borrador antiguo (sin estos campos) se
+    // siga leyendo: sin id, la línea se trata como «sin cambio» al guardar.
+    val unitId: String? = null,
+    val foodId: String? = null,
 )
 
 @Serializable
@@ -106,13 +111,17 @@ internal object DraftStoreCodec {
             cookTime = clean(draft.cookTime, RecipeDraftValidator.MAX_TIME_TEXT),
             performTime = clean(draft.performTime, RecipeDraftValidator.MAX_TIME_TEXT),
             ingredients = draft.ingredients.take(RecipeDraftValidator.MAX_INGREDIENTS).map {
+                val unit = clean(it.unit, RecipeDraftValidator.MAX_UNIT_FOOD)
+                val food = clean(it.food, RecipeDraftValidator.MAX_UNIT_FOOD)
                 StoredDraftIngredient(
                     quantity = finite(it.quantity),
-                    unit = clean(it.unit, RecipeDraftValidator.MAX_UNIT_FOOD),
-                    food = clean(it.food, RecipeDraftValidator.MAX_UNIT_FOOD),
+                    unit = unit,
+                    food = food,
                     note = clean(it.note, RecipeDraftValidator.MAX_INGREDIENT_TEXT),
                     title = clean(it.title, RecipeDraftValidator.MAX_INGREDIENT_TEXT),
                     sourceId = RecipeImage.normalizeId(it.sourceId),
+                    unitId = referenceId(unit, it.unitId),
+                    foodId = referenceId(food, it.foodId),
                 )
             },
             steps = draft.steps.take(RecipeDraftValidator.MAX_STEPS).map {
@@ -166,13 +175,17 @@ internal object DraftStoreCodec {
             cookTime = clean(stored.cookTime, RecipeDraftValidator.MAX_TIME_TEXT),
             performTime = clean(stored.performTime, RecipeDraftValidator.MAX_TIME_TEXT),
             ingredients = stored.ingredients.take(RecipeDraftValidator.MAX_INGREDIENTS).map {
+                val unit = clean(it.unit, RecipeDraftValidator.MAX_UNIT_FOOD)
+                val food = clean(it.food, RecipeDraftValidator.MAX_UNIT_FOOD)
                 DraftIngredient(
                     quantity = finite(it.quantity),
-                    unit = clean(it.unit, RecipeDraftValidator.MAX_UNIT_FOOD),
-                    food = clean(it.food, RecipeDraftValidator.MAX_UNIT_FOOD),
+                    unit = unit,
+                    food = food,
                     note = clean(it.note, RecipeDraftValidator.MAX_INGREDIENT_TEXT),
                     title = clean(it.title, RecipeDraftValidator.MAX_INGREDIENT_TEXT),
                     sourceId = RecipeImage.normalizeId(it.sourceId),
+                    unitId = referenceId(unit, it.unitId),
+                    foodId = referenceId(food, it.foodId),
                 )
             },
             steps = stored.steps.take(RecipeDraftValidator.MAX_STEPS).map {
@@ -214,6 +227,16 @@ internal object DraftStoreCodec {
     /** Sanea y recorta al máximo (aquí sí se recorta: es un borrador propio). */
     private fun clean(raw: String, max: Int, newlines: Boolean = false): String =
         PlainTextSanitizer.sanitize(raw, max, newlines)
+
+    /**
+     * Id de catálogo que se guarda: solo si el nombre saneado no quedó vacío.
+     * Un id sin nombre no se puede reenviar (el esquema exige los dos), y
+     * conservarlo haría que un borrador recuperado no se pudiera guardar por una
+     * referencia que no se puede ni mostrar. Sin id, la línea se trata como «sin
+     * cambio».
+     */
+    private fun referenceId(name: String, raw: String?): String? =
+        if (name.isEmpty()) null else RecipeImage.normalizeId(raw)
 
     /** JSON no admite NaN ni infinito: se guardan como «sin valor». */
     private fun finite(raw: Double?): Double? = raw?.takeIf { it.isFinite() }

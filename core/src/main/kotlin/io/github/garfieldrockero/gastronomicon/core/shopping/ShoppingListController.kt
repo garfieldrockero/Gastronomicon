@@ -22,15 +22,18 @@ import java.util.concurrent.CancellationException
  * [ShoppingListState.busyItemIds] no se acepta otra escritura sobre él, así que
  * dos toques rápidos no lanzan dos `PUT` que se pisen.
  *
- * Las escrituras solo empiezan con la lista en [ShoppingPhase.Idle] y fuera de
- * un borrado de marcados: así el resultado de una escritura nunca se mezcla
- * con una recarga en vuelo y la fase no se queda en «cargando». Además, al
+ * Las escrituras solo empiezan con la lista en [ShoppingPhase.Idle], fuera de
+ * un borrado de marcados y sin un «añadiendo» en vuelo ([ShoppingListState.adding]):
+ * así el resultado de una escritura nunca se mezcla con una recarga en vuelo ni
+ * con la relectura que sigue a un `POST`, y la fase no se queda en «cargando». Además, al
  * aplicar el resultado se comprueba que sigue abierta la misma lista
  * ([ShoppingListState.listId]); si se abrió otra, el resultado se descarta.
  *
  * Añadir no devuelve el elemento: tras un `POST` correcto (o dudoso, ver
  * [ApiResult.MaybeCreated]) se vuelve a leer la lista, para no inventar ids ni
- * arriesgar duplicados si el servidor contesta algo que no se entiende.
+ * arriesgar duplicados si el servidor contesta algo que no se entiende. Lo mismo
+ * vale para añadir los ingredientes de recetas ([addRecipes]): el `POST` lleva
+ * la escala y la respuesta se ignora; la lista se relee.
  *
  * Cualquier [NetworkError] de la fuente se traduce con `ApiErrors.map`, igual
  * que en `ShoppingClient` (401 y 403 → [ShoppingProblem.Unauthorized], 404 →
@@ -41,12 +44,13 @@ import java.util.concurrent.CancellationException
  *
  * Dos cosas no se disfrazan nunca:
  * - Al **añadir**, un fallo que no prueba que la petición no salió (un
- *   [NetworkError.AfterSend], un 5xx, una respuesta ilegible o una excepción
- *   suelta) es [ApiResult.MaybeCreated]: preferir un aviso de más solo hace
- *   mirar la lista, mientras que decir «no se añadió» de menos deja dos líneas
- *   iguales. Solo se cuenta como fallo definitivo lo que prueba que no salió
- *   nada (los mismos [NetworkError] que `ShoppingClient`) o un rechazo
- *   definitivo del servidor.
+ *   [NetworkError.AfterSend], un 5xx o una respuesta ilegible) es
+ *   [ApiResult.MaybeCreated]: preferir un aviso de más solo hace mirar la
+ *   lista, mientras que decir «no se añadió» de menos deja dos líneas iguales.
+ *   Solo se cuenta como fallo definitivo lo que prueba que no salió nada (los
+ *   mismos [NetworkError] que `ShoppingClient`) o un rechazo definitivo del
+ *   servidor. Una `RuntimeException` suelta también es definitiva: el
+ *   transporte no deja escapar ninguna suya, así que saltó antes de enviar.
  * - Una **cancelación** o un `Error` de la carga no son fallos de red: la fase
  *   vuelve a [ShoppingPhase.Idle] y la excepción sigue subiendo, para que quien
  *   canceló lo sepa y la interfaz no espere una respuesta que no va a llegar.
@@ -115,8 +119,8 @@ class ShoppingListController(private val source: ShoppingListSource) {
     /**
      * Marca o desmarca el elemento [itemId]. El cambio se ve al instante y se
      * revierte si la escritura falla. Un id que no está en la lista, una carga
-     * en marcha, un borrado de marcados o una escritura ya en curso sobre él no
-     * hacen nada.
+     * en marcha, un borrado de marcados, un «añadiendo» en vuelo o una
+     * escritura ya en curso sobre él no hacen nada.
      */
     fun toggle(itemId: String): ShoppingListState {
         val id = ShoppingIds.valid(itemId) ?: return state
@@ -125,7 +129,7 @@ class ShoppingListController(private val source: ShoppingListSource) {
         var listId: String? = null
         synchronized(lock) {
             val current = state
-            if (current.phase != ShoppingPhase.Idle || current.clearingChecked) return current
+            if (current.phase != ShoppingPhase.Idle || current.clearingChecked || current.adding) return current
             val item = current.items.firstOrNull { it.id == id } ?: return current
             if (id in current.busyItemIds) return current
             target = item
@@ -196,33 +200,73 @@ class ShoppingListController(private val source: ShoppingListSource) {
             }
         }
         val added = result ?: return state
-        return when (added) {
-            is ApiResult.Success -> load(openList, firstLoad = false)
-            is ApiResult.MaybeCreated -> {
-                // La fase de «añadiendo» ya está cerrada antes de releer. El
-                // aviso se pone sobre el estado vigente y no sobre la copia que
-                // devolvió `load`: entre la relectura y este punto otra
-                // operación pudo cambiarlo (abrir otra lista, un borrado) y
-                // pisarlo con la copia vieja perdería ese cambio.
-                load(openList, firstLoad = false)
-                synchronized(lock) {
-                    if (state.listId == openList) {
-                        state = state.copy(problem = problemOf(added))
-                    }
-                    state
-                }
-            }
-            else -> synchronized(lock) {
-                if (state.listId == openList) state = state.copy(problem = problemOf(added))
-                state
+        return applyCreated(openList, added)
+    }
+
+    /**
+     * Añade los ingredientes de una receta con [scale] (1.0 = tal cual).
+     * Atajo de [addRecipes].
+     */
+    fun addRecipe(recipeId: String, scale: Double = 1.0): ShoppingListState =
+        addRecipes(listOf(RecipeAddition(recipeId, scale)))
+
+    /**
+     * Añade los ingredientes de [additions] en una sola petición y relee la
+     * lista. Sirve para una receta suelta y para la semana del planificador
+     * (ver `RecipeAdditions.plan`).
+     *
+     * Las recetas se validan aquí ([RecipeAdditions.check]): un id que no es
+     * UUID, una escala fuera del rango del núcleo o una tanda vacía o
+     * demasiado grande **no se envían y no tocan el estado**. Los `recipeId`
+     * repetidos se fusionan sumando sus escalas ([RecipeAdditions.merge]) antes
+     * de validar y de enviar, para no dejar dos líneas de los mismos
+     * ingredientes. No se pone un aviso porque `ShoppingProblem` no tiene un
+     * motivo para «dato inválido de la receta» sin tocar la interfaz: quien
+     * llama tiene que comprobar antes con `RecipeAdditions.check` para poder
+     * explicarlo. (Pendiente de decisión: añadir un motivo tipado y su texto.)
+     *
+     * Tras un `POST` correcto se relee la lista, igual que al añadir una nota.
+     * Un desenlace dudoso ([ApiResult.MaybeCreated]) también relee y deja el
+     * aviso: el servidor puede haber metido los ingredientes y repetir a ciegas
+     * los duplicaría.
+     *
+     * Mientras dura, [ShoppingListState.adding] está encendido y no se acepta
+     * ninguna otra escritura.
+     */
+    fun addRecipes(additions: List<RecipeAddition>): ShoppingListState {
+        // Se copia y se fusiona: quien llama puede reutilizar la lista que pasa y
+        // no debe cambiar lo que se manda a mitad de la petición, y un id
+        // repetido no puede acabar en dos líneas de los mismos ingredientes.
+        val batch = RecipeAdditions.merge(additions)
+        if (RecipeAdditions.check(batch) != null) return state
+        var listId: String? = null
+        synchronized(lock) {
+            val current = state
+            if (current.adding || current.clearingChecked || current.phase != ShoppingPhase.Idle) return current
+            listId = current.listId ?: return current
+            state = current.copy(adding = true, problem = null)
+        }
+        val openList = listId ?: return state
+        // `adding` se cierra siempre, también si la fuente se corta con una
+        // cancelación o un `Error`: si no, el botón de añadir quedaría muerto.
+        var result: ApiResult<Unit>? = null
+        try {
+            result = callCreate { source.addRecipes(openList, batch) }
+        } finally {
+            synchronized(lock) {
+                if (state.listId == openList) state = state.copy(adding = false)
             }
         }
+        val added = result ?: return state
+        return applyCreated(openList, added)
     }
 
     /**
      * Cambia la nota y la cantidad del elemento [itemId]. La cantidad 0 es
      * «sin cantidad». Si el texto se queda vacío y el elemento no tiene
      * alimento ni unidad, no se envía: la línea no tendría nada que enseñar.
+     * No empieza con una carga, un borrado de marcados o un «añadiendo» en
+     * vuelo.
      */
     fun editNote(itemId: String, note: String, quantity: Double): ShoppingListState {
         val id = ShoppingIds.valid(itemId) ?: return state
@@ -231,7 +275,7 @@ class ShoppingListController(private val source: ShoppingListSource) {
         var listId: String? = null
         synchronized(lock) {
             val current = state
-            if (current.phase != ShoppingPhase.Idle || current.clearingChecked) return current
+            if (current.phase != ShoppingPhase.Idle || current.clearingChecked || current.adding) return current
             val item = current.items.firstOrNull { it.id == id } ?: return current
             if (id in current.busyItemIds) return current
             val inputProblem = input.problem
@@ -273,14 +317,15 @@ class ShoppingListController(private val source: ShoppingListSource) {
 
     /**
      * Borra el elemento [itemId]. No es optimista: se quita del estado solo
-     * cuando el servidor lo acepta o contesta 404 (ya no estaba).
+     * cuando el servidor lo acepta o contesta 404 (ya no estaba). No empieza con
+     * una carga, un borrado de marcados o un «añadiendo» en vuelo.
      */
     fun delete(itemId: String): ShoppingListState {
         val id = ShoppingIds.valid(itemId) ?: return state
         var listId: String? = null
         synchronized(lock) {
             val current = state
-            if (current.phase != ShoppingPhase.Idle || current.clearingChecked) return current
+            if (current.phase != ShoppingPhase.Idle || current.clearingChecked || current.adding) return current
             if (current.items.none { it.id == id } || id in current.busyItemIds) return current
             listId = current.listId
             state = current.copy(busyItemIds = current.busyItemIds + id, problem = null)
@@ -302,10 +347,11 @@ class ShoppingListController(private val source: ShoppingListSource) {
 
     /**
      * Borra los elementos marcados que había al empezar. No empieza si hay
-     * algún elemento con una escritura en vuelo: su `PUT` podría revertir y el
-     * borrado dejaría el estado mintiendo. Mientras dura, todo el lote está en
-     * [ShoppingListState.busyItemIds] y en [ShoppingListState.clearingItemIds],
-     * y no se acepta ninguna otra escritura.
+     * algún elemento con una escritura en vuelo ni mientras se están añadiendo
+     * ingredientes: su `PUT` podría revertir y el borrado dejaría el estado
+     * mintiendo, y la relectura del `POST` podría resucitar lo borrado. Mientras
+     * dura, todo el lote está en [ShoppingListState.busyItemIds] y en
+     * [ShoppingListState.clearingItemIds], y no se acepta ninguna otra escritura.
      *
      * El lote es exactamente lo que la interfaz pudo confirmar: si alguien
      * marca otro mientras tanto, ese se queda. Tras un fallo parcial se relee
@@ -318,6 +364,7 @@ class ShoppingListController(private val source: ShoppingListSource) {
             val current = state
             if (current.clearingChecked) return current
             if (current.phase != ShoppingPhase.Idle) return current
+            if (current.adding) return current
             if (current.busyItemIds.isNotEmpty()) return current
             val openList = current.listId ?: return current
             batch = current.items.filter { it.checked }
@@ -412,9 +459,18 @@ class ShoppingListController(private val source: ShoppingListSource) {
      * Como [call], pero para el `POST` de añadir: solo se cuenta como fallo
      * definitivo lo que prueba que la petición no salió o un rechazo del
      * servidor que no deja nada creado. Todo lo demás —[NetworkError.AfterSend],
-     * un 5xx (un proxy puede contestar 502 mientras Mealie sigue creando), una
-     * respuesta ilegible o una excepción suelta— es [ApiResult.MaybeCreated]: se
-     * relee la lista antes de dejar repetir, igual que hace [ShoppingClient].
+     * un 5xx (un proxy puede contestar 502 mientras Mealie sigue creando) o una
+     * respuesta ilegible— es [ApiResult.MaybeCreated]: se relee la lista antes de
+     * dejar repetir, igual que hace [ShoppingClient].
+     *
+     * Una [RuntimeException] que llegue hasta aquí **no** es una creación
+     * dudosa: el transporte envuelve en [NetworkError] (y en
+     * [NetworkError.AfterSend] lo ambiguo posterior al envío) cualquier fallo
+     * suyo, así que una excepción suelta salió al validar, al componer el cuerpo
+     * o al abrir la conexión, es decir, antes de enviar nada. Se cuenta como
+     * fallo definitivo ([ApiResult.Failure] con [ConnectionProblem.Unknown]) y
+     * no se avisa de «quizá creado» ni se relee: mandar a mirar la lista por una
+     * petición que nunca salió solo confunde.
      *
      * Una cancelación no se traga: se relanza tal cual ([add] cierra `adding`
      * antes) para que quien canceló lo sepa.
@@ -429,9 +485,9 @@ class ShoppingListController(private val source: ShoppingListSource) {
         } catch (error: NetworkError) {
             creationFailure(error)
         } catch (error: RuntimeException) {
-            // Una excepción suelta no prueba que el cuerpo no llegara a salir,
-            // así que el elemento puede estar creado: dudoso, no fallido.
-            ApiResult.MaybeCreated(ConnectionProblem.Unknown)
+            // El transporte no deja escapar sus propias excepciones: si llega
+            // una, saltó antes de enviar y no hay nada que comprobar.
+            ApiResult.Failure(ConnectionProblem.Unknown)
         }
 
     /**
@@ -457,6 +513,32 @@ class ShoppingListController(private val source: ShoppingListSource) {
         NetworkError.InvalidRequest,
         NetworkError.LocalHttpNotAllowedOnThisNetwork -> true
         else -> false
+    }
+
+    /**
+     * Aplica el desenlace de un `POST` que crea algo en la lista (una nota o
+     * los ingredientes de recetas). Con éxito o con duda se relee la lista; el
+     * aviso se pone sobre el estado vigente y no sobre la copia que devolvió
+     * `load`: entre la relectura y este punto otra operación pudo cambiarlo
+     * (abrir otra lista, un borrado) y pisarlo con la copia vieja perdería ese
+     * cambio. Con un rechazo definitivo no se relee: no hay nada nuevo.
+     */
+    private fun applyCreated(openList: String, created: ApiResult<Unit>): ShoppingListState = when (created) {
+        is ApiResult.Success -> load(openList, firstLoad = false)
+        is ApiResult.MaybeCreated -> {
+            // La fase de «añadiendo» ya está cerrada antes de releer.
+            load(openList, firstLoad = false)
+            synchronized(lock) {
+                if (state.listId == openList) {
+                    state = state.copy(problem = problemOf(created))
+                }
+                state
+            }
+        }
+        else -> synchronized(lock) {
+            if (state.listId == openList) state = state.copy(problem = problemOf(created))
+            state
+        }
     }
 
     private fun load(listId: String, firstLoad: Boolean): ShoppingListState {

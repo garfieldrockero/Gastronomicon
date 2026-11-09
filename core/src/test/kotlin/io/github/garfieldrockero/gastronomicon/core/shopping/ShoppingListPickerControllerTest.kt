@@ -489,7 +489,7 @@ class ShoppingListPickerControllerTest {
     }
 
     @Test
-    fun `una excepcion suelta al crear queda en duda y relee`() {
+    fun `una excepcion suelta al crear es definitiva y no relee`() {
         val fake = source(summary(LIST_A, "Compra"))
         fake.createRuntime = IllegalStateException("fallo raro")
         val controller = ShoppingListPickerController(fake)
@@ -498,10 +498,11 @@ class ShoppingListPickerControllerTest {
 
         val state = controller.create("Compra")
 
-        // No prueba que el POST no saliera: se relee antes de dejar repetir.
-        assertEquals(listOf("create:Compra", "list"), fake.calls)
+        // El transporte no deja escapar sus excepciones: saltó antes de enviar,
+        // así que no se avisa de «quizá creada» ni se relee la página.
+        assertEquals(listOf("create:Compra"), fake.calls)
         assertEquals(
-            ShoppingListPickerProblem.MaybeCreated(ConnectionProblem.Unknown),
+            ShoppingListPickerProblem.Failed(ConnectionProblem.Unknown),
             state.problem,
         )
         assertEquals(ShoppingListPickerPhase.Idle, state.phase)

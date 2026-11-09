@@ -55,17 +55,18 @@ sealed interface ApiResult<out T> {
     data class SavedButNotReloaded(val problem: ConnectionProblem) : ApiResult<Nothing>
 
     /**
-     * Solo en `createRecipe` e `importFromUrl`: **puede** que la receta se haya
-     * creado y no se sabe. Es el resultado de cualquier desenlace posterior al
-     * envío del cuerpo que no sea un rechazo definitivo: un plazo agotado, un
-     * corte de conexión, un 5xx (proxies incluidos, que pueden cortar mientras
-     * el servidor sigue importando), una respuesta demasiado grande o un 2xx
-     * con un slug ausente o inválido.
+     * Solo en `createRecipe`, `importFromUrl`, `createUnit` y `createFood`:
+     * **puede** que el recurso se haya creado y no se sabe. Es el resultado de
+     * cualquier desenlace posterior al envío del cuerpo que no sea un rechazo
+     * definitivo: un plazo agotado, un corte de conexión, un 5xx (proxies
+     * incluidos, que pueden cortar mientras el servidor sigue trabajando), una
+     * respuesta demasiado grande o un 2xx sin el id o el nombre legibles.
      *
-     * La interfaz debe avisar de que puede estar ya creada y pedir que se mire
-     * la lista antes de repetir. Nunca se reintenta solo: repetir a ciegas
-     * dejaría dos recetas. [problem] es el motivo real, para el mensaje; este
-     * valor no lleva ningún dato del servidor.
+     * La interfaz debe avisar de que puede estar ya creado y pedir que se mire
+     * la lista (de recetas o del catálogo) antes de repetir. Nunca se reintenta
+     * solo: repetir a ciegas dejaría dos recetas o dos unidades. [problem] es
+     * el motivo real, para el mensaje; este valor no lleva ningún dato del
+     * servidor.
      */
     data class MaybeCreated(val problem: ConnectionProblem) : ApiResult<Nothing>
 

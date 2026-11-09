@@ -24,6 +24,9 @@ object RecipeDraftValidator {
     const val MAX_TIME_TEXT = 100
     const val MAX_INGREDIENT_TEXT = 500
     const val MAX_UNIT_FOOD = 100
+
+    /** Tope de una abreviatura de unidad («cda»): son cortas por naturaleza. */
+    const val MAX_ABBREVIATION = 20
     const val MAX_STEP_TITLE = 300
     const val MAX_STEP_TEXT = 10_000
     const val MAX_NOTE_TITLE = 300
@@ -101,6 +104,26 @@ object RecipeDraftValidator {
         return if (errors.isEmpty()) name.text to emptyList() else null to errors
     }
 
+    /**
+     * Nombre de una unidad nueva del catálogo (`POST /api/units`): mismo
+     * criterio que el nombre de una receta, con el error apuntando a
+     * [DraftField.IngredientUnit]. Null más los errores si no vale.
+     */
+    fun validateUnitName(raw: String): Pair<String?, List<DraftError>> =
+        validateCatalogName(raw, DraftField.IngredientUnit)
+
+    /** Nombre de un alimento nuevo (`POST /api/foods`). Ver [validateUnitName]. */
+    fun validateFoodName(raw: String): Pair<String?, List<DraftError>> =
+        validateCatalogName(raw, DraftField.IngredientFood)
+
+    private fun validateCatalogName(raw: String, field: DraftField): Pair<String?, List<DraftError>> {
+        val name = clean(raw, MAX_UNIT_FOOD, false)
+        val errors = ArrayList<DraftError>()
+        if (name.text.isEmpty()) errors += DraftError(field, DraftErrorKind.Required)
+        flagLong(name, field, null, errors)
+        return if (errors.isEmpty()) name.text to emptyList() else null to errors
+    }
+
     // ------------------------------------------------- utilidades compartidas
 
     /** Texto de una sola línea saneado y recortado al máximo, para comparar con lo que ya hay en el servidor. */
@@ -161,15 +184,26 @@ object RecipeDraftValidator {
                         errors += DraftError(DraftField.IngredientQuantity, DraftErrorKind.OutOfRange, index)
                 }
             }
-            // Unidad y alimento no se pueden crear desde aquí: en una línea
-            // nueva tienen que ir vacíos. En una existente, merge() comprueba
-            // que no han cambiado (necesita el original).
-            if (id == null) {
-                if (unit.text.isNotEmpty()) errors += DraftError(DraftField.IngredientUnit, DraftErrorKind.NotEditable, index)
-                if (food.text.isNotEmpty()) errors += DraftError(DraftField.IngredientFood, DraftErrorKind.NotEditable, index)
+            val unitId = referenceId(item.unitId, DraftField.IngredientUnit, index, errors)
+            val foodId = referenceId(item.foodId, DraftField.IngredientFood, index, errors)
+            // Un id sin nombre no se puede enviar: `IngredientUnit-Input` e
+            // `IngredientFood-Input` exigen `id` y `name` a la vez, y el nombre es
+            // lo que se ve en la línea. En una línea que ya existía (con
+            // `sourceId`) se descarta el id y se trata como «sin cambio»: su
+            // nombre puede haber quedado vacío en el servidor o al sanear, y eso
+            // no puede bloquear el guardado del resto de la receta. En una línea
+            // nueva es un dato incoherente del formulario y se avisa.
+            if (unitId != null && unit.text.isEmpty() && id == null) {
+                errors += DraftError(DraftField.IngredientUnit, DraftErrorKind.Required, index)
             }
+            if (foodId != null && food.text.isEmpty() && id == null) {
+                errors += DraftError(DraftField.IngredientFood, DraftErrorKind.Required, index)
+            }
+            val keptUnitId = unitId.takeIf { unit.text.isNotEmpty() }
+            val keptFoodId = foodId.takeIf { food.text.isNotEmpty() }
             val hasText = note.text.isNotEmpty() || title.text.isNotEmpty() ||
-                unit.text.isNotEmpty() || food.text.isNotEmpty()
+                unit.text.isNotEmpty() || food.text.isNotEmpty() ||
+                keptUnitId != null || keptFoodId != null
             if (id == null && !hasText) {
                 // Fila nueva en blanco: se descarta, salvo que lleve una cantidad
                 // (eso es un dato escrito que no se puede perder en silencio).
@@ -185,9 +219,28 @@ object RecipeDraftValidator {
                 note = note.text,
                 title = title.text,
                 sourceId = id,
+                unitId = keptUnitId,
+                foodId = keptFoodId,
             )
         }
         return result
+    }
+
+    /**
+     * UUID de una referencia al catálogo (unidad o alimento), o null si no
+     * hay. Si venía y no tiene forma de UUID, es [DraftErrorKind.Invalid]: no
+     * se puede reenviar un id que el servidor no reconocería.
+     */
+    private fun referenceId(
+        raw: String?,
+        field: DraftField,
+        index: Int,
+        errors: MutableList<DraftError>,
+    ): String? {
+        if (raw == null) return null
+        val id = validUuid(raw)
+        if (id == null) errors += DraftError(field, DraftErrorKind.Invalid, index)
+        return id
     }
 
     private fun checkSteps(raw: List<DraftStep>, errors: MutableList<DraftError>): List<DraftStep> {

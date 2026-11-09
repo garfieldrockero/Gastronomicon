@@ -65,7 +65,7 @@ data class ShoppingListState(
     /** Si ya ha terminado bien alguna carga. */
     val loadedOnce: Boolean = false,
     val busyItemIds: Set<String> = emptySet(),
-    /** Hay un `POST` de un elemento en curso. */
+    /** Hay un `POST` en curso: un elemento nuevo o los ingredientes de recetas. */
     val adding: Boolean = false,
     /** Hay un borrado de los marcados en curso. */
     val clearingChecked: Boolean = false,

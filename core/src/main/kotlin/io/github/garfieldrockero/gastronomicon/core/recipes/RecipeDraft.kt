@@ -16,11 +16,23 @@ data class DraftOrganizer(val id: String? = null, val name: String = "", val slu
 /**
  * Línea de ingredientes.
  *
- * [unit] y [food] son SOLO LECTURA: es el nombre que ya tenía la línea en el
- * servidor, para mostrarlo. Cambiarlos o ponerlos en una línea nueva da
- * [DraftErrorKind.NotEditable], porque en Mealie son objetos con id y la forma
- * de crearlos no está verificada. Una línea nueva se escribe con [quantity] y
- * [note] («g de harina» en la nota).
+ * [unit] y [food] son el NOMBRE de la unidad y del alimento tal como se
+ * muestran («g», «harina»); [unitId] y [foodId] son la referencia al catálogo
+ * del servidor ([IngredientUnit], [IngredientFood]). Según
+ * `RecipeIngredient-Input` de `docs/openapi.json`, el `unit`/`food` que se
+ * envía puede ser `IngredientUnit-Input` (id y nombre) o `CreateIngredientUnit`
+ * (solo nombre, que Mealie resuelve o crea):
+ * - id + nombre: se reenvía esa referencia;
+ * - solo nombre: es un valor nuevo por nombre (no se puede garantizar si el
+ *   servidor lo crea o lo reutiliza; ver el informe de la tanda);
+ * - los dos vacíos: la línea no lleva unidad o alimento.
+ *
+ * Un id sin nombre no se envía (`IngredientUnit-Input` exige los dos campos):
+ * en una línea nueva [RecipeDraftValidator] lo rechaza con `Required`, y en una
+ * que ya existía se descarta el id al leer del servidor y al recuperar un
+ * borrador, así que la línea se queda «sin cambio» en vez de bloquear el
+ * guardado. [unitId] y [foodId] son nulos también cuando el servidor manda un
+ * id que no es un UUID, y entonces la línea se reenvía por nombre.
  *
  * [sourceId] es el `referenceId` que Mealie dio a la línea (null en una nueva):
  * con él, el núcleo conserva de una línea editada todo lo que el formulario no
@@ -33,6 +45,8 @@ data class DraftIngredient(
     val note: String = "",
     val title: String = "",
     val sourceId: String? = null,
+    val unitId: String? = null,
+    val foodId: String? = null,
 )
 
 /** Paso. [text] es texto plano con saltos de línea. [sourceId] es el `id` del paso en Mealie. */
@@ -96,7 +110,11 @@ enum class DraftErrorKind {
     /** Elemento repetido (mismo id de línea, o la misma etiqueta dos veces). */
     Duplicate,
 
-    /** Campo de solo lectura que se ha cambiado. */
+    /**
+     * Campo que no se puede cambiar desde el formulario. Ya no se emite para
+     * la unidad ni el alimento de un ingrediente (se eligen del catálogo); se
+     * conserva para no romper a quien lo nombre.
+     */
     NotEditable,
 }
 

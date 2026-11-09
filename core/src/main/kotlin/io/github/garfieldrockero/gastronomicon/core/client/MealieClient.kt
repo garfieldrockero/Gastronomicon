@@ -13,6 +13,11 @@ import io.github.garfieldrockero.gastronomicon.core.network.MultipartBody
 import io.github.garfieldrockero.gastronomicon.core.network.NetworkError
 import io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransport
 import io.github.garfieldrockero.gastronomicon.core.network.toConnectionProblem
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftError
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftErrorKind
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftField
+import io.github.garfieldrockero.gastronomicon.core.recipes.IngredientFood
+import io.github.garfieldrockero.gastronomicon.core.recipes.IngredientUnit
 import io.github.garfieldrockero.gastronomicon.core.recipes.Organizer
 import io.github.garfieldrockero.gastronomicon.core.recipes.OrganizerKind
 import io.github.garfieldrockero.gastronomicon.core.recipes.Page
@@ -75,11 +80,11 @@ class CurrentUser internal constructor(val id: String) {
  * [NetworkError.InvalidResponse] si el cuerpo no es el JSON esperado. Esos
  * mensajes son fijos y no llevan token, URL ni cuerpo de la respuesta.
  *
- * Las operaciones de escritura, importar, subir imagen, listar organizadores
- * (más abajo) y [currentUser] no lanzan por red: devuelven [ApiResult]. El
- * cuerpo de un 422 se lee solo ahí, con límite de bytes, y se entrega saneado y
- * acotado ([ValidationDetail]). Ninguna de las dos formas lleva token, URL ni
- * cuerpo crudo.
+ * Las operaciones de escritura, importar, subir imagen, listar organizadores,
+ * el catálogo de unidades y alimentos (más abajo) y [currentUser] no lanzan por
+ * red: devuelven [ApiResult]. El cuerpo de un 422 se lee solo ahí, con límite
+ * de bytes, y se entrega saneado y acotado ([ValidationDetail]). Ninguna de las
+ * dos formas lleva token, URL ni cuerpo crudo.
  */
 class MealieClient(
     private val transport: HttpTransport,
@@ -314,10 +319,7 @@ class MealieClient(
         } catch (error: NetworkError) {
             return ApiErrors.map(error)
         }
-        val body = when (val merged = RecipeDraftJson.merge(original, clean)) {
-            is RecipeDraftJson.Merge.Body -> merged.json
-            is RecipeDraftJson.Merge.Errors -> return ApiResult.DraftInvalid(merged.errors)
-        }
+        val body = RecipeDraftJson.merge(original, clean)
         val saved = try {
             transport.execute(HttpRequest.json(HttpMethod.PUT, path, encode(body), readErrorBody = true))
         } catch (error: NetworkError) {
@@ -488,6 +490,155 @@ class MealieClient(
         }
     }
 
+    // ------------------------------------------- catálogo de unidades y alimentos
+
+    /**
+     * Una página de `GET /api/units` para elegir la unidad de un ingrediente.
+     *
+     * - Se pide con `page`, `perPage` y `search` (saneado y acotado); la
+     *   paginación la calcula [Page] y `next`/`previous` del servidor se
+     *   ignoran, como en las recetas.
+     * - **No se manda `orderBy`**: el catálogo no documenta qué nombres de
+     *   campo admite y no se inventa; el orden es el que decida el servidor.
+     * - Lo que no tiene id con forma de UUID o nombre se descarta, y una
+     *   página nunca trae más de [MAX_CATALOG_PER_PAGE] entradas aunque el
+     *   servidor ignore `perPage`.
+     */
+    fun listUnits(
+        page: Int = 1,
+        perPage: Int = MAX_CATALOG_PER_PAGE,
+        search: String? = null,
+    ): ApiResult<Page<IngredientUnit>> {
+        val safePage = page.coerceAtLeast(1)
+        val safePerPage = perPage.coerceIn(1, MAX_CATALOG_PER_PAGE)
+        val term = PlainTextSanitizer.sanitize(search, CATALOG_SEARCH_MAX).ifEmpty { null }
+        val query = buildString {
+            append("page=").append(safePage)
+            append("&perPage=").append(safePerPage)
+            term?.let { append("&search=").append(PercentEncoding.encode(it)) }
+        }
+        return guarded {
+            val dto = decode(
+                IngredientUnitPageDto.serializer(),
+                transport.execute(HttpRequest(HttpMethod.GET, UNITS_PATH, query = query)),
+            )
+            val items = dto.items.orEmpty().asSequence()
+                .filterNotNull()
+                .take(MAX_CATALOG_PER_PAGE)
+                .mapNotNull { IngredientCatalogMapper.unit(it) }
+                .toList()
+            ApiResult.Success(
+                Page.of(
+                    items = items,
+                    page = dto.page ?: safePage,
+                    perPage = dto.perPage ?: safePerPage,
+                    total = dto.total ?: items.size.toLong(),
+                ),
+            )
+        }
+    }
+
+    /** Una página de `GET /api/foods`. Mismas reglas que [listUnits]. */
+    fun listFoods(
+        page: Int = 1,
+        perPage: Int = MAX_CATALOG_PER_PAGE,
+        search: String? = null,
+    ): ApiResult<Page<IngredientFood>> {
+        val safePage = page.coerceAtLeast(1)
+        val safePerPage = perPage.coerceIn(1, MAX_CATALOG_PER_PAGE)
+        val term = PlainTextSanitizer.sanitize(search, CATALOG_SEARCH_MAX).ifEmpty { null }
+        val query = buildString {
+            append("page=").append(safePage)
+            append("&perPage=").append(safePerPage)
+            term?.let { append("&search=").append(PercentEncoding.encode(it)) }
+        }
+        return guarded {
+            val dto = decode(
+                IngredientFoodPageDto.serializer(),
+                transport.execute(HttpRequest(HttpMethod.GET, FOODS_PATH, query = query)),
+            )
+            val items = dto.items.orEmpty().asSequence()
+                .filterNotNull()
+                .take(MAX_CATALOG_PER_PAGE)
+                .mapNotNull { IngredientCatalogMapper.food(it) }
+                .toList()
+            ApiResult.Success(
+                Page.of(
+                    items = items,
+                    page = dto.page ?: safePage,
+                    perPage = dto.perPage ?: safePerPage,
+                    total = dto.total ?: items.size.toLong(),
+                ),
+            )
+        }
+    }
+
+    /**
+     * `POST /api/units`: crea una unidad y devuelve la que ha quedado guardada
+     * (con su id), lista para meterla en el borrador con
+     * `DraftIngredient.unitId`.
+     *
+     * Solo viajan los campos con contenido: `name` (obligatorio) y, si se
+     * escriben, `pluralName`, `abbreviation` y `pluralAbbreviation`. `fraction`
+     * y `useAbbreviation` se dejan en los valores por defecto del esquema
+     * porque su efecto en el texto del ingrediente no está confirmado.
+     *
+     * No se reintenta nunca. Un rechazo definitivo del servidor (o un fallo
+     * antes de enviar) es un error; cualquier desenlace ambiguo después de
+     * enviar el cuerpo es [ApiResult.MaybeCreated]: la unidad puede existir y
+     * hay que mirar el catálogo antes de repetir. Un 2xx sin id o nombre
+     * legibles también es ambiguo.
+     */
+    fun createUnit(
+        name: String,
+        pluralName: String? = null,
+        abbreviation: String? = null,
+        pluralAbbreviation: String? = null,
+    ): ApiResult<IngredientUnit> {
+        val (clean, errors) = RecipeDraftValidator.validateUnitName(name)
+        val problems = ArrayList(errors)
+        val plural = optionalText(pluralName, RecipeDraftValidator.MAX_UNIT_FOOD, DraftField.IngredientUnit, problems)
+        val abbrev = optionalText(abbreviation, RecipeDraftValidator.MAX_ABBREVIATION, DraftField.IngredientUnit, problems)
+        val pluralAbbrev = optionalText(
+            pluralAbbreviation,
+            RecipeDraftValidator.MAX_ABBREVIATION,
+            DraftField.IngredientUnit,
+            problems,
+        )
+        if (clean == null || problems.isNotEmpty()) return ApiResult.DraftInvalid(problems)
+        val body = LinkedHashMap<String, JsonElement>()
+        body["name"] = JsonPrimitive(clean)
+        plural?.let { body["pluralName"] = JsonPrimitive(it) }
+        abbrev?.let { body["abbreviation"] = JsonPrimitive(it) }
+        pluralAbbrev?.let { body["pluralAbbreviation"] = JsonPrimitive(it) }
+        return guardedCreate {
+            val response = transport.execute(
+                HttpRequest.json(HttpMethod.POST, UNITS_PATH, encode(JsonObject(body)), readErrorBody = true),
+            )
+            ApiResult.Success(readUnit(response))
+        }
+    }
+
+    /**
+     * `POST /api/foods`: crea un alimento y devuelve el guardado, con su id.
+     * Mismas reglas de reintento que [createUnit].
+     */
+    fun createFood(name: String, pluralName: String? = null): ApiResult<IngredientFood> {
+        val (clean, errors) = RecipeDraftValidator.validateFoodName(name)
+        val problems = ArrayList(errors)
+        val plural = optionalText(pluralName, RecipeDraftValidator.MAX_UNIT_FOOD, DraftField.IngredientFood, problems)
+        if (clean == null || problems.isNotEmpty()) return ApiResult.DraftInvalid(problems)
+        val body = LinkedHashMap<String, JsonElement>()
+        body["name"] = JsonPrimitive(clean)
+        plural?.let { body["pluralName"] = JsonPrimitive(it) }
+        return guardedCreate {
+            val response = transport.execute(
+                HttpRequest.json(HttpMethod.POST, FOODS_PATH, encode(JsonObject(body)), readErrorBody = true),
+            )
+            ApiResult.Success(readFood(response))
+        }
+    }
+
     // ------------------------------------------------------------- privados
 
     /** Ejecuta [block] y traduce cualquier [NetworkError] a un [ApiResult]. */
@@ -554,6 +705,38 @@ class MealieClient(
 
     private fun encode(element: JsonElement): String =
         CoreJson.json.encodeToString(JsonElement.serializer(), element)
+
+    /**
+     * Un campo opcional del catálogo (plural o abreviatura), saneado. Vacío es
+     * null (no se envía). Si tras sanear pasa del tope, es un error: no se
+     * recorta en silencio lo que la persona ha escrito.
+     */
+    private fun optionalText(
+        raw: String?,
+        max: Int,
+        field: DraftField,
+        errors: MutableList<DraftError>,
+    ): String? {
+        if (raw == null) return null
+        val text = PlainTextSanitizer.sanitize(raw, max + 1)
+        if (text.codePointCount(0, text.length) > max) {
+            errors += DraftError(field, DraftErrorKind.TooLong)
+            return null
+        }
+        return text.ifEmpty { null }
+    }
+
+    /** La unidad creada, o [NetworkError.InvalidResponse] si el 2xx no trae id y nombre legibles. */
+    private fun readUnit(response: HttpResponse): IngredientUnit {
+        val dto = decode(IngredientUnitDto.serializer(), response)
+        return IngredientCatalogMapper.unit(dto) ?: throw NetworkError.InvalidResponse
+    }
+
+    /** El alimento creado, o [NetworkError.InvalidResponse] si el 2xx no trae id y nombre legibles. */
+    private fun readFood(response: HttpResponse): IngredientFood {
+        val dto = decode(IngredientFoodDto.serializer(), response)
+        return IngredientCatalogMapper.food(dto) ?: throw NetworkError.InvalidResponse
+    }
 
     /** El cuerpo como árbol JSON; cualquier fallo es [NetworkError.InvalidResponse] sin citar el cuerpo. */
     private fun parseElement(response: HttpResponse): JsonElement =
@@ -651,6 +834,8 @@ class MealieClient(
         const val ABOUT_PATH = "/api/app/about"
         const val SELF_PATH = "/api/users/self"
         const val RECIPES_PATH = "/api/recipes"
+        const val UNITS_PATH = "/api/units"
+        const val FOODS_PATH = "/api/foods"
 
         /**
          * Códigos con los que el servidor (o un proxy) contesta que NO ha
@@ -663,6 +848,10 @@ class MealieClient(
 
         private const val MAX_VERSION_LENGTH = 64
         private const val ORGANIZER_SEARCH_MAX = 100
+        private const val CATALOG_SEARCH_MAX = 100
+
+        /** Tope de elementos por página de unidades o alimentos. */
+        const val MAX_CATALOG_PER_PAGE = 100
 
         /** Tope de elementos por página de etiquetas o categorías. */
         const val MAX_ORGANIZERS_PER_PAGE = 100

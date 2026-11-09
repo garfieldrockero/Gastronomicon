@@ -15,6 +15,7 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.Page
 import io.github.garfieldrockero.gastronomicon.core.recipes.ServingScaler
 import io.github.garfieldrockero.gastronomicon.core.session.Session
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -38,6 +39,12 @@ import java.util.Locale
  *   lista entera con sus `listItems`; este endpoint no pagina, así que no se
  *   inventa una paginación de elementos.
  * - `POST /api/households/shopping/items` ([addItem]).
+ * - `POST /api/households/shopping/lists/{item_id}/recipe` ([addRecipe] y
+ *   [addRecipes]): añade los ingredientes de una o varias recetas, con escala.
+ *   Se usa esta ruta y no la de una sola receta
+ *   (`/recipe/{recipe_id}`) porque el `openapi.json` de Mealie marca la segunda
+ *   como `deprecated`; el cuerpo es un array de `ShoppingListAddRecipeParamsBulk`
+ *   y la respuesta, `ShoppingListOut`, se ignora: el controlador relee la lista.
  * - `PUT /api/households/shopping/items/{item_id}` ([setChecked], [editItem]).
  * - `DELETE /api/households/shopping/items/{item_id}` ([deleteItem] y
  *   [deleteChecked]).
@@ -172,6 +179,57 @@ class ShoppingClient(private val transport: HttpTransport) : ShoppingListSource 
         )
         return guardedCreate {
             transport.execute(HttpRequest.json(HttpMethod.POST, ITEMS_PATH, body, readErrorBody = true))
+            ApiResult.Success(Unit)
+        }
+    }
+
+    /**
+     * Añade los ingredientes de la receta [recipeId], escalados por [scale].
+     * Atajo de [addRecipes] con una sola receta.
+     *
+     * @throws IllegalArgumentException si la lista o la receta no son UUID o la
+     *   escala no está en el rango del núcleo.
+     */
+    override fun addRecipe(listId: String, recipeId: String, scale: Double): ApiResult<Unit> =
+        addRecipes(listId, listOf(RecipeAddition(recipeId, scale)))
+
+    /**
+     * Añade los ingredientes de [additions] en una sola petición
+     * (`POST /api/households/shopping/lists/{item_id}/recipe`), que el servidor
+     * escala con `recipeIncrementQuantity`.
+     *
+     * No se lee la respuesta (`ShoppingListOut`): quien llama relee la lista
+     * para no inventar ids ni duplicar líneas. Los `recipeId` repetidos se
+     * fusionan sumando sus escalas ([RecipeAdditions.merge]) antes de validar y
+     * de componer el cuerpo. Un fallo posterior al envío del cuerpo es
+     * [ApiResult.MaybeCreated], porque repetir el `POST` volvería a
+     * meter los mismos ingredientes. Nunca se reintenta solo.
+     *
+     * @throws IllegalArgumentException si la lista o alguna receta no son UUID,
+     *   si la lista de recetas está vacía, si hay más recetas **distintas** que
+     *   el tope ([RecipeAdditions.MAX_RECIPES_PER_OPERATION]) o si alguna escala
+     *   (también la suma de un id repetido) se sale del rango del núcleo. El
+     *   controlador valida antes; aquí es la última barrera antes de que salga
+     *   algo.
+     */
+    override fun addRecipes(listId: String, additions: List<RecipeAddition>): ApiResult<Unit> {
+        val checked = ShoppingIds.checked(listId)
+        // Los ids repetidos se fusionan sumando sus escalas: una tanda con la
+        // misma receta dos veces no puede dejar dos líneas de sus ingredientes.
+        val merged = RecipeAdditions.merge(additions)
+        if (RecipeAdditions.check(merged) != null) {
+            throw IllegalArgumentException("Las recetas para la lista de la compra no son válidas.")
+        }
+        // La ruta valida cada id, pero se normalizan antes de mandarlos para que
+        // el cuerpo lleve exactamente los mismos UUID que la ruta.
+        val body = merged.map { RecipeAddition(ShoppingIds.checked(it.recipeId), it.scale) }
+        val json = encode(ListSerializer(ShoppingListAddRecipeDto.serializer()), body.map {
+            ShoppingListAddRecipeDto(recipeId = it.recipeId, recipeIncrementQuantity = it.scale)
+        })
+        return guardedCreate {
+            transport.execute(
+                HttpRequest.json(HttpMethod.POST, "$LISTS_PATH/$checked/recipe", json, readErrorBody = true),
+            )
             ApiResult.Success(Unit)
         }
     }

@@ -354,17 +354,20 @@ class MealieClientWriteTest {
     }
 
     @Test
-    fun `cambiar la unidad de una linea existente se rechaza antes del PUT`() {
-        mealie.fixed("GET", "/api/recipes/tarta", 200, original())
-        val loaded = (mealie.client().loadDraft("tarta") as ApiResult.Success).value
+    fun `cambiar la unidad de una linea existente envia la referencia nueva`() {
+        statefulRecipe()
+        val client = mealie.client()
+        val loaded = (client.loadDraft("tarta") as ApiResult.Success).value
         val draft = loaded.copy(ingredients = listOf(loaded.ingredients[0].copy(unit = "g")))
-        mealie.seen.clear()
-        val result = mealie.client().updateRecipe("tarta", draft)
-        assertEquals(
-            ApiResult.DraftInvalid(listOf(DraftError(DraftField.IngredientUnit, DraftErrorKind.NotEditable, 0))),
-            result,
-        )
-        assertTrue(mealie.requestsTo("PUT", "/api/recipes/tarta").isEmpty())
+        client.updateRecipe("tarta", draft)
+        val put = CoreJson.json.parseToJsonElement(
+            String(mealie.requestsTo("PUT", "/api/recipes/tarta").single().body, Charsets.UTF_8),
+        ) as JsonObject
+        val line = (put["recipeIngredient"] as JsonArray)[0] as JsonObject
+        // El id del original no es un UUID, así que la línea va por nombre.
+        assertEquals(JsonObject(mapOf("name" to JsonPrimitive("g"))), line["unit"])
+        // El alimento de esa misma línea no se toca.
+        assertEquals(JsonPrimitive("azúcar"), (line["food"] as JsonObject)["name"])
     }
 
     @Test

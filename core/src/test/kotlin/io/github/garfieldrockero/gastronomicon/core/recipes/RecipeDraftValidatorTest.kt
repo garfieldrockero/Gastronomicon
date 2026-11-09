@@ -154,19 +154,110 @@ class RecipeDraftValidatorTest {
     }
 
     @Test
-    fun `unidad y alimento no se pueden poner en una linea nueva`() {
+    fun `unidad y alimento se eligen del catalogo y se validan sus ids`() {
+        val unitId = "11111111-1111-4111-8111-111111111111"
+        val foodId = "22222222-2222-4222-8222-222222222222"
+        // Una línea nueva ya puede llevar unidad y alimento, con id o solo nombre.
+        val clean = valid(
+            base().copy(
+                ingredients = listOf(
+                    DraftIngredient(quantity = 2.0, unit = "g", unitId = unitId, food = "harina", foodId = foodId),
+                    DraftIngredient(note = "pizca", food = "sal"),
+                ),
+            ),
+        )
+        assertEquals(unitId, clean.ingredients[0].unitId)
+        assertEquals(foodId, clean.ingredients[0].foodId)
+        assertEquals("harina", clean.ingredients[0].food)
+        assertNull(clean.ingredients[1].foodId)
+        assertEquals("sal", clean.ingredients[1].food)
+    }
+
+    @Test
+    fun `un id de unidad o alimento que no es un UUID se rechaza`() {
         assertEquals(
             listOf(
-                DraftError(DraftField.IngredientUnit, DraftErrorKind.NotEditable, 0),
-                DraftError(DraftField.IngredientFood, DraftErrorKind.NotEditable, 0),
+                DraftError(DraftField.IngredientUnit, DraftErrorKind.Invalid, 0),
+                DraftError(DraftField.IngredientFood, DraftErrorKind.Invalid, 0),
             ),
-            errors(base().copy(ingredients = listOf(DraftIngredient(unit = "g", food = "harina")))),
+            errors(
+                base().copy(
+                    ingredients = listOf(
+                        DraftIngredient(note = "a", unit = "g", unitId = "../x", food = "harina", foodId = "no"),
+                    ),
+                ),
+            ),
         )
-        // En una línea que ya existe, la comprobación contra el original la hace el cliente.
-        assertTrue(
-            RecipeDraftValidator.validate(
-                base().copy(ingredients = listOf(DraftIngredient(unit = "g", food = "harina", sourceId = id1))),
-            ) is DraftValidation.Valid,
+    }
+
+    @Test
+    fun `un id de unidad o alimento sin nombre es un error`() {
+        // `IngredientUnit-Input` e `IngredientFood-Input` exigen id y nombre juntos.
+        assertEquals(
+            listOf(
+                DraftError(DraftField.IngredientUnit, DraftErrorKind.Required, 0),
+                DraftError(DraftField.IngredientFood, DraftErrorKind.Required, 0),
+            ),
+            errors(
+                base().copy(
+                    ingredients = listOf(
+                        DraftIngredient(
+                            unitId = "11111111-1111-4111-8111-111111111111",
+                            foodId = "22222222-2222-4222-8222-222222222222",
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `un id de unidad o alimento sin nombre en una linea existente no bloquea`() {
+        // El servidor puede devolver un nombre que el saneado deja vacío. En una
+        // línea que ya existía, el id se descarta y se trata como «sin cambio»:
+        // no puede impedir guardar el resto de la receta.
+        val clean = valid(
+            base().copy(
+                ingredients = listOf(
+                    DraftIngredient(
+                        sourceId = id1,
+                        unitId = "11111111-1111-4111-8111-111111111111",
+                        foodId = "22222222-2222-4222-8222-222222222222",
+                    ),
+                ),
+            ),
+        )
+        val ingredient = clean.ingredients.single()
+        assertEquals(id1, ingredient.sourceId)
+        assertNull(ingredient.unitId)
+        assertNull(ingredient.foodId)
+    }
+
+    @Test
+    fun `el nombre de una unidad o alimento nuevo tiene su propio limite`() {
+        assertEquals(
+            listOf(DraftError(DraftField.IngredientUnit, DraftErrorKind.TooLong, 0)),
+            errors(base().copy(ingredients = listOf(DraftIngredient(note = "a", unit = "u".repeat(101))))),
+        )
+        assertEquals(
+            listOf(DraftError(DraftField.IngredientFood, DraftErrorKind.TooLong, 0)),
+            errors(base().copy(ingredients = listOf(DraftIngredient(note = "a", food = "f".repeat(101))))),
+        )
+    }
+
+    @Test
+    fun `el nombre de una unidad o alimento nuevo se sanea`() {
+        val (unit, unitErrors) = RecipeDraftValidator.validateUnitName("  gra\u0007mo  ")
+        assertEquals("gramo", unit)
+        assertTrue(unitErrors.isEmpty())
+        assertEquals(
+            listOf(DraftError(DraftField.IngredientFood, DraftErrorKind.Required)),
+            RecipeDraftValidator.validateFoodName("   ").second,
+        )
+        assertNull(RecipeDraftValidator.validateFoodName("   ").first)
+        assertEquals(
+            listOf(DraftError(DraftField.IngredientUnit, DraftErrorKind.TooLong)),
+            RecipeDraftValidator.validateUnitName("a".repeat(101)).second,
         )
     }
 

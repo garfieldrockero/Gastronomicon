@@ -135,6 +135,55 @@ class OfflineCodecTest {
     }
 
     @Test
+    fun `un borrador conserva los ids de unidad y alimento`() {
+        val unitId = "11111111-1111-4111-8111-111111111111"
+        val foodId = "22222222-2222-4222-8222-222222222222"
+        val base = OfflineFixtures.draft()
+        val draft = base.copy(
+            ingredients = listOf(base.ingredients.single().copy(unitId = unitId, foodId = foodId)),
+        )
+        val target = DraftTarget.New
+
+        val bytes = DraftStoreCodec.encode(draft, 1_000L, scope, target)!!
+        val cached = DraftStoreCodec.decode(bytes, scope, target, maxBytes)!!
+
+        // Ida y vuelta exacta: al recuperar el borrador no se pierden las
+        // referencias al catálogo ni se reenvían como creación por nombre.
+        assertEquals(draft, cached.draft)
+        assertEquals(unitId, cached.draft.ingredients.single().unitId)
+        assertEquals(foodId, cached.draft.ingredients.single().foodId)
+    }
+
+    @Test
+    fun `un borrador antiguo sin ids se lee sin referencias y sin fallar`() {
+        val base = OfflineFixtures.draft()
+        val draft = base.copy(
+            ingredients = listOf(
+                base.ingredients.single().copy(
+                    unitId = "11111111-1111-4111-8111-111111111111",
+                    foodId = "22222222-2222-4222-8222-222222222222",
+                ),
+            ),
+        )
+        val target = DraftTarget.New
+        val bytes = DraftStoreCodec.encode(draft, 1_000L, scope, target)!!
+        // Como un blob escrito por una versión que aún no guardaba los ids.
+        val antigua = tamperJson(bytes) { root ->
+            val ingredients = (root["ingredients"] as JsonArray).map { it as JsonObject }
+            val first = JsonObject(ingredients[0].filterKeys { it != "unitId" && it != "foodId" })
+            root.with("ingredients", JsonArray(listOf<JsonElement>(first)))
+        }
+
+        val cached = DraftStoreCodec.decode(antigua, scope, target, maxBytes)!!
+
+        val ingredient = cached.draft.ingredients.single()
+        assertNull(ingredient.unitId)
+        assertNull(ingredient.foodId)
+        assertEquals("huevo", ingredient.unit)
+        assertEquals("huevo", ingredient.food)
+    }
+
+    @Test
     fun `un borrador de version distinta se rechaza`() {
         val target = DraftTarget.New
         val bytes = DraftStoreCodec.encode(OfflineFixtures.draft(), 1_000L, scope, target)!!

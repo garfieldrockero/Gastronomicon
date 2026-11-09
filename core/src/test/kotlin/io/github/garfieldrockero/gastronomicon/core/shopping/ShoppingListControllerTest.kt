@@ -654,6 +654,33 @@ class ShoppingListControllerTest {
         assertTrue(state.busyItemIds.isEmpty())
     }
 
+    @Test
+    fun `marcar editar borrar o borrar los marcados no empieza mientras se anade`() {
+        val fake = source(listOf(item(id1), item(id2, note = "Pan", checked = true)))
+        val controller = ShoppingListController(fake)
+        controller.open(LIST_UUID)
+        fake.calls.clear()
+        var durante: ShoppingListState? = null
+        fake.onAdd = {
+            controller.toggle(id1)
+            controller.editNote(id1, "Otra", 1.0)
+            controller.delete(id1)
+            controller.deleteChecked()
+            durante = controller.state
+        }
+
+        val state = controller.add("Leche")
+
+        // Ninguna de las cuatro escrituras llegó a la fuente.
+        assertEquals(listOf("add:Leche", "get"), fake.calls)
+        assertTrue(durante!!.adding)
+        assertFalse(durante!!.clearingChecked)
+        assertEquals(0, fake.setCheckedCalls)
+        assertEquals(0, fake.deleteCheckedCalls)
+        assertNull(state.problem)
+        assertFalse(state.adding)
+    }
+
     // --------------------------- fallos de red que lanza la propia fuente
 
     @Test
@@ -734,7 +761,7 @@ class ShoppingListControllerTest {
     // ------------------ creación dudosa y fallos que no son un resultado
 
     @Test
-    fun `una excepcion suelta al anadir queda en duda y relee`() {
+    fun `una excepcion suelta al anadir es definitiva y no relee`() {
         val fake = source()
         fake.addThrowable = IllegalStateException("fallo raro")
         val controller = ShoppingListController(fake)
@@ -743,8 +770,8 @@ class ShoppingListControllerTest {
 
         val state = controller.add("Leche")
 
-        // No prueba que el POST no saliera: se relee antes de dejar repetir.
-        assertEquals(listOf("add:Leche", "get"), fake.calls)
+        // El transporte no deja escapar sus excepciones: saltó antes de enviar.
+        assertEquals(listOf("add:Leche"), fake.calls)
         assertEquals(ShoppingProblem.Failed(ConnectionProblem.Unknown), state.problem)
         assertFalse(state.adding)
     }

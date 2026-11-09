@@ -12,11 +12,11 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.Page
  * por red. La única excepción prevista es [IllegalArgumentException] si un id o
  * un texto no pasan la validación local antes de enviar nada.
  *
- * [listLists] y [createList] tienen una implementación por defecto que falla
- * sin tocar la red: existen para que una fuente que solo gestiona elementos
- * (como la que monta `app/`) siga compilando. Una fuente que quiera listar o
- * crear listas tiene que sobrescribirlas; si no, el controlador recibe un
- * fallo tipado y no una respuesta inventada.
+ * [listLists], [createList], [addRecipe] y [addRecipes] tienen una
+ * implementación por defecto que falla sin tocar la red: existen para que una
+ * fuente que solo gestiona elementos (como la que monta `app/`) siga
+ * compilando. Una fuente que quiera usarlas tiene que sobrescribirlas; si no,
+ * el controlador recibe un fallo tipado y no una respuesta inventada.
  */
 interface ShoppingListSource {
 
@@ -42,6 +42,22 @@ interface ShoppingListSource {
      * controlador vuelve a leer la lista para no inventar ids ni duplicar.
      */
     fun addItem(listId: String, text: String): ApiResult<Unit>
+
+    /**
+     * Añade los ingredientes de una receta, escalados por [scale]
+     * (`POST /api/households/shopping/lists/{item_id}/recipe`). Si la fuente no
+     * la implementa, falla sin tocar la red.
+     */
+    fun addRecipe(listId: String, recipeId: String, scale: Double = 1.0): ApiResult<Unit> =
+        throw UnsupportedOperationException("La fuente de la compra no implementa addRecipe.")
+
+    /**
+     * Añade los ingredientes de varias recetas en una sola petición. Es la que
+     * usa el controlador; [addRecipe] es el atajo de una. Si la fuente no la
+     * implementa, falla sin tocar la red.
+     */
+    fun addRecipes(listId: String, additions: List<RecipeAddition>): ApiResult<Unit> =
+        throw UnsupportedOperationException("La fuente de la compra no implementa addRecipes.")
 
     /** Marca o desmarca un elemento existente. */
     fun setChecked(item: ShoppingItem, checked: Boolean): ApiResult<Unit>

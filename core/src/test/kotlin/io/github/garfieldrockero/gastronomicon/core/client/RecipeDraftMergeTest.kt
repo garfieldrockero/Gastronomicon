@@ -1,13 +1,9 @@
 package io.github.garfieldrockero.gastronomicon.core.client
 
 import io.github.garfieldrockero.gastronomicon.core.network.CoreJson
-import io.github.garfieldrockero.gastronomicon.core.recipes.DraftError
-import io.github.garfieldrockero.gastronomicon.core.recipes.DraftErrorKind
-import io.github.garfieldrockero.gastronomicon.core.recipes.DraftField
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftIngredient
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftOrganizer
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftStep
-import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraft
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -97,9 +93,7 @@ class RecipeDraftMergeTest {
 
     private fun original(): JsonObject = CoreJson.json.parseToJsonElement(originalText) as JsonObject
 
-    private fun body(merge: RecipeDraftJson.Merge): JsonObject = (merge as RecipeDraftJson.Merge.Body).json
-
-    private fun errors(merge: RecipeDraftJson.Merge): List<DraftError> = (merge as RecipeDraftJson.Merge.Errors).errors
+    private fun body(merged: JsonObject): JsonObject = merged
 
     /** Lo que debe salir si no se edita nada: el original menos las marcas de tiempo que rellena Mealie. */
     private fun untouched(): Map<String, JsonElement> = original().filterKeys { it !in managed }
@@ -215,17 +209,21 @@ class RecipeDraftMergeTest {
     }
 
     @Test
-    fun `cambiar la unidad o el alimento de una linea existente es un error y no se envia`() {
+    fun `cambiar el nombre de la unidad o del alimento reescribe solo esa referencia`() {
         val source = original()
         val draft = RecipeDraftJson.toDraft(source)
-        val edited = draft.copy(ingredients = listOf(draft.ingredients[0].copy(unit = "g", food = "sal")))
-        assertEquals(
-            listOf(
-                DraftError(DraftField.IngredientUnit, DraftErrorKind.NotEditable, 0),
-                DraftError(DraftField.IngredientFood, DraftErrorKind.NotEditable, 0),
-            ),
-            errors(RecipeDraftJson.merge(source, edited)),
-        )
+        val edited = draft.copy(ingredients = listOf(draft.ingredients[0].copy(unit = "gramo", food = "sal")))
+        val line = array(body(RecipeDraftJson.merge(source, edited)), "recipeIngredient")[0] as JsonObject
+        val before = (source["recipeIngredient"] as JsonArray)[0] as JsonObject
+        // Sin id, el nombre viaja como `CreateIngredientUnit`/`CreateIngredientFood`.
+        assertEquals(JsonObject(mapOf("name" to JsonPrimitive("gramo"))), line["unit"])
+        assertEquals(JsonObject(mapOf("name" to JsonPrimitive("sal"))), line["food"])
+        // El resto de la línea se conserva tal cual.
+        assertEquals(before["quantity"], line["quantity"])
+        assertEquals(before["note"], line["note"])
+        assertEquals(before["referenceId"], line["referenceId"])
+        assertEquals(before["campoFuturoDeLinea"], line["campoFuturoDeLinea"])
+        assertFalse(line.containsKey("display"))
     }
 
     @Test

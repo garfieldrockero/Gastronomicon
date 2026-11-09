@@ -41,11 +41,13 @@ import java.util.concurrent.CancellationException
  * [ConnectionProblem.Unknown]: el estado nunca se queda «cargando».
  *
  * Al crear, un fallo que no prueba que el `POST` no salió ([NetworkError.AfterSend],
- * un 5xx, una respuesta ilegible o una excepción suelta) es
+ * un 5xx o una respuesta ilegible) es
  * [ApiResult.MaybeCreated]: preferir un aviso de más solo hace mirar la lista,
  * mientras que decir «no se creó» de menos deja dos listas iguales. Solo se
  * cuenta como fallo definitivo lo que prueba que no salió nada (los mismos
  * [NetworkError] que [ShoppingClient]) o un rechazo definitivo del servidor.
+ * Una `RuntimeException` suelta también es definitiva: el transporte no deja
+ * escapar ninguna suya, así que saltó antes de enviar.
  *
  * Una cancelación o un `Error` no se disfrazan de fallo ni dejan la fase
  * colgada: la fase vuelve a [ShoppingListPickerPhase.Idle] y la excepción sigue
@@ -287,9 +289,15 @@ class ShoppingListPickerController(
      * definitivo lo que prueba que la petición no salió o un rechazo del
      * servidor que no deja nada creado. Todo lo demás
      * —[NetworkError.AfterSend], un 5xx (un proxy puede contestar 502 mientras
-     * Mealie sigue creando), una respuesta ilegible o una excepción suelta— es
+     * Mealie sigue creando) o una respuesta ilegible— es
      * [ApiResult.MaybeCreated]: se relee la página antes de dejar repetir, igual
      * que hace [ShoppingClient].
+     *
+     * Una [RuntimeException] suelta no es dudosa: el transporte convierte en
+     * [NetworkError] (y en [NetworkError.AfterSend] lo ambiguo posterior al
+     * envío) cualquier fallo suyo, así que una excepción que llegue hasta aquí
+     * saltó antes de enviar. Es un fallo definitivo con
+     * [ConnectionProblem.Unknown], sin aviso de «quizá creado».
      */
     private inline fun <T> callCreate(block: () -> ApiResult<T>): ApiResult<T> =
         try {
@@ -302,9 +310,8 @@ class ShoppingListPickerController(
         } catch (error: NetworkError) {
             creationFailure(error)
         } catch (error: RuntimeException) {
-            // Una excepción suelta no prueba que el cuerpo no llegara a salir,
-            // así que la lista puede estar creada: dudoso, no fallido.
-            ApiResult.MaybeCreated(ConnectionProblem.Unknown)
+            // Saltó antes de enviar: no hay nada que comprobar en la página.
+            ApiResult.Failure(ConnectionProblem.Unknown)
         }
 
     /**

@@ -110,3 +110,20 @@ internal class ShoppingItemCreateDto(
     val note: String,
     val quantity: Double? = null,
 )
+
+/**
+ * Un elemento del cuerpo de `POST /api/households/shopping/lists/{item_id}/recipe`
+ * (`ShoppingListAddRecipeParamsBulk`): la petición lleva un array de estos.
+ *
+ * Solo viajan `recipeId` y `recipeIncrementQuantity` (la escala). Se omite
+ * `recipeIngredients` a propósito: el servidor toma los ingredientes de la
+ * receta, y mandarlos obligaría a la app a reproducir su formato de ingrediente
+ * (`RecipeIngredient-Input`) sin necesidad. `recipeIncrementQuantity` es
+ * opcional en el esquema (vale 1 por defecto), pero se manda siempre para que la
+ * escala no dependa del valor por defecto de cada versión de Mealie.
+ */
+@Serializable
+internal class ShoppingListAddRecipeDto(
+    val recipeId: String,
+    val recipeIncrementQuantity: Double,
+)
