@@ -191,8 +191,8 @@ class ShoppingRecipeAddTest {
             403 to ApiResult.Forbidden,
             404 to ApiResult.NotFound,
             400 to ApiResult.Rejected(400),
-            500 to ApiResult.Failure(ConnectionProblem.ServerError),
         )
+        // El 5xx no está aquí: tras enviar es dudoso (MaybeCreated), ver la prueba siguiente.
         for ((status, result) in expected) {
             mealie.fixed("POST", recipePath, status)
             assertEquals("estado $status", result, client().addRecipe(listId, recetaA, 1.0))

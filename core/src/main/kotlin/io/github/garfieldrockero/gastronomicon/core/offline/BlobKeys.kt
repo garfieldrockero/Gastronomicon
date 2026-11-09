@@ -51,7 +51,26 @@ internal object BlobPrefix {
     /** Índice de borradores de un ámbito. */
     const val DRAFT_INDEX = "dri1."
 
+    /**
+     * Copia del planificador de un ámbito, para el recordatorio. Un solo blob:
+     * lo que se consulta es un día, no una colección, así que no hay índice.
+     */
+    const val MEAL_PLAN_ENTRY = "mp1."
+
+    /**
+     * La última lista de la compra abierta en la app, para el widget. Un solo
+     * blob por ámbito: el widget enseña una lista, no una colección.
+     */
+    const val WIDGET = "wg1."
+
     /** Todas las familias conocidas; lo recorre [OfflineWipe.clearAll]. */
-    val ALL: List<String> = listOf(RECIPE_ENTRY, RECIPE_INDEX, DRAFT_ENTRY, DRAFT_INDEX)
+    val ALL: List<String> = listOf(
+        RECIPE_ENTRY,
+        RECIPE_INDEX,
+        DRAFT_ENTRY,
+        DRAFT_INDEX,
+        MEAL_PLAN_ENTRY,
+        WIDGET,
+    )
 }
 
