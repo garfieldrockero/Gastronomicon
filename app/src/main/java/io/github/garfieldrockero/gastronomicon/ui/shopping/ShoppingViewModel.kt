@@ -10,6 +10,9 @@ import io.github.garfieldrockero.gastronomicon.core.network.toConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClient
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingItem
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListController
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerController
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerProblem
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerState
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListSource
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListState
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingProblem
@@ -26,39 +29,56 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Lo que pinta la pantalla: el estado del núcleo más lo que pasa ANTES de tener
- * lista (buscar cuál abrir) y el texto del campo de añadir.
+ * Lo que pinta la pantalla: la lista abierta, la página de listas del selector,
+ * el diálogo de crear y el texto del campo de añadir.
  *
  * Sin token, sin URL del servidor y sin mensajes de excepción: los fallos son un
  * [ConnectionProblem] o un motivo tipado del núcleo.
  */
 data class ShoppingUiState(
     val list: ShoppingListState = ShoppingListState(),
-    /** Buscando qué lista abrir (antes de la primera carga de sus elementos). */
-    val resolving: Boolean = false,
-    /** Fallo al buscar la lista; la pantalla lo enseña con «Volver a intentar». */
-    val resolveProblem: ConnectionProblem? = null,
-    /** Mealie respondió bien pero no hay ninguna lista de la compra. */
-    val noList: Boolean = false,
+    /**
+     * Página de listas y cuál está abierta. Qué lista se abre, en qué orden van y
+     * cuál queda elegida lo decide el núcleo (`ShoppingListPickerController`).
+     */
+    val picker: ShoppingListPickerState = ShoppingListPickerState(),
+    /** El diálogo de «Nueva lista» está abierto. */
+    val createDialog: Boolean = false,
+    /** Fallo del último intento de crear, para enseñarlo dentro del diálogo. */
+    val createProblem: ShoppingListPickerProblem? = null,
+    /**
+     * El `POST` de crear pudo llegar al servidor y no se sabe si la lista existe.
+     * El aviso se queda hasta que la persona lo cierre: reintentar a ciegas
+     * crearía otra lista.
+     */
+    val maybeCreated: Boolean = false,
     /** Texto del campo de añadir; se conserva si añadir falla. */
     val draft: String = "",
 )
 
 /**
- * Pasarela entre la lista de la compra y el [ShoppingListController]: no decide
- * nada. Lanza cada operación (bloqueante) en un hilo de fondo y publica el
- * estado del controlador.
+ * Pasarela entre la lista de la compra y el núcleo ([ShoppingListController] para
+ * los elementos, [ShoppingListPickerController] para el selector de listas): no
+ * decide nada. Lanza cada operación (bloqueante) en un hilo de fondo y publica el
+ * estado de los dos controladores.
+ *
+ * Los dos controladores comparten época y fuente porque comparten la lista
+ * abierta: el selector dice cuál toca y este ViewModel la abre. Tenerlos en el
+ * mismo sitio evita dos verdades sobre qué lista se está viendo.
  *
  * - Cada petición crea su cliente con [ShoppingAccess] (nunca se guarda uno), y
  *   un fallo al crearlo llega al controlador como [ApiResult] tipado, no como
  *   excepción.
- * - Mientras hay operaciones en marcha, un sondeo corto publica el estado del
- *   controlador: así el marcado optimista, que el núcleo aplica antes de ir a la
- *   red, se ve al instante.
- * - Al terminar se publica el estado VIGENTE del controlador, no el devuelto
+ * - Mientras hay operaciones en marcha, un sondeo corto publica el estado de los
+ *   controladores: así el marcado optimista, que el núcleo aplica antes de ir a
+ *   la red, se ve al instante.
+ * - Al terminar se publica el estado VIGENTE de los controladores, no el devuelto
  *   por la operación (puede haber otras en vuelo).
- * - Qué lista se abre (hoy, la primera por nombre) es una regla provisional: ver
- *   el informe; si hace falta elegir entre varias, que la ponga el núcleo.
+ * - Crear una lista no se reintenta nunca sola: si la respuesta es dudosa el
+ *   núcleo relee la página y aquí queda un aviso fijo ([ShoppingUiState.maybeCreated]).
+ * - Qué lista se abre al entrar lo decide el núcleo: la recordada por
+ *   [ShoppingListPickerController.rememberOpenList] o, si no hay ninguna, la
+ *   primera por nombre. La interfaz no guarda nada en disco.
  * - [reset] cancela todo, sube la época y empieza de cero (cambio o borrado de
  *   sesión): lo que ya estaba en vuelo no usa la sesión nueva.
  */
@@ -77,11 +97,11 @@ class ShoppingViewModel(
     private var epoch = 0L
 
     private var controller: ShoppingListController = newController()
-    private var resolved = false
-    private var resolving = false
-    private var resolveProblem: ConnectionProblem? = null
-    private var noList = false
+    private var picker: ShoppingListPickerController = newPicker()
     private var draft = ""
+    private var createDialog = false
+    private var createProblem: ShoppingListPickerProblem? = null
+    private var maybeCreated = false
 
     /** Aviso que la persona ya ha cerrado; ver [visibleList]. */
     private var dismissedProblem: ShoppingProblem? = null
@@ -100,14 +120,25 @@ class ShoppingViewModel(
         return ShoppingListController(sourceFor(bornEpoch))
     }
 
+    private fun newPicker(): ShoppingListPickerController {
+        // Sin lista inicial: la primera lectura abre la primera por nombre.
+        val bornEpoch = epoch
+        return ShoppingListPickerController(sourceFor(bornEpoch))
+    }
+
     /**
      * Fuente de UNA sesión ([bornEpoch]). El cliente se crea en cada llamada y
      * no se guarda; un fallo al crearlo (sin sesión, almacén sin respuesta, HTTP
      * local con datos móviles) se convierte en [ApiResult] de fallo y no puede
      * escapar de la corrutina. La llamada va fuera del `try` para no perder el
-     * matiz de [NetworkError.AfterSend] al añadir.
+     * matiz de [NetworkError.AfterSend] al añadir o al crear.
      */
     private fun sourceFor(bornEpoch: Long): ShoppingListSource = object : ShoppingListSource {
+
+        override fun listLists(page: Int, perPage: Int) =
+            withClient(bornEpoch) { it.listLists(page, perPage) }
+
+        override fun createList(name: String) = withClient(bornEpoch) { it.createList(name) }
 
         override fun getList(listId: String) = withClient(bornEpoch) { it.getList(listId) }
 
@@ -129,10 +160,19 @@ class ShoppingViewModel(
     private fun <T> withClient(bornEpoch: Long, call: (ShoppingClient) -> ApiResult<T>): ApiResult<T> {
         // Una operación de antes de reset() no puede pedir con la sesión nueva.
         if (bornEpoch != epoch) return ApiResult.Failure(ConnectionProblem.Unknown)
+        // Solo se envuelve la creación del cliente: la llamada va fuera para no
+        // perder el matiz de AfterSend (el servidor puede haber recibido el POST).
         val client = try {
             access.newClient()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: NetworkError) {
             return failureOf(error)
+        } catch (error: RuntimeException) {
+            // El almacén seguro sin respuesta lanza IllegalStateException. Aquí no
+            // ha salido ninguna petición, así que es un fallo normal y no un
+            // MaybeCreated: si no, el aviso diría que la lista pudo crearse.
+            return ApiResult.Failure(ConnectionProblem.Unknown)
         }
         return call(client)
     }
@@ -146,9 +186,10 @@ class ShoppingViewModel(
 
     private fun snapshot() = ShoppingUiState(
         list = visibleList(controller.state),
-        resolving = resolving,
-        resolveProblem = resolveProblem,
-        noList = noList,
+        picker = picker.state,
+        createDialog = createDialog,
+        createProblem = createProblem,
+        maybeCreated = maybeCreated,
         draft = draft,
     )
 
@@ -162,32 +203,35 @@ class ShoppingViewModel(
         return if (problem == dismissedProblem) list.copy(problem = null) else list
     }
 
-    private fun publish(source: ShoppingListController = controller) {
-        if (source !== controller) return
+    private fun publish() {
         _state.value = snapshot()
     }
 
     // ------------------------------------------------------------- lectura
 
-    /** Al mostrar la pantalla: primera carga, o repetir si lo último fue un fallo. */
+    /**
+     * Al mostrar la pantalla: lee la página de listas si aún no la tiene y abre
+     * la lista que toca. Con una página buena no se pide nada: ir a Ajustes y
+     * volver deja la lista donde estaba; solo se repite si lo último fue un fallo.
+     */
     fun onShown() {
-        if (!resolved) {
-            if (!resolving) resolve()
+        val current = picker.state
+        if (current.isBusy) return
+        if (!current.loadedOnce || current.problem != null) {
+            launchLists { it.load() }
             return
         }
-        val current = controller.state
-        if (current.problem != null && !current.isLoading) onRetry()
+        val open = controller.state
+        if (open.problem != null && !open.isLoading) retryOpenList() else openChosen()
     }
 
-    /** «Volver a intentar» y «Recargar»: cada caso lo resuelve el núcleo o se vuelve a buscar la lista. */
+    /**
+     * «Recargar» y «Volver a intentar»: relee la página de listas (por si hay
+     * alguna nueva) y la lista abierta.
+     */
     fun onRetry() {
-        if (!resolved) {
-            if (!resolving) resolve()
-            return
-        }
-        launchOperation { c ->
-            if (c.state.problem != null && !c.state.loadedOnce) c.retry() else c.refresh()
-        }
+        launchLists { it.refresh() }
+        retryOpenList()
     }
 
     fun onRefresh() = onRetry()
@@ -200,48 +244,92 @@ class ShoppingViewModel(
         publish()
     }
 
-    /** Busca la lista que abrir y la carga. */
-    private fun resolve() {
-        val target = controller
-        val bornEpoch = epoch
-        resolving = true
-        resolveProblem = null
-        noList = false
-        dismissedProblem = null
-        publish(target)
-        val job = viewModelScope.launch {
-            val outcome = try {
-                withContext(ioDispatcher) {
-                    // Una sesión reiniciada mientras se buscaba la lista: no se pide nada.
-                    if (bornEpoch != epoch) Problem(ConnectionProblem.Unknown) else findList()
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (unexpected: Exception) {
-                // Red de seguridad: la pantalla nunca se queda sin decir nada.
-                Problem(ConnectionProblem.Unknown)
+    // ------------------------------------------------------------- listas
+
+    /**
+     * Elige qué lista se abre. No toca la red: la recuerda el selector y la
+     * pantalla carga la que ha quedado abierta.
+     */
+    fun onSelectList(listId: String) {
+        picker.rememberOpenList(listId)
+        createProblem = null
+        publish()
+        openChosen()
+    }
+
+    /**
+     * Abre la lista que el selector da por abierta. Si el selector no tiene ninguna
+     * (la página vino vacía), se cierra la que hubiera: la pantalla no puede seguir
+     * enseñando una lista que ya no está en la página.
+     */
+    private fun openChosen() {
+        val listId = picker.state.openListId
+        if (listId == null) {
+            if (controller.state.listId != null) {
+                controller.close()
+                publish()
             }
-            if (target !== controller) return@launch
-            resolving = false
-            when (outcome) {
-                is Found -> {
-                    resolved = true
-                    publish(target)
-                    launchOperation(target) { it.open(outcome.id) }
-                }
-                NoList -> {
-                    // Sin `resolved`: «Volver a mirar» y volver a la pantalla buscan otra vez.
-                    noList = true
-                    publish(target)
-                }
-                is Problem -> {
-                    resolveProblem = outcome.problem
-                    publish(target)
-                }
-            }
+            return
         }
-        running.add(job)
-        job.invokeOnCompletion { running.remove(job) }
+        if (controller.state.listId == listId) return
+        launchOperation { it.open(listId) }
+    }
+
+    /** Reintenta la lista abierta (o abre la elegida, si la pantalla no la tiene). */
+    private fun retryOpenList() {
+        val listId = picker.state.openListId ?: return
+        val current = controller.state
+        if (current.isLoading) return
+        if (current.listId != listId) {
+            launchOperation { it.open(listId) }
+            return
+        }
+        launchOperation { c ->
+            if (c.state.problem != null && !c.state.loadedOnce) c.retry() else c.refresh()
+        }
+    }
+
+    // ------------------------------------------------------------- crear lista
+
+    /** Abre el diálogo de «Nueva lista». */
+    fun onCreateListClick() {
+        // Sin la página de listas leída no se crea: no se sabe qué hay y se
+        // acabaría con dos listas iguales. La pantalla ya lo desactiva; esto
+        // cubre el atajo del estado vacío y cualquier llamada futura.
+        val current = picker.state
+        if (!current.loadedOnce || current.isBusy) return
+        createProblem = null
+        createDialog = true
+        publish()
+    }
+
+    /** Cierra el diálogo. Con el `POST` en vuelo no hace nada. */
+    fun onDismissCreateList() {
+        if (picker.state.isCreating) return
+        createDialog = false
+        createProblem = null
+        publish()
+    }
+
+    /**
+     * Crea una lista con [name]. El nombre lo valida el núcleo (vacío o demasiado
+     * largo queda en [ShoppingListPickerProblem.InputRejected] sin enviar nada) y
+     * la lista nueva queda abierta. Con una respuesta dudosa NO se reintenta: se
+     * cierra el diálogo y se enciende [ShoppingUiState.maybeCreated], porque
+     * repetir crearía otra lista.
+     */
+    fun onCreateList(name: String) {
+        val current = picker.state
+        if (!current.loadedOnce || current.isBusy) return
+        createProblem = null
+        publish()
+        launchCreate { it.create(name) }
+    }
+
+    /** Cierra el aviso de «puede que la lista se haya creado». */
+    fun onDismissCreateNotice() {
+        maybeCreated = false
+        publish()
     }
 
     // ------------------------------------------------------------- escritura
@@ -280,13 +368,13 @@ class ShoppingViewModel(
         inFlight = 0
         // Nueva época: lo que siga en vuelo no puede pedir con la sesión nueva.
         epoch++
-        resolved = false
-        resolving = false
-        resolveProblem = null
-        noList = false
         draft = ""
         dismissedProblem = null
+        createDialog = false
+        createProblem = null
+        maybeCreated = false
         controller = newController()
+        picker = newPicker()
         publish()
     }
 
@@ -299,6 +387,71 @@ class ShoppingViewModel(
     ) {
         // Se cierra el aviso anterior: si esta operación falla igual, vuelve a salir.
         dismissedProblem = null
+        track(isCurrent = { target === controller }, onDone = onDone) { operation(target) }
+    }
+
+    /** Relee la página de listas; al acabar abre la lista que haya quedado elegida. */
+    private fun launchLists(operation: (ShoppingListPickerController) -> ShoppingListPickerState) {
+        val target = picker
+        track(
+            isCurrent = { target === picker },
+            onDone = { result ->
+                // Si la relectura sale bien, el aviso de «puede que se haya creado»
+                // ya sobra: la persona está viendo las listas de verdad.
+                if (maybeCreated && result.loadedOnce && result.problem == null) maybeCreated = false
+                openChosen()
+            },
+        ) { operation(target) }
+    }
+
+    /**
+     * Crea la lista y ajusta el diálogo y el aviso según el desenlace. Solo la
+     * creación vigente manda: si `reset()` ha cambiado de sesión, el resultado
+     * se descarta y no se abre nada.
+     */
+    private fun launchCreate(operation: (ShoppingListPickerController) -> ShoppingListPickerState) {
+        val target = picker
+        track(
+            isCurrent = { target === picker },
+            onDone = { result ->
+                val problem = result.problem
+                when {
+                    problem == null -> {
+                        // Lista creada y abierta por el núcleo: se carga la nueva.
+                        createDialog = false
+                        createProblem = null
+                        maybeCreated = false
+                        openChosen()
+                    }
+                    // Otra operación del selector ha tomado el relevo: manda su estado.
+                    result.isBusy -> Unit
+                    problem is ShoppingListPickerProblem.MaybeCreated -> {
+                        // Pudo crearse: aviso fijo y que la persona mire antes de repetir.
+                        createDialog = false
+                        createProblem = null
+                        maybeCreated = true
+                    }
+                    // Sesión caducada: se cierra el diálogo y el aviso de la pantalla
+                    // lleva a Ajustes, como en el resto de la app.
+                    problem == ShoppingListPickerProblem.Unauthorized -> {
+                        createDialog = false
+                        createProblem = null
+                    }
+                    else -> createProblem = problem
+                }
+            },
+        ) { operation(target) }
+    }
+
+    /**
+     * Lanza [work] en un hilo de fondo y publica el estado. [isCurrent] evita que
+     * una operación de una sesión ya reiniciada toque el estado o el diálogo.
+     */
+    private fun <S> track(
+        isCurrent: () -> Boolean,
+        onDone: (S) -> Unit,
+        work: () -> S,
+    ) {
         viewModelScope.launch {
             // El propio trabajo, para poder cancelarlo en reset().
             val self = coroutineContext[Job]
@@ -308,17 +461,17 @@ class ShoppingViewModel(
                 poller = viewModelScope.launch {
                     while (true) {
                         delay(POLL_MILLIS)
-                        publish(target)
+                        publish()
                     }
                 }
             }
-            var result: ShoppingListState? = null
+            var result: S? = null
             try {
                 // El núcleo devuelve fallos tipados y su fuente no deja escapar la
                 // creación del cliente; esto es una red de seguridad para que una
                 // excepción rara no tumbe la app ni deje la fila «guardando».
                 result = try {
-                    withContext(ioDispatcher) { operation(target) }
+                    withContext(ioDispatcher) { work() }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (unexpected: Exception) {
@@ -326,7 +479,7 @@ class ShoppingViewModel(
                 }
             } finally {
                 if (self != null) running.remove(self)
-                if (target === controller) {
+                if (isCurrent()) {
                     inFlight--
                     if (inFlight <= 0) {
                         inFlight = 0
@@ -336,43 +489,8 @@ class ShoppingViewModel(
                     val done = result
                     if (done != null) onDone(done)
                 }
-                publish(target)
+                publish()
             }
-        }
-    }
-
-    private sealed interface Outcome
-    private data class Found(val id: String) : Outcome
-    private data object NoList : Outcome
-    private data class Problem(val problem: ConnectionProblem) : Outcome
-
-    /** Lee las listas del servidor y se queda con la primera (el cliente ya las ordena por nombre). */
-    private fun findList(): Outcome {
-        val client = try {
-            access.newClient()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: NetworkError) {
-            return Problem(e.toConnectionProblem())
-        } catch (e: Exception) {
-            return Problem(ConnectionProblem.Unknown)
-        }
-        val result = try {
-            client.listLists()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            return Problem(ConnectionProblem.Unknown)
-        }
-        return when (result) {
-            is ApiResult.Success -> {
-                val first = result.value.items.firstOrNull()
-                if (first == null) NoList else Found(first.id)
-            }
-            ApiResult.Unauthorized, ApiResult.Forbidden -> Problem(ConnectionProblem.Unauthorized)
-            is ApiResult.Failure -> Problem(result.problem)
-            is ApiResult.MaybeCreated -> Problem(result.problem)
-            else -> Problem(ConnectionProblem.Unknown)
         }
     }
 

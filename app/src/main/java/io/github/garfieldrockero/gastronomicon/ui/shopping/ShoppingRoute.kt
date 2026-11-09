@@ -13,8 +13,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * (en la actividad), así que ir a Ajustes y volver no pierde nada; solo si Ajustes
  * cambia la sesión, quien lo posee llama a [ShoppingViewModel.reset].
  *
- * Al mostrarse pide la primera carga, o repite la última si falló (por ejemplo,
- * tras arreglar un 401 en Ajustes).
+ * Al mostrarse pide la página de listas (una vez) y abre la que toque, o repite la
+ * lectura si falló (por ejemplo, tras arreglar un 401 en Ajustes).
  */
 @Composable
 fun ShoppingRoute(
@@ -40,6 +40,11 @@ fun ShoppingRoute(
         onRetry = viewModel::onRetry,
         onOpenSettings = onOpenSettings,
         onDismissProblem = viewModel::onDismissProblem,
+        onSelectList = viewModel::onSelectList,
+        onOpenCreateList = viewModel::onCreateListClick,
+        onDismissCreateList = viewModel::onDismissCreateList,
+        onCreateList = viewModel::onCreateList,
+        onDismissCreateNotice = viewModel::onDismissCreateNotice,
         modifier = modifier,
         contentWindowInsets = contentWindowInsets,
     )

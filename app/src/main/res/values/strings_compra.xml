@@ -26,6 +26,21 @@
     <string name="shopping_add_button">Añadir a la lista</string>
     <string name="shopping_adding">Añadiendo…</string>
 
+    <!-- Selector de listas -->
+    <string name="shopping_lists_loading">Buscando tus listas…</string>
+    <string name="shopping_selector_change">Cambiar de lista</string>
+    <string name="shopping_selector_current">La lista abierta</string>
+    <string name="shopping_selector_locked">Esperando a leer tus listas</string>
+    <string name="shopping_new_list">Nueva lista…</string>
+    <string name="shopping_new_list_title">Nueva lista de la compra</string>
+    <string name="shopping_new_list_help">Ponle un nombre que reconozcas en el súper.</string>
+    <string name="shopping_new_list_label">Nombre de la lista</string>
+    <string name="shopping_new_list_create">Crear lista</string>
+    <string name="shopping_new_list_creating">Creando…</string>
+    <string name="shopping_new_list_empty">Escribe un nombre para la lista.</string>
+    <string name="shopping_new_list_too_long">Ese nombre es demasiado largo. Acórtalo un poco.</string>
+    <string name="shopping_new_list_rejected">Tu Mealie no ha aceptado ese nombre. Prueba con otro.</string>
+
     <!-- Quitar marcados -->
     <string name="shopping_clear_button">Quitar los marcados (%d)</string>
     <string name="shopping_clearing">Quitando los marcados…</string>
@@ -48,7 +63,8 @@
     <string name="shopping_empty_text">Apunta lo que te falta y lo tendrás a mano en el súper. Lo que escribas aquí también lo verás en tu Mealie.</string>
     <string name="shopping_empty_action">Escribir lo primero</string>
     <string name="shopping_no_list_title">Todavía no tienes ninguna lista</string>
-    <string name="shopping_no_list_text">Crea una lista de la compra en tu Mealie, desde el navegador, y vuelve aquí. La app todavía no puede crearlas.</string>
+    <string name="shopping_no_list_text">Crea la primera desde aquí y apunta lo que te falte. También la verás en tu Mealie.</string>
+    <string name="shopping_no_list_create">Crear una lista</string>
     <string name="shopping_no_list_action">Volver a mirar</string>
 
     <!-- Fallos -->
@@ -61,4 +77,12 @@
     <string name="shopping_problem_invalid_quantity">La cantidad no es válida.</string>
     <string name="shopping_change_failed">El último cambio puede no haberse guardado</string>
     <string name="shopping_problem_dismiss">Entendido</string>
+
+    <!-- Fallos del selector de listas -->
+    <string name="shopping_lists_problem_title">No se han podido leer tus listas</string>
+    <string name="shopping_lists_stale">No se han podido actualizar tus listas</string>
+    <string name="shopping_lists_rejected">Tu Mealie no ha aceptado el cambio en las listas. Recarga y vuelve a intentarlo.</string>
+    <string name="shopping_maybe_created_title">Puede que la lista se haya creado</string>
+    <string name="shopping_maybe_created_text">No hemos podido confirmarlo. Mira las listas del selector antes de crearla otra vez; si no aparece, créala de nuevo.</string>
+    <string name="shopping_maybe_created_reload">Volver a mirar</string>
 </resources>
