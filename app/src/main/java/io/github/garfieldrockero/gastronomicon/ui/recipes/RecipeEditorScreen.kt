@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -32,6 +34,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,9 +47,19 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -57,6 +70,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -146,6 +160,13 @@ fun RecipeEditorScreen(
 ) {
     BackHandler { actions.onRequestClose() }
 
+    // Quitar una fila con texto dentro pide confirmación: un toque perdido no puede
+    // borrar un paso largo. Vacía, se quita directo. Es estado de la pantalla, no del
+    // formulario: no viaja al ViewModel, pero sobrevive al giro ([PendingRemovalSaver]).
+    var pendingRemoval by rememberSaveable(stateSaver = PendingRemovalSaver) {
+        mutableStateOf<PendingRemoval?>(null)
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -158,7 +179,12 @@ fun RecipeEditorScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = actions.onRequestClose) {
+                    // Mientras se guarda, atrás no hace nada: que se vea apagado en vez
+                    // de dar la sensación de que la pantalla se ha colgado.
+                    IconButton(
+                        onClick = actions.onRequestClose,
+                        enabled = (state as? RecipeEditorState.Editing)?.saving != true,
+                    ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
                             contentDescription = stringResource(R.string.nav_back),
@@ -203,6 +229,7 @@ fun RecipeEditorScreen(
             is RecipeEditorState.Editing -> EditorContent(
                 state = state,
                 actions = actions,
+                onAskRemove = { pendingRemoval = it },
                 modifier = contentModifier,
             )
             is RecipeEditorState.Saved -> SavedContent(
@@ -227,6 +254,35 @@ fun RecipeEditorScreen(
             onDismiss = actions.onDismissDuplicateSave,
         )
     }
+
+    val form = editing?.form
+    val pending = pendingRemoval
+    // Tras girar, el índice guardado puede haber dejado de existir (la fila se quitó
+    // mientras tanto): se cierra el diálogo y no se quita nada a ciegas. Mientras el
+    // formulario aún no está (cargando), se espera sin soltar el aviso.
+    val formLoaded = form != null
+    val pendingExists = when {
+        pending == null || form == null -> false
+        pending.isStep -> pending.index in form.steps.indices
+        else -> pending.index in form.ingredients.indices
+    }
+    LaunchedEffect(pending, formLoaded, pendingExists) {
+        if (pending != null && formLoaded && !pendingExists) pendingRemoval = null
+    }
+    if (form != null && pending != null && pendingExists) {
+        RemoveRowDialog(
+            isStep = pending.isStep,
+            onConfirm = {
+                pendingRemoval = null
+                if (pending.isStep) {
+                    actions.onRemoveStep(pending.index)
+                } else {
+                    actions.onRemoveIngredient(pending.index)
+                }
+            },
+            onDismiss = { pendingRemoval = null },
+        )
+    }
 }
 
 @StringRes
@@ -244,10 +300,36 @@ private fun titleRes(state: RecipeEditorState): Int = when (state) {
 
 // ------------------------------------------------------------------ contenido
 
+/** Fila de ingrediente o de paso esperando a que la persona confirme que la quita. */
+private data class PendingRemoval(val isStep: Boolean, val index: Int)
+
+/**
+ * Guarda el diálogo de quitar para que el giro no lo cierre: si es paso o ingrediente y
+ * la posición. Al restaurar, la pantalla comprueba que la fila siga existiendo.
+ */
+private val PendingRemovalSaver: Saver<PendingRemoval?, Any> = Saver(
+    save = { pending -> pending?.let { arrayListOf<Any>(it.isStep, it.index) } },
+    restore = { saved ->
+        val parts = saved as? List<*>
+        val isStep = parts?.getOrNull(0) as? Boolean
+        val index = parts?.getOrNull(1) as? Int
+        if (isStep != null && index != null) PendingRemoval(isStep, index) else null
+    },
+)
+
+/**
+ * Qué tarjeta debe quedar a la vista, por su id de interfaz: la posición cambia al
+ * mover y la tarjeta se lleva el foco con ella. [focus] pide además el foco en su
+ * primer campo (al añadir); tras subir o bajar solo se asegura que se vea. [token]
+ * cambia en cada petición para que dos seguidas se noten.
+ */
+private data class CardFocus(val uiId: Long, val focus: Boolean, val token: Int)
+
 @Composable
 private fun EditorContent(
     state: RecipeEditorState.Editing,
     actions: RecipeEditorActions,
+    onAskRemove: (PendingRemoval) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
@@ -268,8 +350,16 @@ private fun EditorContent(
     ) {
         EditorMessages(state = state, actions = actions)
         BasicSection(state = state, actions = actions)
-        IngredientsSection(state = state, actions = actions)
-        StepsSection(state = state, actions = actions)
+        IngredientsSection(
+            state = state,
+            actions = actions,
+            onAskRemove = { index -> onAskRemove(PendingRemoval(isStep = false, index = index)) },
+        )
+        StepsSection(
+            state = state,
+            actions = actions,
+            onAskRemove = { index -> onAskRemove(PendingRemoval(isStep = true, index = index)) },
+        )
         PhotoSection(state = state, actions = actions)
         OrganizersSection(state = state, actions = actions)
     }
@@ -430,7 +520,10 @@ private fun BasicSection(state: RecipeEditorState.Editing, actions: RecipeEditor
                 null
             },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Next,
+            ),
         )
 
         val descriptionError = firstError(state, DraftField.Description, null)
@@ -449,7 +542,10 @@ private fun BasicSection(state: RecipeEditorState.Editing, actions: RecipeEditor
                 null
             },
             minLines = 3,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Next,
+            ),
         )
 
         val servingsError = firstError(state, DraftField.Servings, null)
@@ -468,8 +564,10 @@ private fun BasicSection(state: RecipeEditorState.Editing, actions: RecipeEditor
                 { Text(stringResource(R.string.editor_servings_supporting)) }
             },
             singleLine = true,
+            // Texto y no decimal: el teclado decimal de muchos móviles no tiene «/»,
+            // y el núcleo acepta 1,5 y 1/2. La ayuda lo dice.
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Decimal,
+                keyboardType = KeyboardType.Text,
                 imeAction = ImeAction.Next,
             ),
         )
@@ -479,6 +577,7 @@ private fun BasicSection(state: RecipeEditorState.Editing, actions: RecipeEditor
             onValueChange = actions.onTotalTimeChange,
             label = stringResource(R.string.editor_total_time_label),
             error = firstError(state, DraftField.TotalTime, null),
+            help = stringResource(R.string.editor_time_supporting),
             readOnly = state.saving,
         )
         TimeField(
@@ -486,6 +585,7 @@ private fun BasicSection(state: RecipeEditorState.Editing, actions: RecipeEditor
             onValueChange = actions.onPrepTimeChange,
             label = stringResource(R.string.editor_prep_time_label),
             error = firstError(state, DraftField.PrepTime, null),
+            help = null,
             readOnly = state.saving,
         )
         TimeField(
@@ -493,6 +593,7 @@ private fun BasicSection(state: RecipeEditorState.Editing, actions: RecipeEditor
             onValueChange = actions.onCookTimeChange,
             label = stringResource(R.string.editor_cook_time_label),
             error = firstError(state, DraftField.CookTime, null),
+            help = null,
             readOnly = state.saving,
         )
     }
@@ -504,6 +605,7 @@ private fun TimeField(
     onValueChange: (String) -> Unit,
     label: String,
     error: String?,
+    help: String?,
     readOnly: Boolean,
 ) {
     OutlinedTextField(
@@ -517,8 +619,10 @@ private fun TimeField(
         isError = error != null,
         supportingText = if (error != null) {
             { Text(error) }
+        } else if (help != null) {
+            { Text(help) }
         } else {
-            { Text(stringResource(R.string.editor_time_supporting)) }
+            null
         },
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
@@ -538,11 +642,16 @@ private fun TimeField(
 @Composable
 private fun PhotoSection(state: RecipeEditorState.Editing, actions: RecipeEditorActions) {
     if (state.mode is EditorMode.Create) {
-        Text(
-            text = stringResource(R.string.editor_photo_hint_create),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // También aquí hay título: sin él, la frase suelta parecía parte de la sección
+        // anterior y no se entendía de qué hablaba.
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
+            SectionTitle(stringResource(R.string.editor_section_photo))
+            Text(
+                text = stringResource(R.string.editor_photo_hint_create),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         return
     }
 
@@ -719,24 +828,74 @@ private fun photoProblemText(problem: PhotoProblem): String = when (problem) {
 // -------------------------------------------------------------- ingredientes
 
 @Composable
-private fun IngredientsSection(state: RecipeEditorState.Editing, actions: RecipeEditorActions) {
+private fun IngredientsSection(
+    state: RecipeEditorState.Editing,
+    actions: RecipeEditorActions,
+    onAskRemove: (Int) -> Unit,
+) {
+    val rows = state.form.ingredients
+    // Foco y scroll: al añadir, el foco va al ingrediente nuevo; al subir o bajar, la
+    // tarjeta que se mueve se lleva el foco y se queda a la vista. Se apunta por id de
+    // interfaz y no por posición: con `key(row.uiId)` la tarjeta es la misma aunque
+    // cambie de sitio, así que un segundo toque sigue moviendo la misma fila.
+    var focus by remember { mutableStateOf<CardFocus?>(null) }
+    var focusToken by remember { mutableIntStateOf(0) }
+    var knownCount by remember { mutableIntStateOf(rows.size) }
+
+    LaunchedEffect(rows.size) {
+        if (rows.size > knownCount) {
+            val added = rows.lastOrNull()
+            if (added != null) {
+                focusToken += 1
+                focus = CardFocus(uiId = added.uiId, focus = true, token = focusToken)
+            }
+        }
+        knownCount = rows.size
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.medium)) {
         SectionTitle(stringResource(R.string.editor_section_ingredients))
-        if (state.form.ingredients.isEmpty()) {
+        // Una vez, no en cada tarjeta: qué parte del ingrediente decide el servidor.
+        if (rows.any { it.unit.isNotEmpty() || it.food.isNotEmpty() }) {
+            Text(
+                text = stringResource(R.string.editor_ingredient_fixed_help),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (rows.isEmpty()) {
             Text(
                 text = stringResource(R.string.editor_ingredients_empty),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        state.form.ingredients.forEachIndexed { index, row ->
-            IngredientCard(
-                index = index,
-                row = row,
-                count = state.form.ingredients.size,
-                state = state,
-                actions = actions,
-            )
+        rows.forEachIndexed { index, row ->
+            key(row.uiId) {
+                IngredientCard(
+                    index = index,
+                    row = row,
+                    count = rows.size,
+                    state = state,
+                    actions = actions,
+                    focusRequest = focus?.takeIf { it.uiId == row.uiId },
+                    onMoveUp = {
+                        actions.onMoveIngredientUp(index)
+                        if (index > 0) {
+                            focusToken += 1
+                            focus = CardFocus(uiId = row.uiId, focus = false, token = focusToken)
+                        }
+                    },
+                    onMoveDown = {
+                        actions.onMoveIngredientDown(index)
+                        if (index < rows.lastIndex) {
+                            focusToken += 1
+                            focus = CardFocus(uiId = row.uiId, focus = false, token = focusToken)
+                        }
+                    },
+                    onAskRemove = { onAskRemove(index) },
+                )
+            }
         }
         OutlinedButton(
             onClick = actions.onAddIngredient,
@@ -762,6 +921,10 @@ private fun IngredientCard(
     count: Int,
     state: RecipeEditorState.Editing,
     actions: RecipeEditorActions,
+    focusRequest: CardFocus?,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onAskRemove: () -> Unit,
 ) {
     val quantityError = firstError(state, DraftField.IngredientQuantity, index)
     val noteError = firstError(state, DraftField.IngredientNote, index)
@@ -770,9 +933,18 @@ private fun IngredientCard(
         ?: firstError(state, DraftField.IngredientTitle, index)
     val rowError = quantityError ?: noteError ?: fixedError
 
+    val bringIntoView = remember { BringIntoViewRequester() }
+    val quantityFocus = remember { FocusRequester() }
+    LaunchedEffect(focusRequest?.token) {
+        val request = focusRequest ?: return@LaunchedEffect
+        if (request.focus) quantityFocus.requestFocus()
+        bringIntoView.bringIntoView()
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .bringIntoViewRequester(bringIntoView)
             .fieldError(rowError != null, rowError.orEmpty()),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.medium,
@@ -794,12 +966,15 @@ private fun IngredientCard(
                     modifier = Modifier.weight(1f),
                 )
                 MoveButtons(
-                    index = index,
-                    count = count,
                     enabled = !state.saving,
-                    up = actions.onMoveIngredientUp,
-                    down = actions.onMoveIngredientDown,
-                    remove = actions.onRemoveIngredient,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < count - 1,
+                    onUp = onMoveUp,
+                    onDown = onMoveDown,
+                    // Con algo escrito pide confirmación; vacía se quita directo.
+                    onRemove = {
+                        if (hasIngredientText(row)) onAskRemove() else actions.onRemoveIngredient(index)
+                    },
                     itemName = stringResource(R.string.editor_ingredient_number, index + 1),
                     removeLabel = stringResource(R.string.editor_remove_ingredient, index + 1),
                 )
@@ -818,6 +993,7 @@ private fun IngredientCard(
                 onValueChange = { actions.onIngredientQuantityChange(index, it) },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .focusRequester(quantityFocus)
                     .fieldError(quantityError != null, quantityError.orEmpty()),
                 readOnly = state.saving,
                 label = { Text(stringResource(R.string.editor_ingredient_quantity_label)) },
@@ -825,11 +1001,13 @@ private fun IngredientCard(
                 supportingText = if (quantityError != null) {
                     { Text(quantityError) }
                 } else {
-                    null
+                    { Text(stringResource(R.string.editor_ingredient_quantity_supporting)) }
                 },
                 singleLine = true,
+                // Texto y no decimal: el teclado decimal de muchos móviles no tiene «/»
+                // y el núcleo acepta 1,5 y 1/2. La ayuda de al lado lo dice.
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Decimal,
+                    keyboardType = KeyboardType.Text,
                     imeAction = ImeAction.Next,
                 ),
             )
@@ -849,7 +1027,10 @@ private fun IngredientCard(
                     null
                 },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Next,
+                ),
             )
 
             if (row.unit.isNotEmpty() || row.food.isNotEmpty()) {
@@ -857,11 +1038,6 @@ private fun IngredientCard(
                 Text(
                     text = stringResource(R.string.editor_ingredient_fixed, fixed),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = stringResource(R.string.editor_ingredient_fixed_help),
-                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -877,27 +1053,74 @@ private fun IngredientCard(
     }
 }
 
+/** ¿Hay algo escrito en el ingrediente? Solo entonces quitar pide confirmación. */
+private fun hasIngredientText(row: IngredientForm): Boolean =
+    row.quantity.isNotBlank() || row.note.isNotBlank()
+
+/** ¿Hay algo escrito en el paso? */
+private fun hasStepText(row: StepForm): Boolean = row.title.isNotBlank() || row.text.isNotBlank()
+
 // --------------------------------------------------------------------- pasos
 
 @Composable
-private fun StepsSection(state: RecipeEditorState.Editing, actions: RecipeEditorActions) {
+private fun StepsSection(
+    state: RecipeEditorState.Editing,
+    actions: RecipeEditorActions,
+    onAskRemove: (Int) -> Unit,
+) {
+    val rows = state.form.steps
+    // Igual que en los ingredientes: el paso nuevo recibe el foco y el que se mueve
+    // se lleva el foco consigo y se queda a la vista, por id y no por posición.
+    var focus by remember { mutableStateOf<CardFocus?>(null) }
+    var focusToken by remember { mutableIntStateOf(0) }
+    var knownCount by remember { mutableIntStateOf(rows.size) }
+
+    LaunchedEffect(rows.size) {
+        if (rows.size > knownCount) {
+            val added = rows.lastOrNull()
+            if (added != null) {
+                focusToken += 1
+                focus = CardFocus(uiId = added.uiId, focus = true, token = focusToken)
+            }
+        }
+        knownCount = rows.size
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.medium)) {
         SectionTitle(stringResource(R.string.editor_section_steps))
-        if (state.form.steps.isEmpty()) {
+        if (rows.isEmpty()) {
             Text(
                 text = stringResource(R.string.editor_steps_empty),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        state.form.steps.forEachIndexed { index, row ->
-            StepCard(
-                index = index,
-                row = row,
-                count = state.form.steps.size,
-                state = state,
-                actions = actions,
-            )
+        rows.forEachIndexed { index, row ->
+            key(row.uiId) {
+                StepCard(
+                    index = index,
+                    row = row,
+                    count = rows.size,
+                    state = state,
+                    actions = actions,
+                    focusRequest = focus?.takeIf { it.uiId == row.uiId },
+                    onMoveUp = {
+                        actions.onMoveStepUp(index)
+                        if (index > 0) {
+                            focusToken += 1
+                            focus = CardFocus(uiId = row.uiId, focus = false, token = focusToken)
+                        }
+                    },
+                    onMoveDown = {
+                        actions.onMoveStepDown(index)
+                        if (index < rows.lastIndex) {
+                            focusToken += 1
+                            focus = CardFocus(uiId = row.uiId, focus = false, token = focusToken)
+                        }
+                    },
+                    onAskRemove = { onAskRemove(index) },
+                )
+            }
         }
         OutlinedButton(
             onClick = actions.onAddStep,
@@ -923,14 +1146,28 @@ private fun StepCard(
     count: Int,
     state: RecipeEditorState.Editing,
     actions: RecipeEditorActions,
+    focusRequest: CardFocus?,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onAskRemove: () -> Unit,
 ) {
     val titleError = firstError(state, DraftField.StepTitle, index)
     val textError = firstError(state, DraftField.StepText, index)
     val rowError = titleError ?: textError
 
+    val bringIntoView = remember { BringIntoViewRequester() }
+    val textFocus = remember { FocusRequester() }
+    LaunchedEffect(focusRequest?.token) {
+        val request = focusRequest ?: return@LaunchedEffect
+        // El foco va a «Qué se hace», que es lo primero que se escribe de un paso.
+        if (request.focus) textFocus.requestFocus()
+        bringIntoView.bringIntoView()
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .bringIntoViewRequester(bringIntoView)
             .fieldError(rowError != null, rowError.orEmpty()),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.medium,
@@ -952,12 +1189,15 @@ private fun StepCard(
                     modifier = Modifier.weight(1f),
                 )
                 MoveButtons(
-                    index = index,
-                    count = count,
                     enabled = !state.saving,
-                    up = actions.onMoveStepUp,
-                    down = actions.onMoveStepDown,
-                    remove = actions.onRemoveStep,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < count - 1,
+                    onUp = onMoveUp,
+                    onDown = onMoveDown,
+                    // Con algo escrito pide confirmación; vacío se quita directo.
+                    onRemove = {
+                        if (hasStepText(row)) onAskRemove() else actions.onRemoveStep(index)
+                    },
                     itemName = stringResource(R.string.editor_step_number, index + 1),
                     removeLabel = stringResource(R.string.editor_remove_step, index + 1),
                 )
@@ -978,7 +1218,10 @@ private fun StepCard(
                     null
                 },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Next,
+                ),
             )
 
             OutlinedTextField(
@@ -986,6 +1229,7 @@ private fun StepCard(
                 onValueChange = { actions.onStepTextChange(index, it) },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .focusRequester(textFocus)
                     .fieldError(textError != null, textError.orEmpty()),
                 readOnly = state.saving,
                 label = { Text(stringResource(R.string.editor_step_text_label)) },
@@ -996,7 +1240,10 @@ private fun StepCard(
                     null
                 },
                 minLines = 3,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Next,
+                ),
             )
         }
     }
@@ -1046,6 +1293,11 @@ private fun OrganizersSection(state: RecipeEditorState.Editing, actions: RecipeE
             } else {
                 stringResource(R.string.editor_tags_empty)
             },
+            partialText = if (catalogs.tagsTruncated) {
+                stringResource(R.string.editor_tags_partial)
+            } else {
+                null
+            },
             onToggle = actions.onToggleTag,
         )
         OrganizerChips(
@@ -1057,6 +1309,11 @@ private fun OrganizersSection(state: RecipeEditorState.Editing, actions: RecipeE
                 stringResource(R.string.editor_catalogs_failed)
             } else {
                 stringResource(R.string.editor_categories_empty)
+            },
+            partialText = if (catalogs.categoriesTruncated) {
+                stringResource(R.string.editor_categories_partial)
+            } else {
+                null
             },
             onToggle = actions.onToggleCategory,
         )
@@ -1071,6 +1328,7 @@ private fun OrganizerChips(
     selected: List<DraftOrganizer>,
     enabled: Boolean,
     emptyText: String,
+    partialText: String?,
     onToggle: (DraftOrganizer) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
@@ -1087,13 +1345,35 @@ private fun OrganizerChips(
                 verticalArrangement = Arrangement.spacedBy(Spacing.small),
             ) {
                 for (choice in choices) {
+                    val isSelected = selected.any { sameOrganizer(it, choice) }
                     FilterChip(
-                        selected = selected.any { sameOrganizer(it, choice) },
+                        selected = isSelected,
                         onClick = { onToggle(choice) },
+                        // De pie y con prisa: el chip no baja de 48 dp como el resto.
+                        modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
                         enabled = enabled,
                         label = { Text(choice.name) },
+                        // Una marca además del color: el estado no depende solo del tono.
+                        leadingIcon = if (isSelected) {
+                            {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_check),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                )
+                            }
+                        } else {
+                            null
+                        },
                     )
                 }
+            }
+            if (partialText != null) {
+                Text(
+                    text = partialText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -1113,29 +1393,29 @@ private fun SectionTitle(text: String) {
 
 @Composable
 private fun MoveButtons(
-    index: Int,
-    count: Int,
     enabled: Boolean,
-    up: (Int) -> Unit,
-    down: (Int) -> Unit,
-    remove: (Int) -> Unit,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+    onRemove: () -> Unit,
     itemName: String,
     removeLabel: String,
 ) {
     Row {
-        IconButton(onClick = { up(index) }, enabled = enabled && index > 0) {
+        IconButton(onClick = onUp, enabled = enabled && canMoveUp) {
             Icon(
                 painter = painterResource(R.drawable.ic_arrow_up),
                 contentDescription = stringResource(R.string.editor_move_up, itemName),
             )
         }
-        IconButton(onClick = { down(index) }, enabled = enabled && index < count - 1) {
+        IconButton(onClick = onDown, enabled = enabled && canMoveDown) {
             Icon(
                 painter = painterResource(R.drawable.ic_arrow_down),
                 contentDescription = stringResource(R.string.editor_move_down, itemName),
             )
         }
-        IconButton(onClick = { remove(index) }, enabled = enabled) {
+        IconButton(onClick = onRemove, enabled = enabled) {
             Icon(
                 painter = painterResource(R.drawable.ic_remove),
                 contentDescription = removeLabel,
@@ -1168,6 +1448,18 @@ private fun SaveBar(state: RecipeEditorState.Editing, actions: RecipeEditorActio
             ) {
                 if (state.saving) BusyIndicator()
                 Text(stringResource(if (state.saving) R.string.editor_saving else R.string.editor_save))
+            }
+            // Mientras se guarda, atrás y los campos no responden: se dice y TalkBack lo
+            // lee, en vez de dejar la sensación de que la pantalla se ha colgado.
+            if (state.saving) {
+                Text(
+                    text = stringResource(R.string.editor_saving_wait),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(top = Spacing.small)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                )
             }
             if (state.photo.busy) {
                 Text(
@@ -1267,6 +1559,43 @@ private fun DuplicateSaveDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
                 modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
             ) {
                 Text(stringResource(R.string.editor_maybe_created_confirm))
+            }
+        },
+    )
+}
+
+/**
+ * «¿Quitar este ingrediente?» / «¿Quitar este paso?». Solo cuando la fila tiene algo
+ * escrito: un toque perdido en la papelera no puede tirar un paso largo sin querer.
+ * Vacía se quita directo, sin preguntar.
+ */
+@Composable
+private fun RemoveRowDialog(isStep: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (isStep) R.string.editor_remove_step_dialog_title else R.string.editor_remove_ingredient_dialog_title,
+                ),
+            )
+        },
+        text = { Text(stringResource(R.string.editor_remove_dialog_text)) },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.editor_remove_dialog_cancel))
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.editor_remove_dialog_confirm))
             }
         },
     )
@@ -1620,5 +1949,35 @@ private fun RecipeEditorDuplicateConfirmPreview() {
             ),
             actions = previewActions(),
         )
+    }
+}
+
+// Quitar con texto escrito: el paso y el ingrediente piden confirmación.
+// Solo se ven las primeras etiquetas y categorías: el formulario lo dice.
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorCatalogsPartialPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState(catalogsTruncated = true),
+            actions = previewActions(),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeEditorRemoveIngredientPreview() {
+    GastronomiconTheme {
+        RemoveRowDialog(isStep = false, onConfirm = {}, onDismiss = {})
+    }
+}
+
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeEditorRemoveStepPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        RemoveRowDialog(isStep = true, onConfirm = {}, onDismiss = {})
     }
 }

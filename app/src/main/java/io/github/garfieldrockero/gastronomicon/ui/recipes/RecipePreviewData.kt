@@ -227,6 +227,7 @@ internal object RecipePreviewData {
         photo: PhotoState = PhotoState(),
         maybeCreated: Boolean = false,
         showDuplicateConfirm: Boolean = false,
+        catalogsTruncated: Boolean = false,
     ): RecipeEditorState.Editing = RecipeEditorState.Editing(
         mode = mode,
         form = RecipeForm.from(draft),
@@ -236,6 +237,8 @@ internal object RecipePreviewData {
         catalogs = OrganizerCatalog(
             tags = organizerTags.map { it.toDraft() },
             categories = organizerCategories.map { it.toDraft() },
+            tagsTruncated = catalogsTruncated,
+            categoriesTruncated = catalogsTruncated,
             loading = false,
             problem = null,
         ),

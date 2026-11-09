@@ -47,6 +47,20 @@ sealed interface EditorMode {
     data class Edit(val slug: String) : EditorMode
 }
 
+/**
+ * Reparte los ids de interfaz del formulario ([IngredientForm.uiId] y
+ * [StepForm.uiId]). Solo sirve para que Compose sepa qué tarjeta es cuál al subir,
+ * bajar o quitarla; nunca entra en el borrador ni en el JSON.
+ */
+internal class UiIdSource {
+    private var last = 0L
+
+    fun next(): Long {
+        last += 1
+        return last
+    }
+}
+
 /** Una línea de ingredientes tal como se edita: cantidad y nota; unidad y alimento solo se leen. */
 data class IngredientForm(
     val quantity: String = "",
@@ -55,6 +69,12 @@ data class IngredientForm(
     val note: String = "",
     val title: String = "",
     val sourceId: String? = null,
+    /**
+     * Id estable solo de interfaz (`key` de Compose): la tarjeta conserva su foco, su
+     * scroll y su sitio en el orden de TalkBack al moverse. No viaja al borrador ni al
+     * JSON ([RecipeForm.toDraft] lo ignora) y por eso tampoco cuenta para `dirty`.
+     */
+    val uiId: Long = 0L,
 )
 
 /** Un paso tal como se edita. */
@@ -62,6 +82,8 @@ data class StepForm(
     val title: String = "",
     val text: String = "",
     val sourceId: String? = null,
+    /** Igual que [IngredientForm.uiId]: solo para la interfaz, fuera del borrador. */
+    val uiId: Long = 0L,
 )
 
 /**
@@ -87,6 +109,7 @@ data class RecipeForm(
     fun toDraft(): Pair<RecipeDraft, List<DraftError>> {
         val errors = ArrayList<DraftError>()
         val parsedServings = parseNumber(servings, DraftField.Servings, null, errors)
+        // Los `uiId` se quedan aquí a propósito: el borrador y `dirty` no los ven.
         val parsedIngredients = ingredients.mapIndexed { index, row ->
             DraftIngredient(
                 quantity = parseNumber(row.quantity, DraftField.IngredientQuantity, index, errors),
@@ -115,7 +138,11 @@ data class RecipeForm(
     }
 
     companion object {
-        fun from(draft: RecipeDraft): RecipeForm = RecipeForm(
+        /**
+         * [uiIds] los pone el ViewModel; sin él (previews y pruebas) se numera aquí,
+         * único dentro del formulario y sin ningún significado más.
+         */
+        internal fun from(draft: RecipeDraft, uiIds: UiIdSource = UiIdSource()): RecipeForm = RecipeForm(
             name = draft.name,
             description = draft.description,
             servings = draft.servings?.let(::formatNumber) ?: "",
@@ -131,9 +158,10 @@ data class RecipeForm(
                     note = row.note,
                     title = row.title,
                     sourceId = row.sourceId,
+                    uiId = uiIds.next(),
                 )
             },
-            steps = draft.steps.map { StepForm(it.title, it.text, it.sourceId) },
+            steps = draft.steps.map { StepForm(it.title, it.text, it.sourceId, uiId = uiIds.next()) },
             notes = draft.notes,
             tags = draft.tags,
             categories = draft.categories,
@@ -145,6 +173,12 @@ data class RecipeForm(
 data class OrganizerCatalog(
     val tags: List<DraftOrganizer> = emptyList(),
     val categories: List<DraftOrganizer> = emptyList(),
+    /**
+     * El servidor tiene más de las que caben en una página: el formulario lo dice en
+     * vez de callarse las que no ha podido traer. Lo calcula el núcleo (`Page.hasNext`).
+     */
+    val tagsTruncated: Boolean = false,
+    val categoriesTruncated: Boolean = false,
     val loading: Boolean = false,
     val problem: ConnectionProblem? = null,
 )
@@ -288,6 +322,12 @@ class RecipeEditorViewModel(
     private var photoJob: Job? = null
 
     /**
+     * Ids de interfaz del formulario. No se reinicia al abrir ni al cerrar: así dos
+     * filas de dos formularios seguidos nunca comparten id.
+     */
+    private val uiIds = UiIdSource()
+
+    /**
      * JPEG ya recodificado y sin metadatos, listo para subir o para repetir la
      * subida. Fuera del estado a propósito: no se pinta, no se copia y no acaba
      * en ningún `toString`.
@@ -300,7 +340,7 @@ class RecipeEditorViewModel(
         val draft = RecipeDraft()
         _state.value = RecipeEditorState.Editing(
             mode = EditorMode.Create,
-            form = RecipeForm.from(draft),
+            form = RecipeForm.from(draft, uiIds),
             baseline = draft,
             catalogs = OrganizerCatalog(loading = true),
         )
@@ -320,7 +360,7 @@ class RecipeEditorViewModel(
                     val draft = result.draft
                     _state.value = RecipeEditorState.Editing(
                         mode = mode,
-                        form = RecipeForm.from(draft),
+                        form = RecipeForm.from(draft, uiIds),
                         baseline = draft,
                         catalogs = OrganizerCatalog(
                             tags = draft.tags,
@@ -368,7 +408,12 @@ class RecipeEditorViewModel(
     fun onIngredientNoteChange(index: Int, value: String) =
         updateIngredient(index) { it.copy(note = value) }
 
-    fun onAddIngredient() = updateForm { it.copy(ingredients = it.ingredients + IngredientForm()) }
+    fun onAddIngredient() {
+        // El id se pide fuera del cambio de estado: si el flujo reintenta la actualización,
+        // la fila es la misma en todos los intentos.
+        val row = IngredientForm(uiId = uiIds.next())
+        updateForm { it.copy(ingredients = it.ingredients + row) }
+    }
 
     fun onRemoveIngredient(index: Int) = updateForm { form ->
         if (index in form.ingredients.indices) {
@@ -390,7 +435,10 @@ class RecipeEditorViewModel(
 
     fun onStepTextChange(index: Int, value: String) = updateStep(index) { it.copy(text = value) }
 
-    fun onAddStep() = updateForm { it.copy(steps = it.steps + StepForm()) }
+    fun onAddStep() {
+        val row = StepForm(uiId = uiIds.next())
+        updateForm { it.copy(steps = it.steps + row) }
+    }
 
     fun onRemoveStep(index: Int) = updateForm { form ->
         if (index in form.steps.indices) {
@@ -911,6 +959,8 @@ class RecipeEditorViewModel(
                 is CatalogsResult.Loaded -> {
                     val tags = result.tags
                     val categories = result.categories
+                    val tagsTruncated = result.tagsTruncated
+                    val categoriesTruncated = result.categoriesTruncated
                     _state.update { current ->
                         if (current !is RecipeEditorState.Editing) {
                             current
@@ -919,6 +969,8 @@ class RecipeEditorViewModel(
                                 catalogs = OrganizerCatalog(
                                     tags = mergeChoices(tags, current.form.tags),
                                     categories = mergeChoices(categories, current.form.categories),
+                                    tagsTruncated = tagsTruncated,
+                                    categoriesTruncated = categoriesTruncated,
                                     loading = false,
                                     problem = null,
                                 ),
@@ -964,6 +1016,10 @@ class RecipeEditorViewModel(
         return CatalogsResult.Loaded(
             tags = tags.value.items.map { it.toDraft() },
             categories = categories.value.items.map { it.toDraft() },
+            // `hasNext` lo decide el núcleo con el total del servidor: si hay más de una
+            // página, el formulario avisa de que solo se ven las primeras.
+            tagsTruncated = tags.value.hasNext,
+            categoriesTruncated = categories.value.hasNext,
         )
     }
 
@@ -1061,7 +1117,14 @@ class RecipeEditorViewModel(
     }
 
     private sealed interface CatalogsResult {
-        data class Loaded(val tags: List<DraftOrganizer>, val categories: List<DraftOrganizer>) : CatalogsResult
+        data class Loaded(
+            val tags: List<DraftOrganizer>,
+            val categories: List<DraftOrganizer>,
+            /** Hay más de una página en el servidor: el formulario avisa de que faltan. */
+            val tagsTruncated: Boolean,
+            val categoriesTruncated: Boolean,
+        ) : CatalogsResult
+
         data class Problem(val problem: ConnectionProblem) : CatalogsResult
     }
 

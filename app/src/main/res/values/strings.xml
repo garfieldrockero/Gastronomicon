@@ -186,9 +186,10 @@
     <string name="editor_total_time_label">Tiempo total</string>
     <string name="editor_prep_time_label">Preparación</string>
     <string name="editor_cook_time_label">Cocción</string>
-    <string name="editor_servings_supporting">Cuántas raciones salen. Puedes dejarlo vacío.</string>
+    <string name="editor_servings_supporting">Cuántas raciones salen. Admite 1,5 o 1/2; puedes dejarlo vacío.</string>
     <string name="editor_time_supporting">Texto libre, por ejemplo «30 min».</string>
     <string name="editor_ingredient_quantity_label">Cantidad</string>
+    <string name="editor_ingredient_quantity_supporting">Admite 1,5 o 1/2.</string>
     <string name="editor_ingredient_note_label">Ingrediente o nota</string>
     <string name="editor_ingredient_fixed">Unidad y alimento: %1$s</string>
     <string name="editor_ingredient_fixed_help">La unidad y el alimento no se pueden cambiar aquí.</string>
@@ -205,8 +206,15 @@
     <string name="editor_move_down">Bajar %1$s</string>
     <string name="editor_ingredients_empty">Todavía no hay ingredientes. Añade el primero.</string>
     <string name="editor_steps_empty">Todavía no hay pasos. Añade el primero.</string>
+    <!-- Quitar una fila con texto dentro pide confirmación; vacía se quita directo. -->
+    <string name="editor_remove_ingredient_dialog_title">¿Quitar este ingrediente?</string>
+    <string name="editor_remove_step_dialog_title">¿Quitar este paso?</string>
+    <string name="editor_remove_dialog_text">Se perderá lo que has escrito ahí. No se puede deshacer.</string>
+    <string name="editor_remove_dialog_confirm">Quitar</string>
+    <string name="editor_remove_dialog_cancel">Cancelar</string>
     <string name="editor_save">Guardar</string>
     <string name="editor_saving">Guardando…</string>
+    <string name="editor_saving_wait">No salgas todavía: el botón Atrás no hará nada hasta que termine.</string>
     <string name="editor_save_failed">No se ha podido guardar.</string>
     <string name="editor_save_rejected">Tu Mealie no ha aceptado el cambio. Revisa los datos o los permisos de tu token.</string>
     <string name="editor_created_incomplete">La receta ya está creada, pero no se han podido guardar los detalles. Vuelve a guardar cuando se arregle.</string>
@@ -228,6 +236,8 @@
     <string name="editor_catalogs_failed">No se han podido cargar las etiquetas y categorías.</string>
     <string name="editor_tags_empty">Tu Mealie no tiene etiquetas todavía. Puedes guardar la receta sin etiquetas.</string>
     <string name="editor_categories_empty">Tu Mealie no tiene categorías todavía. Puedes guardar la receta sin categorías.</string>
+    <string name="editor_tags_partial">Se han cargado solo las primeras etiquetas, no todas. Si falta la tuya, créala en tu Mealie.</string>
+    <string name="editor_categories_partial">Se han cargado solo las primeras categorías, no todas. Si falta la tuya, créala en tu Mealie.</string>
 
     <!-- Recetas: «puede que ya se haya creado». Se avisa siempre y no se reintenta solo. -->
     <string name="editor_maybe_created">Puede que la receta ya se haya creado: revisa la lista antes de repetir</string>
@@ -247,7 +257,7 @@
     <string name="editor_photo_done">Foto subida a tu Mealie.</string>
     <string name="editor_photo_done_hint">Ya se ve en tu Mealie. Aquí solo se cambia si eliges otra.</string>
     <string name="editor_photo_wait">Espera a que termine la foto para guardar.</string>
-    <string name="editor_photo_hint_create">La foto se puede añadir después de guardar, desde «Editar».</string>
+    <string name="editor_photo_hint_create">Para añadir una foto, guarda primero la receta y pulsa «Editar» en ella.</string>
     <string name="editor_photo_problem_too_large">La foto es demasiado grande para subirla. Prueba con otra.</string>
     <string name="editor_photo_problem_not_image">Ese fichero no es una foto que se pueda usar. Prueba con otra.</string>
     <string name="editor_photo_problem_metadata">No se pudo preparar la foto sin datos de ubicación. Prueba con otra.</string>
