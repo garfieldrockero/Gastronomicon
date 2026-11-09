@@ -2,6 +2,8 @@ package io.github.garfieldrockero.gastronomicon.core.offline
 
 import io.github.garfieldrockero.gastronomicon.core.network.CoreJson
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertTrue
 
@@ -46,10 +48,41 @@ internal fun FakeEncryptedBlobStore.draftKey(): String = keyWithPrefix("dr1.")
 internal fun FakeEncryptedBlobStore.draftIndexKey(): String = keyWithPrefix("dri1.")
 
 /** Reescribe un blob JSON como haría alguien con acceso al fichero. */
-internal fun FakeEncryptedBlobStore.tamper(prefix: String, transform: (JsonObject) -> JsonObject) {
+/**
+ * Reescribe un blob JSON como haría alguien con acceso al fichero.
+ *
+ * Con [syncIndex] (por defecto) el tamaño que anota el índice se ajusta al nuevo, para que la
+ * prueba compruebe el saneado del contenido y no la comprobación de tamaño del índice (que ya
+ * tiene sus propias pruebas). Las pruebas del índice manipulado lo reescriben aparte.
+ */
+internal fun FakeEncryptedBlobStore.tamper(
+    prefix: String,
+    syncIndex: Boolean = true,
+    transform: (JsonObject) -> JsonObject,
+) {
     val key = keyWithPrefix(prefix)
     val root = CoreJson.json.parseToJsonElement(blobs.getValue(key).toString(Charsets.UTF_8)) as JsonObject
-    blobs[key] = CoreJson.json
+    val rewritten = CoreJson.json
         .encodeToString(JsonObject.serializer(), transform(root))
+        .toByteArray(Charsets.UTF_8)
+    blobs[key] = rewritten
+    if (!syncIndex) return
+    val indexPrefix = when (prefix) {
+        "rc1." -> "rci1."
+        "dr1." -> "dri1."
+        else -> return
+    }
+    val indexKey = keyWithPrefix(indexPrefix)
+    val index = CoreJson.json.parseToJsonElement(blobs.getValue(indexKey).toString(Charsets.UTF_8)) as JsonObject
+    val entries = (index["entries"] as JsonArray).map { element ->
+        val entry = element as JsonObject
+        if ((entry["key"] as? JsonPrimitive)?.content == key) {
+            entry.with("bytes", JsonPrimitive(rewritten.size))
+        } else {
+            entry
+        }
+    }
+    blobs[indexKey] = CoreJson.json
+        .encodeToString(JsonObject.serializer(), index.with("entries", JsonArray(entries)))
         .toByteArray(Charsets.UTF_8)
 }
