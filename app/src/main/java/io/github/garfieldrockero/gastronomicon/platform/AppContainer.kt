@@ -4,6 +4,8 @@ import android.content.Context
 import io.github.garfieldrockero.gastronomicon.core.client.MealieClient
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanClient
 import io.github.garfieldrockero.gastronomicon.core.network.ActiveNetworkProvider
+import io.github.garfieldrockero.gastronomicon.core.offline.DraftStore
+import io.github.garfieldrockero.gastronomicon.core.offline.RecipeCache
 import io.github.garfieldrockero.gastronomicon.core.session.Session
 import io.github.garfieldrockero.gastronomicon.core.session.SessionStore
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClient
@@ -23,7 +25,45 @@ class AppContainer(context: Context) {
     // applicationContext para no retener una Activity.
     private val appContext: Context = context.applicationContext
 
-    val sessionStore: SessionStore = KeystoreSessionStore(appContext)
+    /**
+     * Datos offline (fase 8): ficheros cifrados en el directorio privado de la app,
+     * nunca en la caché. Uno solo para toda la app, compartido por la caché de
+     * recetas y los borradores (el almacén serializa sus operaciones).
+     */
+    val offlineStore: KeystoreBlobStore = KeystoreBlobStore(appContext)
+
+    init {
+        // Si un borrado de datos offline se quedó a medias (disco lleno, Keystore
+        // ocupado), se reintenta aquí: sin esto el fallo pasaría por «borrado». Solo
+        // toca el disco cuando hay una marca pendiente; el arranque normal no hace
+        // nada. Lo que no se pueda borrar ahora sigue cifrado.
+        offlineStore.retryPendingClear()
+    }
+
+    /**
+     * Caché de recetas ya abiertas. Expuesta para la fase 8, **todavía sin usar**:
+     * ninguna pantalla la consulta ni la rellena.
+     */
+    val recipeCache: RecipeCache = RecipeCache(offlineStore)
+
+    /**
+     * Borradores del formulario de receta. Expuesto para la fase 8, **todavía sin
+     * usar**: el formulario aún no guarda ni recupera borradores.
+     */
+    val draftStore: DraftStore = DraftStore(offlineStore)
+
+    // El almacén real, sin el envoltorio de abajo.
+    private val keystoreSessionStore: SessionStore = KeystoreSessionStore(appContext)
+
+    /**
+     * La sesión guardada. Al cambiar de servidor o de token, y al borrarla, se
+     * vacía además todo lo offline de la cuenta anterior (ver
+     * [OfflineClearingSessionStore]): no queda caché de una sesión que ya no está.
+     */
+    val sessionStore: SessionStore = OfflineClearingSessionStore(keystoreSessionStore) {
+        offlineStore.clearAll()
+    }
+
     val preferences: AppPreferences = SharedPreferencesAppPreferences(appContext)
     val activeNetwork: ActiveNetworkProvider = AndroidActiveNetworkProvider(appContext)
     val connectionTester: ConnectionTester = MealieConnectionTester(activeNetwork)
