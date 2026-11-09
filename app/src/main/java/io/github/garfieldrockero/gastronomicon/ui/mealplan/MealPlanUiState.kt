@@ -16,8 +16,12 @@ class PickedRecipe(val id: String, val name: String) {
 }
 
 /**
- * Lo que la persona va rellenando al añadir una comida. Solo guarda lo escrito
- * o elegido; nada se valida aquí: lo hace el núcleo al pulsar «Añadir».
+ * Lo que la persona va rellenando al añadir o editar una comida. Solo guarda lo
+ * escrito o elegido; nada se valida aquí: lo hace el núcleo al confirmar.
+ *
+ * [editingId] distingue las dos caras de la misma hoja: null es una comida
+ * nueva y un id es la entrada que se está editando. [scaleText] es el número
+ * tal como se escribe (con coma o con punto); el núcleo decide si vale.
  */
 data class AddMealForm(
     val date: LocalDate,
@@ -26,21 +30,29 @@ data class AddMealForm(
     val recipe: PickedRecipe? = null,
     val title: String = "",
     val text: String = "",
+    /** Raciones escritas para una comida con receta; vacío es la receta tal cual. */
+    val scaleText: String = "",
+    /** Entrada que se está editando; null si es una comida nueva. */
+    val editingId: Long? = null,
     /** Se está eligiendo receta: la hoja enseña el buscador en vez del formulario. */
     val picking: Boolean = false,
 ) {
     // Sin los textos: son de la persona y un estado puede acabar en un log.
-    override fun toString(): String = "AddMealForm(date=$date, mealType=$mealType, kind=$kind, picking=$picking)"
+    override fun toString(): String =
+        "AddMealForm(date=$date, mealType=$mealType, kind=$kind, picking=$picking, " +
+            "editing=${editingId != null})"
 }
 
 /** Hoja o diálogo abierto encima de la semana; solo hay uno a la vez. */
 sealed interface MealPlanDialog {
     data object None : MealPlanDialog
 
+    /**
+     * La misma hoja para añadir o editar: [AddMealForm.editingId] dice cuál.
+     * Al editar cambia el día (cualquier fecha), el tipo de comida, las
+     * raciones y la nota; no hay hoja aparte para mover.
+     */
     data class Add(val form: AddMealForm) : MealPlanDialog
-
-    /** Mover [meal]: [date] y [mealType] son el destino elegido. */
-    data class Move(val meal: MealPlanMealView, val date: LocalDate, val mealType: MealType) : MealPlanDialog
 
     data class ConfirmDelete(val meal: MealPlanMealView) : MealPlanDialog
 }
@@ -48,12 +60,18 @@ sealed interface MealPlanDialog {
 /** Aviso corto al terminar algo; la pantalla lo anuncia y lo da por visto con [MealPlanViewModel.onNoticeShown]. */
 enum class MealPlanNotice {
     Added,
-    Moved,
+    Edited,
+
+    /**
+     * Se guardó en un día de otra semana: la semana a la vista no cambia y la
+     * pantalla ofrece «Ver esa semana».
+     */
+    MovedOtherWeek,
     Deleted,
 
     /**
-     * La comida a mover ya no está: el núcleo no la encontró en la semana
-     * cargada (o el servidor contestó 404). Hay que recargar la semana.
+     * La comida a editar o a quitar ya no está: el núcleo no la encontró en la
+     * semana cargada (o el servidor contestó 404). Hay que recargar la semana.
      */
     EntryMissing,
 }
@@ -70,4 +88,15 @@ class MealPlanUiState(
     val dialog: MealPlanDialog,
     val picker: RecipePickerUiState,
     val notice: MealPlanNotice?,
+    /**
+     * Sube con cada aviso nuevo, aunque sea del mismo tipo: es la clave con la
+     * que la pantalla vuelve a lanzar la confirmación (dos comidas añadidas
+     * seguidas se anuncian las dos, no una).
+     */
+    val noticeId: Long = 0L,
+    /**
+     * Día del aviso [MealPlanNotice.MovedOtherWeek]: la pantalla ofrece «Ver esa
+     * semana» cuando no es null. Sin él, el aviso no lleva acción.
+     */
+    val noticeDate: LocalDate? = null,
 )

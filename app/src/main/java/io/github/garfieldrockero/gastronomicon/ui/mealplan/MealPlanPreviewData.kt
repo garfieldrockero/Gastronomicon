@@ -1,6 +1,7 @@
 package io.github.garfieldrockero.gastronomicon.ui.mealplan
 
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanActionFailure
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanInputProblem
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanOperation
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanPhase
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanProblem
@@ -69,6 +70,7 @@ internal object MealPlanPreviewData {
         dialog = MealPlanDialog.None,
         picker = picker(),
         notice = null,
+        noticeId = 0L,
     )
 
     /** Semana con comidas; los parámetros dejan probar la recarga fallida, un fallo al guardar o «guardando». */
@@ -114,6 +116,38 @@ internal object MealPlanPreviewData {
     fun maybeCreated(): MealPlanActionFailure = MealPlanActionFailure(
         MealPlanOperation.Create,
         MealPlanProblem.MaybeCreated(ConnectionProblem.ServerNotResponding),
+    )
+
+    /** Hoja de editar una comida con receta: el nombre viene de la vista, ya saneado. */
+    fun editRecipeForm(): AddMealForm = AddMealForm(
+        date = TODAY,
+        mealType = MealType.LUNCH,
+        kind = AddKind.Recipe,
+        recipe = PickedRecipe(RECIPE_RICE, "Arroz con verduras"),
+        title = "",
+        text = "",
+        scaleText = "2",
+        editingId = 4L,
+    )
+
+    /** Hoja de editar una nota: sin receta ni raciones. */
+    fun editNoteForm(): AddMealForm = AddMealForm(
+        date = WEEK_START,
+        mealType = MealType.DINNER,
+        kind = AddKind.Note,
+        title = "Sobras de las lentejas",
+        text = "",
+        editingId = 2L,
+    )
+
+    /** La misma hoja con el día ya cambiado a otra semana y a otro año: enseña el día que se guardará. */
+    fun editRecipeOtherWeekForm(): AddMealForm =
+        editRecipeForm().copy(date = LocalDate.of(2027, 1, 6))
+
+    /** Fallo de raciones al editar: el núcleo rechaza el número y la hoja marca el campo. */
+    fun invalidScale(): MealPlanActionFailure = MealPlanActionFailure(
+        MealPlanOperation.Edit,
+        MealPlanProblem.InvalidInput(MealPlanInputProblem.InvalidRecipeScale),
     )
 
     private fun recipe(id: String, slug: String, name: String, total: String) = RecipeSummary(

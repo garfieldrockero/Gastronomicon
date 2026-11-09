@@ -81,10 +81,12 @@ class MealPlanActions(
     val onToday: () -> Unit = {},
     val onOpenSettings: () -> Unit = {},
     val onAddClick: (LocalDate?) -> Unit = {},
-    val onMoveClick: (MealPlanMealView) -> Unit = {},
+    val onEditClick: (MealPlanMealView) -> Unit = {},
     val onDeleteClick: (MealPlanMealView) -> Unit = {},
     val onDismissActionFailure: () -> Unit = {},
     val onNoticeShown: () -> Unit = {},
+    /** «Ver esa semana» del aviso: la comida se guardó en otra semana. */
+    val onShowNoticeWeek: () -> Unit = {},
     val sheets: MealPlanSheetActions = MealPlanSheetActions(),
 )
 
@@ -113,26 +115,39 @@ fun MealPlanScreen(
     val snackbar = remember { SnackbarHostState() }
 
     // Confirmación al terminar: Snackbar (TalkBack lo anuncia) que se da por visto al cerrarse.
+    // La clave es el contador, no el tipo: dos comidas añadidas seguidas se anuncian las dos.
     val addedText = stringResource(R.string.plan_notice_added)
-    val movedText = stringResource(R.string.plan_notice_moved)
+    val editedText = stringResource(R.string.plan_notice_edited)
+    val movedOtherWeekText = stringResource(R.string.plan_notice_moved_other_week)
     val deletedText = stringResource(R.string.plan_notice_deleted)
     val missingText = stringResource(R.string.plan_action_entry_missing)
     val reloadLabel = stringResource(R.string.plan_action_reload)
-    LaunchedEffect(state.notice) {
+    val viewWeekLabel = stringResource(R.string.plan_notice_view_week)
+    LaunchedEffect(state.noticeId) {
         val notice = state.notice ?: return@LaunchedEffect
         val missing = notice == MealPlanNotice.EntryMissing
+        // El aviso de otra semana lleva a verla, si se sabe a cuál fue.
+        val otherWeek = notice == MealPlanNotice.MovedOtherWeek && state.noticeDate != null
         val result = snackbar.showSnackbar(
             message = when (notice) {
                 MealPlanNotice.Added -> addedText
-                MealPlanNotice.Moved -> movedText
+                MealPlanNotice.Edited -> editedText
+                MealPlanNotice.MovedOtherWeek -> movedOtherWeekText
                 MealPlanNotice.Deleted -> deletedText
                 MealPlanNotice.EntryMissing -> missingText
             },
-            actionLabel = if (missing) reloadLabel else null,
-            duration = if (missing) SnackbarDuration.Long else SnackbarDuration.Short,
+            actionLabel = when {
+                missing -> reloadLabel
+                otherWeek -> viewWeekLabel
+                else -> null
+            },
+            // Con acción hay que dar tiempo a pulsarla.
+            duration = if (missing || otherWeek) SnackbarDuration.Long else SnackbarDuration.Short,
         )
         actions.onNoticeShown()
-        if (result == SnackbarResult.ActionPerformed) actions.onRefresh()
+        if (result == SnackbarResult.ActionPerformed) {
+            if (otherWeek) actions.onShowNoticeWeek() else actions.onRefresh()
+        }
     }
 
     Scaffold(
@@ -173,7 +188,9 @@ fun MealPlanScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            if (week != null) {
+            // Con la semana vacía ya hay un «Añadir la primera comida»: dos atajos
+            // al mismo sitio sobran y el flotante tapa el texto.
+            if (week != null && week.hasMeals) {
                 ExtendedFloatingActionButton(
                     onClick = { if (!plan.isBusy) actions.onAddClick(null) },
                     icon = {
@@ -308,7 +325,7 @@ private fun WeekContent(
                         day = day,
                         busy = plan.isBusy,
                         onAdd = { actions.onAddClick(day.date) },
-                        onMove = actions.onMoveClick,
+                        onEdit = actions.onEditClick,
                         onDelete = actions.onDeleteClick,
                     )
                 }
@@ -361,7 +378,7 @@ private fun DayCard(
     day: MealPlanDayView,
     busy: Boolean,
     onAdd: () -> Unit,
-    onMove: (MealPlanMealView) -> Unit,
+    onEdit: (MealPlanMealView) -> Unit,
     onDelete: (MealPlanMealView) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -418,7 +435,12 @@ private fun DayCard(
                 )
             }
             day.meals.forEach { meal ->
-                MealItem(meal = meal, busy = busy, onMove = { onMove(meal) }, onDelete = { onDelete(meal) })
+                MealItem(
+                    meal = meal,
+                    busy = busy,
+                    onEdit = { onEdit(meal) },
+                    onDelete = { onDelete(meal) },
+                )
             }
             val addDescription = stringResource(R.string.plan_add_to_day_description, day.dayLabel)
             TextButton(
@@ -444,7 +466,7 @@ private fun DayCard(
 private fun MealItem(
     meal: MealPlanMealView,
     busy: Boolean,
-    onMove: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -487,17 +509,19 @@ private fun MealItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val moveDescription = stringResource(R.string.plan_meal_move_description, meal.title)
+            // El nombre accesible empieza por el verbo visible y dice de qué comida
+            // habla: con tres comidas, «Editar» a secas no distingue ninguna.
+            val editDescription = stringResource(R.string.plan_meal_edit_description, meal.title)
             val deleteDescription = stringResource(R.string.plan_meal_delete_description, meal.title)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.small)) {
                 TextButton(
-                    onClick = onMove,
+                    onClick = onEdit,
                     enabled = !busy,
                     modifier = Modifier
                         .heightIn(min = Sizes.MinTouchTarget)
-                        .semantics { contentDescription = moveDescription },
+                        .semantics { contentDescription = editDescription },
                 ) {
-                    Text(stringResource(R.string.plan_meal_move))
+                    Text(stringResource(R.string.plan_meal_edit))
                 }
                 TextButton(
                     onClick = onDelete,
@@ -543,8 +567,12 @@ private fun WeekBar(
                     .heightIn(min = Sizes.MinTouchTarget)
                     .semantics { contentDescription = previous },
             ) {
-                // La flecha es solo adorno: el lector dice «Semana anterior».
-                Text("← $previous")
+                // El chevrón es solo adorno: el lector dice «Semana anterior».
+                Icon(
+                    painter = painterResource(R.drawable.ic_chevron_left),
+                    contentDescription = null,
+                )
+                Text(text = previous, modifier = Modifier.padding(start = Spacing.small))
             }
             OutlinedButton(
                 onClick = onNext,
@@ -554,7 +582,11 @@ private fun WeekBar(
                     .heightIn(min = Sizes.MinTouchTarget)
                     .semantics { contentDescription = next },
             ) {
-                Text("$next →")
+                Text(text = next, modifier = Modifier.padding(end = Spacing.small))
+                Icon(
+                    painter = painterResource(R.drawable.ic_chevron_right),
+                    contentDescription = null,
+                )
             }
         }
     }

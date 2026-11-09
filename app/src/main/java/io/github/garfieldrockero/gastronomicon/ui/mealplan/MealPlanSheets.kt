@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,9 +13,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,8 +26,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -33,24 +39,42 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import io.github.garfieldrockero.gastronomicon.R
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDates
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDayView
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanInputProblem
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanMealView
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanOperation
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanProblem
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanState
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanWeekView
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealType
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummaryRow
@@ -62,8 +86,9 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
-/** Acciones de las hojas (añadir, mover) y del diálogo de quitar. */
+/** Acciones de las hojas (añadir o editar) y del diálogo de quitar. */
 class MealPlanSheetActions(
     val onDismiss: () -> Unit = {},
     val onAddDateChange: (LocalDate) -> Unit = {},
@@ -71,6 +96,7 @@ class MealPlanSheetActions(
     val onAddKindChange: (AddKind) -> Unit = {},
     val onAddTitleChange: (String) -> Unit = {},
     val onAddTextChange: (String) -> Unit = {},
+    val onAddScaleChange: (String) -> Unit = {},
     val onPickRecipeOpen: () -> Unit = {},
     val onPickRecipeBack: () -> Unit = {},
     val onRecipePicked: (id: String, name: String) -> Unit = { _, _ -> },
@@ -79,9 +105,6 @@ class MealPlanSheetActions(
     val onPickerRetry: () -> Unit = {},
     val onPickerLoadMore: () -> Unit = {},
     val onConfirmAdd: () -> Unit = {},
-    val onMoveDateChange: (LocalDate) -> Unit = {},
-    val onMoveTypeChange: (MealType) -> Unit = {},
-    val onConfirmMove: () -> Unit = {},
     val onConfirmDelete: () -> Unit = {},
 )
 
@@ -105,19 +128,6 @@ fun MealPlanSheets(
                 form = dialog.form,
                 plan = state.plan,
                 picker = state.picker,
-                actions = actions,
-                onOpenSettings = onOpenSettings,
-                onReload = onReload,
-            )
-        }
-
-        is MealPlanDialog.Move -> ModalBottomSheet(
-            onDismissRequest = actions.onDismiss,
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        ) {
-            MoveMealContent(
-                move = dialog,
-                plan = state.plan,
                 actions = actions,
                 onOpenSettings = onOpenSettings,
                 onReload = onReload,
@@ -170,109 +180,232 @@ private fun AddMealFormBody(
     modifier: Modifier = Modifier,
 ) {
     val saving = plan.isSaving
+    val editing = form.editingId != null
+    // Editar no cambia de «receta» a «nota» a la ligera: quitaría la receta de
+    // la entrada. La clase de comida solo se elige al añadir.
+    val operation = if (editing) MealPlanOperation.Edit else MealPlanOperation.Create
+    // El calendario es una hoja aparte; con rememberSaveable, rotar el móvil no lo cierra.
+    var pickingDay by rememberSaveable { mutableStateOf(false) }
+    // El día elegido puede quedar fuera de la semana a la vista (solo al editar).
+    val outsideWeek = plan.week?.contains(form.date) == false
+    val scaleInvalid = hasInvalidScale(plan, operation)
+    // El calendario se abre sin teclado delante: si no, se queda encima de la hoja.
+    val focusManager = LocalFocusManager.current
+    // Las raciones son el último campo y el pie de la hoja no se mueve: con el
+    // teclado abierto se traen a la vista al tocarlas.
+    val scaleRequester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .imePadding()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = Spacing.medium)
             .windowInsetsPadding(WindowInsets.navigationBars),
-        verticalArrangement = Arrangement.spacedBy(Spacing.medium),
     ) {
-        SheetTitle(stringResource(R.string.plan_add_title))
-        FailureFor(MealPlanOperation.Create, plan, onOpenSettings, onReload)
+        Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(Spacing.medium),
+        ) {
+            SheetTitle(stringResource(if (editing) R.string.plan_edit_title else R.string.plan_add_title))
 
-        plan.week?.let { week ->
-            DayChoices(
-                days = week.days,
-                selected = form.date,
-                title = stringResource(R.string.plan_add_day),
-                onSelect = actions.onAddDateChange,
-            )
-        }
-        TypeChoices(selected = form.mealType, onSelect = actions.onAddTypeChange)
-
-        SectionLabel(stringResource(R.string.plan_add_kind))
-        ChoiceRow {
-            ChoiceChip(
-                label = stringResource(R.string.plan_add_kind_recipe),
-                selected = form.kind == AddKind.Recipe,
-                onClick = { actions.onAddKindChange(AddKind.Recipe) },
-            )
-            ChoiceChip(
-                label = stringResource(R.string.plan_add_kind_note),
-                selected = form.kind == AddKind.Note,
-                onClick = { actions.onAddKindChange(AddKind.Note) },
-            )
-        }
-
-        when (form.kind) {
-            AddKind.Recipe -> {
-                val recipe = form.recipe
-                Text(
-                    text = recipe?.name ?: stringResource(R.string.plan_add_recipe_none),
-                    style = if (recipe != null) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyLarge,
-                    color = if (recipe != null) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+            plan.week?.let { week ->
+                DayChoices(
+                    days = week.days,
+                    selected = form.date,
+                    today = plan.today,
+                    title = stringResource(R.string.plan_add_day),
+                    onSelect = actions.onAddDateChange,
                 )
+            }
+
+            if (editing) {
+                // Un toque para un día de la semana a la vista y «Otra fecha…» para
+                // cualquier otro, también de otra semana.
                 OutlinedButton(
-                    onClick = actions.onPickRecipeOpen,
+                    onClick = {
+                        // Sin foco no queda teclado tapando el calendario.
+                        focusManager.clearFocus()
+                        pickingDay = true
+                    },
                     enabled = !saving,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = Sizes.MinTouchTarget),
                 ) {
+                    Text(stringResource(R.string.plan_edit_other_date))
+                }
+                if (outsideWeek) {
                     Text(
-                        stringResource(
-                            if (recipe == null) R.string.plan_add_recipe_pick else R.string.plan_add_recipe_change,
+                        text = stringResource(
+                            R.string.plan_edit_day_outside,
+                            MealPlanWeekView.dayLabel(form.date, plan.today),
                         ),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 }
             }
 
-            AddKind.Note -> {
-                OutlinedTextField(
-                    value = form.title,
-                    onValueChange = actions.onAddTitleChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.plan_add_note_title)) },
-                    placeholder = { Text(stringResource(R.string.plan_add_note_title_hint)) },
-                    enabled = !saving,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                )
-                OutlinedTextField(
-                    value = form.text,
-                    onValueChange = actions.onAddTextChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.plan_add_note_text)) },
-                    enabled = !saving,
-                    minLines = 2,
-                )
+            TypeChoices(selected = form.mealType, onSelect = actions.onAddTypeChange)
+
+            if (!editing) {
+                SectionLabel(stringResource(R.string.plan_add_kind))
+                ChoiceRow {
+                    ChoiceChip(
+                        label = stringResource(R.string.plan_add_kind_recipe),
+                        selected = form.kind == AddKind.Recipe,
+                        onClick = { actions.onAddKindChange(AddKind.Recipe) },
+                    )
+                    ChoiceChip(
+                        label = stringResource(R.string.plan_add_kind_note),
+                        selected = form.kind == AddKind.Note,
+                        onClick = { actions.onAddKindChange(AddKind.Note) },
+                    )
+                }
+            }
+
+            when (form.kind) {
+                AddKind.Recipe -> {
+                    val recipe = form.recipe
+                    Text(
+                        text = recipe?.name ?: stringResource(R.string.plan_add_recipe_none),
+                        style = if (recipe != null) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyLarge,
+                        color = if (recipe != null) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    OutlinedButton(
+                        onClick = actions.onPickRecipeOpen,
+                        enabled = !saving,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Sizes.MinTouchTarget),
+                    ) {
+                        Text(
+                            stringResource(
+                                if (recipe == null) R.string.plan_add_recipe_pick else R.string.plan_add_recipe_change,
+                            ),
+                        )
+                    }
+                    // Título y nota no sustituyen a la receta: la vista los enseña
+                    // debajo de su nombre, y las ayudas lo dicen antes de escribirlos.
+                    // Las raciones se piden como texto y el núcleo decide si valen.
+                    OutlinedTextField(
+                        value = form.title,
+                        onValueChange = actions.onAddTitleChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.plan_recipe_title)) },
+                        supportingText = { Text(stringResource(R.string.plan_recipe_title_hint)) },
+                        enabled = !saving,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                            imeAction = ImeAction.Next,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = form.text,
+                        onValueChange = actions.onAddTextChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.plan_recipe_text)) },
+                        supportingText = { Text(stringResource(R.string.plan_recipe_text_hint)) },
+                        enabled = !saving,
+                        minLines = 2,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    )
+                    ScaleField(
+                        value = form.scaleText,
+                        onValueChange = actions.onAddScaleChange,
+                        enabled = !saving,
+                        invalid = scaleInvalid,
+                        modifier = Modifier.bringIntoViewRequester(scaleRequester),
+                        onFocused = { scope.launch { scaleRequester.bringIntoView() } },
+                    )
+                }
+
+                AddKind.Note -> {
+                    OutlinedTextField(
+                        value = form.title,
+                        onValueChange = actions.onAddTitleChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.plan_add_note_title)) },
+                        placeholder = { Text(stringResource(R.string.plan_add_note_title_hint)) },
+                        enabled = !saving,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                            imeAction = ImeAction.Next,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = form.text,
+                        onValueChange = actions.onAddTextChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.plan_add_note_text)) },
+                        enabled = !saving,
+                        minLines = 2,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    )
+                }
             }
         }
 
-        Button(
-            onClick = actions.onConfirmAdd,
-            enabled = !saving,
+        // «Guardar cambios» y «Cancelar» no se van con el scroll: siguen a la
+        // vista con el texto grande. El fallo se queda pegado al botón.
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = Sizes.MinTouchTarget),
+                .padding(top = Spacing.medium),
+            verticalArrangement = Arrangement.spacedBy(Spacing.small),
         ) {
-            if (saving) BusyIndicator()
-            Text(stringResource(if (saving) R.string.plan_saving else R.string.plan_add_confirm))
+            FailureFor(operation, plan, onOpenSettings, onReload)
+
+            Button(
+                onClick = actions.onConfirmAdd,
+                enabled = !saving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                if (saving) BusyIndicator()
+                Text(
+                    stringResource(
+                        when {
+                            saving -> R.string.plan_saving
+                            editing -> R.string.plan_edit_confirm
+                            else -> R.string.plan_add_confirm
+                        },
+                    ),
+                )
+            }
+            TextButton(
+                onClick = actions.onDismiss,
+                enabled = !saving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.plan_cancel))
+            }
         }
-        TextButton(
-            onClick = actions.onDismiss,
-            enabled = !saving,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = Sizes.MinTouchTarget),
-        ) {
-            Text(stringResource(R.string.plan_cancel))
-        }
+    }
+
+    if (pickingDay) {
+        DayPickerSheet(
+            initial = form.date,
+            today = plan.today,
+            onDismiss = { pickingDay = false },
+            onPick = { date ->
+                actions.onAddDateChange(date)
+                pickingDay = false
+            },
+        )
     }
 }
 
@@ -412,13 +545,14 @@ private fun RecipePickerContent(
 
 @Composable
 private fun PickerRow(row: RecipeSummaryRow, onPick: () -> Unit) {
-    val description = stringResource(R.string.plan_picker_choose_description, row.name)
+    val action = stringResource(R.string.plan_picker_choose_description, row.name)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = PICKER_ROW_MIN_HEIGHT)
-            .clickable(onClick = onPick)
-            .semantics { contentDescription = description },
+            // El nombre y el tiempo se leen tal cual; la acción va como pista,
+            // sin pisar el texto visible (el control por voz sigue encontrándolo).
+            .clickable(onClickLabel = action, role = Role.Button, onClick = onPick),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.medium,
     ) {
@@ -443,62 +577,88 @@ private fun PickerRow(row: RecipeSummaryRow, onPick: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------- mover
+// ------------------------------------------------------------ elegir el día
 
+/**
+ * Cualquier día, también de otra semana.
+ *
+ * Va en una hoja propia y no en un `DatePickerDialog`: con el texto al 200 % el
+ * diálogo recortaba el calendario y sus botones. Aquí el calendario se lleva
+ * todo el alto que sobra y «Elegir este día» y «Cancelar» quedan fijos debajo,
+ * siempre alcanzables. Con el texto grande el calendario no cabe entero, así que
+ * la hoja abre escribiendo la fecha, que ocupa mucho menos; el selector de modo
+ * sigue ahí para quien prefiera el calendario. El título y el día elegido los
+ * compone el núcleo.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MoveMealContent(
-    move: MealPlanDialog.Move,
-    plan: MealPlanState,
-    actions: MealPlanSheetActions,
-    onOpenSettings: () -> Unit,
-    onReload: () -> Unit,
-    modifier: Modifier = Modifier,
+private fun DayPickerSheet(
+    initial: LocalDate,
+    today: LocalDate,
+    onDismiss: () -> Unit,
+    onPick: (LocalDate) -> Unit,
 ) {
-    val saving = plan.isSaving
-    val week = plan.week
-    val currentDay = week?.days?.firstOrNull { it.date == move.meal.date }?.dayLabel.orEmpty()
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.medium)
-            .windowInsetsPadding(WindowInsets.navigationBars),
-        verticalArrangement = Arrangement.spacedBy(Spacing.medium),
+    val largeText = LocalDensity.current.fontScale > LARGE_TEXT_FONT_SCALE
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = initial.toPickerMillis(),
+        yearRange = MealPlanDates.MIN_YEAR..MealPlanDates.MAX_YEAR,
+        initialDisplayMode = if (largeText) DisplayMode.Input else DisplayMode.Picker,
+    )
+    val selected = state.selectedDateMillis?.toPickerDate() ?: initial
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        SheetTitle(stringResource(R.string.plan_move_title))
-        Text(
-            text = stringResource(R.string.plan_move_text, move.meal.title, currentDay),
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        FailureFor(MealPlanOperation.Move, plan, onOpenSettings, onReload)
-        if (week != null) {
-            DayChoices(
-                days = week.days,
-                selected = move.date,
-                title = stringResource(R.string.plan_add_day),
-                onSelect = actions.onMoveDateChange,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(PICKER_SHEET_HEIGHT_FRACTION)
+                .padding(horizontal = Spacing.medium)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+            verticalArrangement = Arrangement.spacedBy(Spacing.medium),
+        ) {
+            DatePicker(
+                state = state,
+                // El alto que sobra es para el calendario y él mismo desplaza sus
+                // filas por dentro; `weight` le pone el tope para que ese
+                // desplazamiento exista. Un `verticalScroll` por fuera lo mediría
+                // sin tope de alto y el selector de años, que es una lista
+                // perezosa, no se puede medir así.
+                modifier = Modifier.weight(1f),
+                showModeToggle = true,
+                title = {
+                    Text(
+                        text = stringResource(R.string.plan_date_picker_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(horizontal = Spacing.large, vertical = Spacing.medium),
+                    )
+                },
+                headline = {
+                    Text(
+                        text = MealPlanWeekView.dayLabel(selected, today),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier
+                            .padding(horizontal = Spacing.large, vertical = Spacing.small)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                },
             )
-        }
-        TypeChoices(selected = move.mealType, onSelect = actions.onMoveTypeChange)
-        Button(
-            onClick = actions.onConfirmMove,
-            enabled = !saving,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = Sizes.MinTouchTarget),
-        ) {
-            if (saving) BusyIndicator()
-            Text(stringResource(if (saving) R.string.plan_saving else R.string.plan_move_confirm))
-        }
-        TextButton(
-            onClick = actions.onDismiss,
-            enabled = !saving,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = Sizes.MinTouchTarget),
-        ) {
-            Text(stringResource(R.string.plan_cancel))
+            Button(
+                onClick = { onPick(selected) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.plan_date_picker_confirm))
+            }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.plan_cancel))
+            }
         }
     }
 }
@@ -592,13 +752,19 @@ private fun FailureFor(
 private fun DayChoices(
     days: List<MealPlanDayView>,
     selected: LocalDate,
+    today: LocalDate,
     title: String,
     onSelect: (LocalDate) -> Unit,
 ) {
     SectionLabel(title)
     ChoiceRow {
         days.forEach { day ->
-            ChoiceChip(label = day.dayLabel, selected = day.date == selected, onClick = { onSelect(day.date) })
+            ChoiceChip(
+                // Con el año si el día no es del año en curso; lo compone el núcleo.
+                label = MealPlanWeekView.dayLabel(day.date, today),
+                selected = day.date == selected,
+                onClick = { onSelect(day.date) },
+            )
         }
     }
 }
@@ -625,26 +791,110 @@ private fun ChoiceRow(content: @Composable () -> Unit) {
     }
 }
 
-/** Opción de un grupo; la marca «✓» acompaña al color para que no dependa solo de él. */
+/**
+ * Opción de un grupo. La marca es un icono (no un carácter «✓», que en algunos
+ * móviles se dibuja como emoji) y acompaña al color para que el estado no
+ * dependa solo del tono. FilterChip ya anuncia «seleccionado» al lector.
+ *
+ * El icono se reserva siempre, invisible cuando no está marcado: así el chip no
+ * se ensancha al elegirlo y los demás no saltan de línea.
+ */
 @Composable
 private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
         onClick = onClick,
         modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
-        label = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (selected) {
-                    // Adorno: FilterChip ya dice «seleccionado» al lector de pantalla.
-                    Text(text = "✓ ", modifier = Modifier.clearAndSetSemantics { })
-                }
-                Text(text = label, style = MaterialTheme.typography.bodyLarge)
-            }
+        label = { Text(text = label, style = MaterialTheme.typography.bodyLarge) },
+        leadingIcon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_check),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(FilterChipDefaults.IconSize)
+                    .alpha(if (selected) 1f else 0f),
+            )
         },
     )
 }
 
+/**
+ * Raciones escritas a mano; el núcleo valida el número al confirmar. Si lo
+ * rechaza, el aviso va en el propio campo (donde se corrige) y no solo junto
+ * al botón. Al tocarlo se trae a la vista: es el último campo de la hoja y el
+ * pie no se aparta con el teclado.
+ */
+@Composable
+private fun ScaleField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    invalid: Boolean,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+) {
+    val focusManager = LocalFocusManager.current
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier
+            .fillMaxWidth()
+            .onFocusChanged { focus -> if (focus.isFocused) onFocused() },
+        label = { Text(stringResource(R.string.plan_scale_label)) },
+        placeholder = { Text(stringResource(R.string.plan_scale_placeholder)) },
+        supportingText = {
+            Text(
+                stringResource(
+                    if (invalid) {
+                        planInputTextRes(MealPlanInputProblem.InvalidRecipeScale)
+                    } else {
+                        R.string.plan_scale_hint
+                    },
+                ),
+            )
+        },
+        isError = invalid,
+        enabled = enabled,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Decimal,
+            imeAction = ImeAction.Done,
+        ),
+        // «Hecho» cierra el teclado; antes no hacía nada.
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+    )
+}
+
+/**
+ * El núcleo ha rechazado las raciones de esta hoja: se marca el campo, que es
+ * donde se arreglan. Aquí no se valida nada; solo se refleja el fallo.
+ */
+private fun hasInvalidScale(plan: MealPlanState, operation: MealPlanOperation): Boolean {
+    val failure = plan.actionFailure ?: return false
+    if (failure.operation != operation) return false
+    val problem = failure.problem
+    return problem is MealPlanProblem.InvalidInput &&
+        problem.problem == MealPlanInputProblem.InvalidRecipeScale
+}
+
+// El selector de fecha trabaja en milisegundos UTC a medianoche, como Material 3.
+private const val MILLIS_PER_DAY = 86_400_000L
+
+private fun LocalDate.toPickerMillis(): Long = toEpochDay() * MILLIS_PER_DAY
+
+private fun Long.toPickerDate(): LocalDate = LocalDate.ofEpochDay(Math.floorDiv(this, MILLIS_PER_DAY))
+
 private const val PICKER_HEIGHT_FRACTION = 0.9f
+
+/** La hoja del calendario: casi toda la pantalla, con los botones siempre abajo. */
+private const val PICKER_SHEET_HEIGHT_FRACTION = 0.92f
+
+/**
+ * A partir de este tamaño de letra el calendario no cabe entero en la hoja: se
+ * abre escribiendo la fecha, que es más corta y se maneja mejor a 2×.
+ */
+private const val LARGE_TEXT_FONT_SCALE = 1.3f
+
 private val PICKER_ROW_MIN_HEIGHT = Sizes.MinTouchTarget
 
 // ------------------------------------------------------------------- previews
@@ -693,6 +943,57 @@ private fun AddFailedPreview() {
                 plan = MealPlanPreviewData.ready(
                     actionFailure = MealPlanPreviewData.maybeCreated(),
                 ).plan,
+                picker = MealPlanPreviewData.picker(),
+                actions = MealPlanSheetActions(),
+                onOpenSettings = {},
+                onReload = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 900)
+@Composable
+private fun EditRecipePreview() {
+    GastronomiconTheme {
+        Surface {
+            AddMealContent(
+                form = MealPlanPreviewData.editRecipeForm(),
+                plan = MealPlanPreviewData.ready().plan,
+                picker = MealPlanPreviewData.picker(),
+                actions = MealPlanSheetActions(),
+                onOpenSettings = {},
+                onReload = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 900, fontScale = 2f)
+@Composable
+private fun EditRecipeLargeTextPreview() {
+    GastronomiconTheme {
+        Surface {
+            AddMealContent(
+                form = MealPlanPreviewData.editRecipeForm(),
+                plan = MealPlanPreviewData.ready().plan,
+                picker = MealPlanPreviewData.picker(),
+                actions = MealPlanSheetActions(),
+                onOpenSettings = {},
+                onReload = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun EditNoteLargeTextPreview() {
+    GastronomiconTheme {
+        Surface {
+            AddMealContent(
+                form = MealPlanPreviewData.editNoteForm(),
+                plan = MealPlanPreviewData.ready().plan,
                 picker = MealPlanPreviewData.picker(),
                 actions = MealPlanSheetActions(),
                 onOpenSettings = {},
@@ -753,21 +1054,63 @@ private fun PickerEmptyPreview() {
     }
 }
 
-@Preview(showBackground = true, widthDp = 360)
+@Preview(showBackground = true, widthDp = 360, heightDp = 900)
 @Composable
-private fun MovePreview() {
+private fun EditOtherWeekPreview() {
     GastronomiconTheme {
         Surface {
-            val plan = MealPlanPreviewData.ready().plan
-            val meal = plan.week!!.days.first { it.meals.isNotEmpty() }.meals.first()
-            MoveMealContent(
-                move = MealPlanDialog.Move(meal, meal.date, meal.mealType),
-                plan = plan,
+            AddMealContent(
+                form = MealPlanPreviewData.editRecipeOtherWeekForm(),
+                plan = MealPlanPreviewData.ready().plan,
+                picker = MealPlanPreviewData.picker(),
                 actions = MealPlanSheetActions(),
                 onOpenSettings = {},
                 onReload = {},
             )
         }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 900)
+@Composable
+private fun EditScaleErrorPreview() {
+    GastronomiconTheme {
+        Surface {
+            AddMealContent(
+                form = MealPlanPreviewData.editRecipeForm().copy(scaleText = "dos"),
+                plan = MealPlanPreviewData.ready(actionFailure = MealPlanPreviewData.invalidScale()).plan,
+                picker = MealPlanPreviewData.picker(),
+                actions = MealPlanSheetActions(),
+                onOpenSettings = {},
+                onReload = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 640)
+@Composable
+private fun DayPickerSmallScreenPreview() {
+    GastronomiconTheme {
+        DayPickerSheet(
+            initial = MealPlanPreviewData.TODAY,
+            today = MealPlanPreviewData.TODAY,
+            onDismiss = {},
+            onPick = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 780, fontScale = 2f)
+@Composable
+private fun DayPickerLargeTextPreview() {
+    GastronomiconTheme {
+        DayPickerSheet(
+            initial = MealPlanPreviewData.TODAY,
+            today = MealPlanPreviewData.TODAY,
+            onDismiss = {},
+            onPick = {},
+        )
     }
 }
 

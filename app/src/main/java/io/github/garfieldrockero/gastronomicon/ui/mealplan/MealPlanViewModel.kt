@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanController
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDraft
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanInputProblem
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanMealView
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanOperation
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanProblem
@@ -40,10 +41,14 @@ import java.time.LocalDate
  *
  * - Cada operación pide una fuente nueva con [MealPlanAccess] y un cliente nuevo
  *   con [ClientAccess] (nunca se guardan), como el resto de pantallas.
- * - Mover y editar van **por id**: el núcleo busca la entrada vigente de la
- *   semana (con su JSON crudo, `groupId` y `userId`) y este ViewModel no guarda
- *   ninguna [PlannedMeal]. Si el id ya no está, el estado trae
+ * - Editar va **por id**: el núcleo busca la entrada vigente de la semana (con
+ *   su JSON crudo, `groupId` y `userId`). Si el id ya no está, el estado trae
  *   [MealPlanProblem.NotFound] y se avisa con [MealPlanNotice.EntryMissing].
+ * - Para **rellenar la hoja de editar** hace falta el `recipeId`, el título y
+ *   la nota originales, que `MealPlanMealView` no lleva (solo el texto ya
+ *   compuesto). La fuente recuerda la última lectura por id: son datos ya
+ *   saneados que el propio núcleo acaba de entregar, no una regla de negocio.
+ *   Borrar no depende de esa caché.
  * - Mientras hay operaciones en marcha, un sondeo corto publica el estado para
  *   que «cargando» y «guardando» se vean antes de que acabe la petición.
  * - Elegir receta reutiliza [RecipeListController] (búsqueda, filtro y páginas
@@ -68,11 +73,18 @@ class MealPlanViewModel(
     @Volatile
     private var epoch = 0L
 
+    // La fuente de la sesión vigente; se cambia con ella y recuerda la última
+    // lectura por id para poder rellenar la hoja de editar.
+    private lateinit var planSource: PlanSource
     private var controller: MealPlanController = newController()
     private var picker: RecipeListController = newPicker()
     private var pickerQuery = ""
     private var dialog: MealPlanDialog = MealPlanDialog.None
     private var notice: MealPlanNotice? = null
+
+    // Día del aviso «se fue a otra semana»: con él, «Ver esa semana» sabe a dónde ir.
+    private var noticeDate: LocalDate? = null
+    private var noticeSeq = 0L
 
     private val _state = MutableStateFlow(snapshot())
     val state: StateFlow<MealPlanUiState> = _state.asStateFlow()
@@ -85,7 +97,8 @@ class MealPlanViewModel(
     private fun newController(): MealPlanController {
         // La fuente nace con la época de ahora: si reset() la supera, deja de pedir.
         val bornEpoch = epoch
-        return MealPlanController(PlanSource(planAccess, isCurrent = { epoch == bornEpoch }))
+        planSource = PlanSource(planAccess, isCurrent = { epoch == bornEpoch })
+        return MealPlanController(planSource)
     }
 
     private fun newPicker() = RecipeListController(
@@ -97,10 +110,19 @@ class MealPlanViewModel(
         dialog = dialog,
         picker = RecipePickerUiState(picker.state, pickerQuery),
         notice = notice,
+        noticeId = noticeSeq,
+        noticeDate = noticeDate,
     )
 
     private fun publish() {
         _state.value = snapshot()
+    }
+
+    /** Apunta el aviso y sube el contador: la pantalla lo anuncia aunque repita tipo. */
+    private fun showNotice(value: MealPlanNotice, date: LocalDate? = null) {
+        notice = value
+        noticeDate = date
+        noticeSeq++
     }
 
     // ------------------------------------------------------------- semana
@@ -130,6 +152,16 @@ class MealPlanViewModel(
         publish()
     }
 
+    /**
+     * «Ver esa semana» del aviso: lleva a la semana del día al que se guardó la
+     * comida. El núcleo normaliza el día al lunes de su semana.
+     */
+    fun onShowNoticeWeek() {
+        val date = noticeDate ?: return
+        noticeDate = null
+        launchPlan { it.showWeek(date) }
+    }
+
     // -------------------------------------------------------------- añadir
 
     /**
@@ -155,6 +187,13 @@ class MealPlanViewModel(
     fun onAddTitleChange(text: String) = updateForm { it.copy(title = text) }
 
     fun onAddTextChange(text: String) = updateForm { it.copy(text = text) }
+
+    /** Raciones escritas; el núcleo decide si el número vale al confirmar. */
+    fun onAddScaleChange(text: String) {
+        // Mientras se corrige el número, el aviso de ese campo ya sobra.
+        clearScaleFailure()
+        updateForm { it.copy(scaleText = text.take(MAX_SCALE_INPUT)) }
+    }
 
     fun onPickRecipeOpen() {
         updateForm { it.copy(picking = true) }
@@ -187,75 +226,72 @@ class MealPlanViewModel(
         launchPicker { it.loadMore() }
     }
 
+    /**
+     * Confirma la hoja: crea la comida o guarda los cambios de la que se está
+     * editando. El borrador lleva los textos tal cual y las raciones como
+     * número; el núcleo es quien valida y quien decide el fallo.
+     */
     fun onConfirmAdd() {
         val form = (dialog as? MealPlanDialog.Add)?.form ?: return
         val current = controller.state
         if (current.isBusy || current.week == null) return
-        val draft = when (form.kind) {
-            AddKind.Recipe -> MealPlanDraft(
-                date = form.date,
-                mealType = form.mealType,
-                recipeId = form.recipe?.id,
-            )
-            AddKind.Note -> MealPlanDraft(
-                date = form.date,
-                mealType = form.mealType,
-                title = form.title,
-                text = form.text,
-            )
-        }
-        launchPlan(onDone = { result ->
-            if (result.actionFailure == null) {
-                dialog = MealPlanDialog.None
-                notice = MealPlanNotice.Added
-            }
-        }) { it.add(draft) }
-    }
-
-    // --------------------------------------------------------------- mover
-
-    fun onMoveClick(meal: MealPlanMealView) {
-        if (controller.state.isBusy) return
-        controller.clearActionFailure()
-        dialog = MealPlanDialog.Move(meal, meal.date, meal.mealType)
-        publish()
-    }
-
-    fun onMoveDateChange(date: LocalDate) {
-        val current = dialog as? MealPlanDialog.Move ?: return
-        dialog = current.copy(date = date)
-        publish()
-    }
-
-    fun onMoveTypeChange(type: MealType) {
-        val current = dialog as? MealPlanDialog.Move ?: return
-        dialog = current.copy(mealType = type)
-        publish()
-    }
-
-    fun onConfirmMove() {
-        val move = dialog as? MealPlanDialog.Move ?: return
-        if (controller.state.isBusy) return
+        val hasRecipe = form.kind == AddKind.Recipe
+        val draft = MealPlanDraft(
+            date = form.date,
+            mealType = form.mealType,
+            recipeId = if (hasRecipe) form.recipe?.id else null,
+            title = form.title,
+            text = form.text,
+            recipeScale = if (hasRecipe) scaleOf(form.scaleText) else 1.0,
+        )
+        val editingId = form.editingId
         launchPlan(onDone = { result ->
             when (val failure = result.actionFailure) {
                 null -> {
                     dialog = MealPlanDialog.None
-                    notice = MealPlanNotice.Moved
+                    when {
+                        editingId == null -> showNotice(MealPlanNotice.Added)
+                        // Editada a un día de otra semana: la semana a la vista no
+                        // cambia, así que el aviso ofrece ir a verla.
+                        !weekContains(form.date) -> showNotice(MealPlanNotice.MovedOtherWeek, form.date)
+                        else -> showNotice(MealPlanNotice.Edited)
+                    }
                 }
-                // El núcleo no encontró la entrada por id (o el servidor contesta
-                // 404): ya no está. Se cierra la hoja y se avisa con la acción de
-                // recargar, sin repetir el mismo aviso en la semana.
                 else -> {
-                    val gone = failure.operation == MealPlanOperation.Move &&
+                    // Editar una entrada que ya no está: se cierra la hoja y se
+                    // invita a recargar, sin dejar el fallo repetido en la semana.
+                    val gone = editingId != null &&
+                        failure.operation == MealPlanOperation.Edit &&
                         failure.problem == MealPlanProblem.NotFound
                     if (gone) {
                         controller.clearActionFailure()
                         dialog = MealPlanDialog.None
-                        notice = MealPlanNotice.EntryMissing
+                        showNotice(MealPlanNotice.EntryMissing)
                     }
                 }
             }
-        }) { it.move(move.meal.id, move.date, move.mealType) }
+        }) {
+            if (editingId != null) it.edit(editingId, draft) else it.add(draft)
+        }
+    }
+
+    /**
+     * Abre la misma hoja para editar [meal]. Los datos finos (receta, título y
+     * nota sin componer) salen de la última lectura de la fuente; si la entrada
+     * ya no está, se avisa y no se abre nada.
+     */
+    fun onEditClick(meal: MealPlanMealView) {
+        if (controller.state.isBusy) return
+        val entry = planSource.entry(meal.id)
+        if (entry == null) {
+            controller.clearActionFailure()
+            showNotice(MealPlanNotice.EntryMissing)
+            publish()
+            return
+        }
+        controller.clearActionFailure()
+        dialog = MealPlanDialog.Add(editForm(entry, meal))
+        publish()
     }
 
     // -------------------------------------------------------------- borrar
@@ -273,7 +309,7 @@ class MealPlanViewModel(
         launchPlan(onDone = { result ->
             if (result.actionFailure == null) {
                 dialog = MealPlanDialog.None
-                notice = MealPlanNotice.Deleted
+                showNotice(MealPlanNotice.Deleted)
             }
         }) { it.delete(confirm.meal.id) }
     }
@@ -298,6 +334,7 @@ class MealPlanViewModel(
         pickerQuery = ""
         dialog = MealPlanDialog.None
         notice = null
+        noticeDate = null
         controller = newController()
         picker = newPicker()
         publish()
@@ -309,6 +346,53 @@ class MealPlanViewModel(
         val current = dialog as? MealPlanDialog.Add ?: return
         dialog = current.copy(form = change(current.form))
         publish()
+    }
+
+    /**
+     * Retira el fallo de raciones al escribir en su campo: el campo se quedaba
+     * en rojo mientras la persona ya lo estaba arreglando. Aquí no se valida
+     * nada; el núcleo vuelve a decidir al guardar.
+     */
+    private fun clearScaleFailure() {
+        val problem = controller.state.actionFailure?.problem ?: return
+        if (problem is MealPlanProblem.InvalidInput && problem.problem == MealPlanInputProblem.InvalidRecipeScale) {
+            controller.clearActionFailure()
+        }
+    }
+
+    /** ¿[date] cae en la semana a la vista? La regla la da el núcleo, no la pantalla. */
+    private fun weekContains(date: LocalDate): Boolean =
+        controller.state.week?.contains(date) == true
+
+    /**
+     * Hoja de editar rellenada con la entrada vigente. Se usan los textos sin
+     * componer ([PlannedMeal.title] y [PlannedMeal.note]) porque la vista los
+     * junta para pintarlos y editarlos así los separaría mal.
+     */
+    private fun editForm(entry: PlannedMeal, meal: MealPlanMealView): AddMealForm {
+        val recipeId = entry.recipeId
+        return AddMealForm(
+            date = entry.date,
+            mealType = entry.mealType,
+            kind = if (recipeId != null) AddKind.Recipe else AddKind.Note,
+            recipe = recipeId?.let { PickedRecipe(it, entry.recipeName ?: meal.title) },
+            title = entry.title,
+            text = entry.note,
+            // La vista ya compone el número con la coma castellana; se quita el «×».
+            scaleText = meal.scaleText?.removePrefix("×").orEmpty(),
+            editingId = entry.id,
+        )
+    }
+
+    /**
+     * Texto de raciones a número. Aquí no se valida nada: un texto que no sea
+     * número viaja como NaN y el núcleo lo rechaza con su propio mensaje. La
+     * coma se acepta porque es como se escribe en castellano.
+     */
+    private fun scaleOf(text: String): Double {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return 1.0
+        return trimmed.replace(',', '.').toDoubleOrNull() ?: Double.NaN
     }
 
     private fun launchPlan(
@@ -377,6 +461,9 @@ class MealPlanViewModel(
     companion object {
         private const val POLL_MILLIS = 120L
 
+        /** Tope del texto de raciones: el número útil no llega ni a cinco caracteres. */
+        private const val MAX_SCALE_INPUT = 10
+
         fun factory(planAccess: MealPlanAccess, recipeAccess: ClientAccess): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
@@ -398,36 +485,81 @@ class MealPlanViewModel(
  * [isCurrent] compara la época de la sesión con la que nació esta fuente: si
  * `reset()` la ha superado, no se pide nada (ni se lee la sesión nueva) y se
  * devuelve un fallo que el ViewModel descarta.
+ *
+ * También recuerda por id la última lectura, ya saneada: la hoja de editar
+ * necesita el `recipeId` y los textos sin componer, que la vista no lleva.
+ * Es una caché de presentación, con el tope que ya aplica el núcleo; no
+ * decide nada ni sustituye al estado del controlador.
  */
 private class PlanSource(
     private val access: MealPlanAccess,
     private val isCurrent: () -> Boolean,
 ) : MealPlanSource {
 
+    private val remembered = HashMap<Long, PlannedMeal>()
+
+    /** La última entrada leída con ese id, o null si esta sesión no la ha visto. */
+    fun entry(id: Long): PlannedMeal? = synchronized(remembered) { remembered[id] }
+
     override fun listEntries(start: LocalDate, end: LocalDate): MealPlanResult<List<PlannedMeal>> =
-        guarded { it.listEntries(start, end) }
+        guarded { it.listEntries(start, end) }.also { rememberAll(it) }
 
-    override fun entriesToday(): MealPlanResult<List<PlannedMeal>> = guarded { it.entriesToday() }
+    override fun entriesToday(): MealPlanResult<List<PlannedMeal>> =
+        guarded { it.entriesToday() }.also { rememberSome(it) }
 
-    override fun getEntry(id: Long): MealPlanResult<PlannedMeal> = guarded { it.getEntry(id) }
+    override fun getEntry(id: Long): MealPlanResult<PlannedMeal> =
+        guarded { it.getEntry(id) }.also { rememberOne(it) }
 
     override fun createEntry(draft: MealPlanDraft): MealPlanResult<PlannedMeal> =
-        guarded { it.createEntry(draft) }
+        guarded { it.createEntry(draft) }.also { rememberOne(it) }
 
     override fun moveEntry(entry: PlannedMeal, date: LocalDate, mealType: MealType): MealPlanResult<PlannedMeal> =
-        guarded { it.moveEntry(entry, date, mealType) }
+        guarded { it.moveEntry(entry, date, mealType) }.also { rememberOne(it) }
 
     override fun editEntry(entry: PlannedMeal, draft: MealPlanDraft): MealPlanResult<PlannedMeal> =
-        guarded { it.editEntry(entry, draft) }
+        guarded { it.editEntry(entry, draft) }.also { rememberOne(it) }
 
-    override fun deleteEntry(id: Long): MealPlanResult<Unit> = guarded { it.deleteEntry(id) }
+    override fun deleteEntry(id: Long): MealPlanResult<Unit> =
+        guarded { it.deleteEntry(id) }.also { result ->
+            if (result is MealPlanResult.Success) synchronized(remembered) { remembered.remove(id) }
+        }
+
+    /** La semana leída sustituye a lo recordado: es lo que hay en el servidor ahora. */
+    private fun rememberAll(result: MealPlanResult<List<PlannedMeal>>) {
+        if (result !is MealPlanResult.Success) return
+        synchronized(remembered) {
+            remembered.clear()
+            for (meal in result.value) remembered[meal.id] = meal
+        }
+    }
+
+    /** Lo de hoy no sustituye la semana: solo completa lo que esta sesión ha visto. */
+    private fun rememberSome(result: MealPlanResult<List<PlannedMeal>>) {
+        if (result !is MealPlanResult.Success) return
+        synchronized(remembered) {
+            for (meal in result.value) remembered[meal.id] = meal
+        }
+    }
+
+    private fun rememberOne(result: MealPlanResult<PlannedMeal>) {
+        if (result !is MealPlanResult.Success) return
+        synchronized(remembered) { remembered[result.value.id] = result.value }
+    }
 
     private fun <T> guarded(call: (MealPlanSource) -> MealPlanResult<T>): MealPlanResult<T> {
         if (!isCurrent()) return MealPlanResult.Failure(ConnectionProblem.Unknown)
+        // Solo se envuelve la creación de la fuente: la llamada va fuera para no
+        // perder el matiz de AfterSend al crear o editar.
         val source = try {
             access.newSource()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: NetworkError) {
             return failureOf(error)
+        } catch (error: RuntimeException) {
+            // El almacén seguro sin respuesta lanza IllegalStateException. No ha
+            // salido nada, así que es un fallo normal y no un MaybeCreated.
+            return MealPlanResult.Failure(ConnectionProblem.Unknown)
         }
         return call(source)
     }

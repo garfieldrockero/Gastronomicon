@@ -51,8 +51,9 @@ fun planActionTextRes(problem: MealPlanProblem): Int = when (problem) {
 fun planActionTitleRes(operation: MealPlanOperation): Int = when (operation) {
     MealPlanOperation.Create -> R.string.plan_action_failed_create
     MealPlanOperation.Move -> R.string.plan_action_failed_move
+    MealPlanOperation.Edit -> R.string.plan_action_failed_edit
     MealPlanOperation.Delete -> R.string.plan_action_failed_delete
-    MealPlanOperation.Edit, MealPlanOperation.Today -> R.string.plan_action_failed_other
+    MealPlanOperation.Today -> R.string.plan_action_failed_other
 }
 
 /** El fallo se arregla entrando en Ajustes (token caducado o sin permiso). */
