@@ -74,6 +74,24 @@ class RecipeListController(
     /** Pide la página siguiente; sin efecto si no hay más o ya se está cargando. */
     fun loadMore(): RecipeListState = run(Kind.More, state.search)
 
+    /**
+     * Repite la operación que falló ([RecipeListState.failedOperation]): si
+     * falló recargar, recarga; si falló cargar más, pide la página siguiente;
+     * si falló la primera carga, la repite con la búsqueda actual. Sin fallo
+     * que reintentar (o con una carga en curso) no hace nada. El éxito limpia
+     * la marca.
+     */
+    fun retry(): RecipeListState {
+        val current = state
+        if (current.isLoading) return current
+        return when (current.failedOperation) {
+            ListOperation.Refresh -> run(Kind.Refresh, current.search)
+            ListOperation.LoadMore -> run(Kind.More, current.search)
+            ListOperation.FirstLoad -> run(Kind.First, current.search)
+            null -> current
+        }
+    }
+
     /** Filtro local sobre lo cargado, sin red. */
     fun setLocalFilter(text: String): RecipeListState =
         synchronized(lock) {

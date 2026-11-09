@@ -17,6 +17,18 @@ enum class ListPhase {
     LoadingMore,
 }
 
+/** Qué operación de la lista ha fallado, para reintentar esa misma y no otra. */
+enum class ListOperation {
+    /** Primera carga o carga nueva (otra búsqueda); también una recarga con la lista vacía. */
+    FirstLoad,
+
+    /** Recarga con la lista anterior a la vista: el fallo se enseña arriba. */
+    Refresh,
+
+    /** Página siguiente: el fallo se enseña al final de la lista. */
+    LoadMore,
+}
+
 /**
  * Estado de la lista de recetas. Es inmutable: cada paso devuelve otro estado
  * y la interfaz solo lo pinta. Los pasos que no necesitan red (los de aquí)
@@ -42,6 +54,12 @@ data class RecipeListState(
     val problem: ConnectionProblem? = null,
     /** Si ya ha terminado bien alguna carga con esta búsqueda. */
     val loadedOnce: Boolean = false,
+    /**
+     * Operación que causó [problem]; se borra al empezar otra carga y al
+     * tener éxito. Null también cuando el fallo no se arregla repitiendo
+     * (el servidor devolvió otra página al pedir «más»).
+     */
+    val failedOperation: ListOperation? = null,
 ) {
     /** Lo cargado filtrado por [localFilter] (nombre, descripción, etiquetas y categorías). */
     val visibleItems: List<RecipeSummary> by lazy {
@@ -58,6 +76,27 @@ data class RecipeListState(
     /** Se puede pedir la página siguiente ahora. */
     val canLoadMore: Boolean get() = hasMore && phase == ListPhase.Idle
 
+    /**
+     * La interfaz puede pedir sola la página siguiente (al acercarse al final).
+     * Falso con filtro local: filtrar no avanza el final de la lista y la
+     * interfaz pediría páginas sin parar hasta el tope. Falso también tras un
+     * fallo, para no insistir sola: se reintenta con un toque ([canRetry]).
+     */
+    val canAutoLoad: Boolean get() = canLoadMore && localFilter.isEmpty() && problem == null
+
+    /**
+     * Mientras se filtra y quedan páginas sin cargar, la lista puede no tener
+     * lo buscado: la interfaz ofrece buscar en todo el servidor con
+     * [localFilter] (ya limpio y acotado) como texto.
+     */
+    val showSearchAllHint: Boolean get() = localFilter.isNotEmpty() && hasMore
+
+    /** Hay un fallo que se arregla repitiendo [failedOperation] (`RecipeListController.retry`). */
+    val canRetry: Boolean get() = problem != null && failedOperation != null && phase == ListPhase.Idle
+
+    /** Las filas de [visibleItems] con tiempo total y estrellas ya calculados. */
+    val visibleRows: List<RecipeSummaryRow> by lazy { visibleItems.map { RecipeSummaryRow.from(it) } }
+
     // ---------------------------------------------------------------- pasos
 
     /** Otra consulta desde cero: se vacía la lista para no enseñar resultados de la anterior. */
@@ -65,9 +104,9 @@ data class RecipeListState(
         RecipeListState(search = newSearch, localFilter = localFilter, phase = ListPhase.LoadingFirst)
 
     /** Recarga: la lista actual se queda a la vista hasta que llegue la nueva. */
-    fun startRefresh(): RecipeListState = copy(phase = ListPhase.Refreshing, problem = null)
+    fun startRefresh(): RecipeListState = copy(phase = ListPhase.Refreshing, problem = null, failedOperation = null)
 
-    fun startLoadMore(): RecipeListState = copy(phase = ListPhase.LoadingMore, problem = null)
+    fun startLoadMore(): RecipeListState = copy(phase = ListPhase.LoadingMore, problem = null, failedOperation = null)
 
     /** El texto se limpia y se acota: es entrada de la persona y no se guarda tal cual. */
     fun withLocalFilter(text: String): RecipeListState =
@@ -95,6 +134,8 @@ data class RecipeListState(
                 phase = ListPhase.Idle,
                 problem = ConnectionProblem.Unknown,
                 hasMore = phase == ListPhase.Refreshing && hasMore,
+                // Repetir «más» daría la misma respuesta (y ya no se ofrece «más»).
+                failedOperation = if (phase == ListPhase.LoadingMore) null else operationInFlight(),
             )
         }
         val appending = phase == ListPhase.LoadingMore
@@ -119,16 +160,25 @@ data class RecipeListState(
             phase = ListPhase.Idle,
             problem = null,
             loadedOnce = true,
+            failedOperation = null,
         )
     }
 
     /** Fallo de la carga en curso: lo cargado se conserva y [hasMore] no cambia (se puede reintentar). */
     fun withProblem(reason: ConnectionProblem): RecipeListState =
-        copy(phase = ListPhase.Idle, problem = reason)
+        copy(phase = ListPhase.Idle, problem = reason, failedOperation = operationInFlight())
+
+    // La fase en curso dice qué se estaba haciendo; sin nada en curso se asume la primera carga.
+    private fun operationInFlight(): ListOperation = when (phase) {
+        ListPhase.Refreshing -> ListOperation.Refresh
+        ListPhase.LoadingMore -> ListOperation.LoadMore
+        ListPhase.LoadingFirst, ListPhase.Idle -> ListOperation.FirstLoad
+    }
 
     // Sin el contenido: son datos del servidor y un estado puede acabar en un log.
     override fun toString(): String =
-        "RecipeListState(items=${items.size}, lastPage=$lastPage, hasMore=$hasMore, phase=$phase, problem=$problem)"
+        "RecipeListState(items=${items.size}, lastPage=$lastPage, hasMore=$hasMore, phase=$phase, problem=$problem, " +
+            "failedOperation=$failedOperation)"
 
     companion object {
         /** Tope de recetas en memoria. */

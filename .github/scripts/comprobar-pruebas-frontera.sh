@@ -30,6 +30,7 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientImageTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailViewTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailViewExtrasTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlugTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeImageTest
   io.github.garfieldrockero.gastronomicon.core.html.SafeUrlTest

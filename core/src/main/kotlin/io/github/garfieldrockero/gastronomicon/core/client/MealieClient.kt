@@ -15,6 +15,7 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.Page
 import io.github.garfieldrockero.gastronomicon.core.recipes.Recipe
 import io.github.garfieldrockero.gastronomicon.core.recipes.ImageSize
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeImage
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailSource
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListQuery
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListSource
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSlug
@@ -59,7 +60,7 @@ class MealieClient(
      * [fetchImage]. Por defecto es [transport] (y entonces manda su límite).
      */
     private val imageTransport: HttpTransport = transport,
-) : RecipeListSource {
+) : RecipeListSource, RecipeDetailSource {
 
     /**
      * Dos pasos: `GET /api/app/about` sin token (¿es un Mealie?) y después
@@ -127,7 +128,7 @@ class MealieClient(
      * @throws IllegalArgumentException si [slug] no pasa la lista blanca de
      *   ruta (antes de enviar nada).
      */
-    fun getRecipe(slug: String): Recipe {
+    override fun getRecipe(slug: String): Recipe {
         val checked = RecipeSlug.checked(slug)
         val response = transport.execute(HttpRequest(HttpMethod.GET, "$RECIPES_PATH/$checked"))
         return RecipeMapper.recipe(decode(RecipeDto.serializer(), response), checked)

@@ -7,19 +7,24 @@ import java.net.URI
 import java.net.URISyntaxException
 import java.util.Locale
 
-/** Cuál de los tiempos de la receta es. El rótulo («Preparación»…) lo pone la interfaz. */
-enum class TimeKind { Total, Prep, Cook, Perform }
-
-/** Un tiempo ya formateado: el texto de la receta, o los segundos en forma corta («1 h 30 min»). */
-data class TimeLine(val kind: TimeKind, val text: String)
-
 /**
- * Línea de ingredientes ya compuesta y escalada.
+ * Línea de ingredientes ya escalada y formateada.
  *
  * [title] no vacío abre una sección («Para la masa») que sigue hasta la
- * próxima línea con título. [text] vacío con título es solo el encabezado.
+ * próxima línea con título. [quantityText] es la cantidad («1 1/2») y
+ * [description] el resto («cucharadas aceite de oliva»), por separado para
+ * poder alinear las cantidades en columna. [text] es lo mismo ya junto, para
+ * TalkBack o para una sola línea. Sin cantidad, [quantityText] queda vacío.
  */
-data class IngredientLine(val title: String, val text: String) {
+data class IngredientLine(
+    val title: String,
+    val quantityText: String,
+    val description: String,
+) {
+    /** Cantidad y descripción en una sola frase, separadas por un espacio. */
+    val text: String
+        get() = if (quantityText.isEmpty()) description else if (description.isEmpty()) quantityText else "$quantityText $description"
+
     val isHeaderOnly: Boolean get() = text.isEmpty() && title.isNotEmpty()
 }
 
@@ -37,7 +42,13 @@ data class StepView(
  * mostrarlo. La interfaz no lo abre sola ni lo hace pulsable al pintar: solo
  * con un toque explícito de la persona y en el navegador del sistema.
  */
-data class SourceLink(val url: String, val host: String)
+data class SourceLink(val url: String, val host: String) {
+    /**
+     * Solo `https`: un origen con `http` se enseña como dato, sin botón de
+     * abrir. Es lo único que decide la interfaz sobre el enlace.
+     */
+    val isHttps: Boolean get() = url.startsWith("https://", ignoreCase = true)
+}
 
 /**
  * Detalle de una receta tal como se pinta: ingredientes escalados y
@@ -57,6 +68,8 @@ class RecipeDetailView private constructor(
     /** Id (UUID) para `MealieClient.fetchImage`, o null si no hay imagen que pedir. */
     val imageRecipeId: String?,
     val rating: Double?,
+    /** Estrellas llenas de 0 a 5, o null si no hay valoración numérica. */
+    val ratingStars: Int?,
     val yieldText: String,
     /** Raciones de la receta; null si no se pueden escalar. */
     val originalServings: Double?,
@@ -103,7 +116,7 @@ class RecipeDetailView private constructor(
         private const val MAX_NAME = 300
         private const val MAX_DESCRIPTION = 5_000
         private const val MAX_LABEL = 100
-        private const val MAX_TIME_TEXT = 100
+        private const val MAX_YIELD_TEXT = 100
         private const val MAX_LINE_TEXT = 500
         private const val MAX_UNIT_FOOD = 100
         private const val MAX_STEP_TITLE = 300
@@ -137,11 +150,12 @@ class RecipeDetailView private constructor(
                 description = PlainTextSanitizer.sanitize(recipe.description, MAX_DESCRIPTION, allowNewlines = true),
                 imageRecipeId = if (recipe.hasImage) RecipeImage.normalizeId(recipe.id) else null,
                 rating = recipe.rating?.takeIf { it.isFinite() }?.coerceIn(0.0, MAX_RATING),
-                yieldText = clean(recipe.yieldText, MAX_TIME_TEXT),
+                ratingStars = RatingStars.of(recipe.rating),
+                yieldText = clean(recipe.yieldText, MAX_YIELD_TEXT),
                 originalServings = original,
                 selectedServings = selected,
                 servingsText = QuantityFormatter.format(selected),
-                times = times(recipe.times),
+                times = RecipeTimeText.lines(recipe.times),
                 categories = labelNames(recipe.categories),
                 tags = labelNames(recipe.tags),
                 ingredients = recipe.ingredients.mapNotNull { ingredientLine(it, original, selected) },
@@ -160,20 +174,6 @@ class RecipeDetailView private constructor(
 
         private fun labelNames(labels: List<Label>): List<String> =
             labels.mapNotNull { clean(it.name, MAX_LABEL).ifEmpty { null } }
-
-        private fun times(times: RecipeTimes): List<TimeLine> {
-            val lines = ArrayList<TimeLine>(4)
-            fun add(kind: TimeKind, text: String, seconds: Int?) {
-                // El texto de la receta manda: puede decir «una hora y pico» y los segundos no.
-                val shown = clean(text, MAX_TIME_TEXT).ifEmpty { DurationFormatter.format(seconds) }
-                if (shown.isNotEmpty()) lines += TimeLine(kind, shown)
-            }
-            add(TimeKind.Total, times.total, times.totalSeconds)
-            add(TimeKind.Prep, times.prep, times.prepSeconds)
-            add(TimeKind.Cook, times.cook, null)
-            add(TimeKind.Perform, times.perform, times.performSeconds)
-            return lines
-        }
 
         private fun steps(steps: List<Step>): List<StepView> {
             val result = ArrayList<StepView>(steps.size)
@@ -210,15 +210,16 @@ class RecipeDetailView private constructor(
 
             val display = clean(ingredient.display, MAX_LINE_TEXT)
             val quantity = ingredient.quantity
-            val text = when {
-                hasParts -> listOf(number, unit, food, note).filter { it.isNotEmpty() }.joinToString(" ")
-                display.isEmpty() -> ""
-                quantity == null || quantity == 0.0 -> display
-                scaled != null && Math.abs(scaled - quantity) < 1e-9 -> display
-                else -> number
+            val description = listOf(unit, food, note).filter { it.isNotEmpty() }.joinToString(" ")
+            val line = when {
+                hasParts -> IngredientLine("", number, description)
+                display.isEmpty() -> IngredientLine("", "", "")
+                quantity == null || quantity == 0.0 -> IngredientLine("", "", display)
+                scaled != null && Math.abs(scaled - quantity) < 1e-9 -> IngredientLine("", "", display)
+                else -> IngredientLine("", number, "")
             }
             val title = clean(ingredient.title, MAX_LINE_TEXT)
-            return if (title.isEmpty() && text.isEmpty()) null else IngredientLine(title, text)
+            return if (title.isEmpty() && line.text.isEmpty()) null else line.copy(title = title)
         }
 
         /** Singular o plural; si falta el que toca, el otro. */
