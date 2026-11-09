@@ -437,7 +437,7 @@ class ShoppingClientTest {
         assertEquals("Leche entera", body["note"]!!.jsonPrimitive.content)
         assertEquals(3.0, body["quantity"]!!.jsonPrimitive.double, 0.0)
         assertTrue(body["checked"]!!.jsonPrimitive.boolean)
-        assertTrue(body.containsKey("extra"))
+        assertTrue(body.containsKey("extras"))
     }
 
     @Test
