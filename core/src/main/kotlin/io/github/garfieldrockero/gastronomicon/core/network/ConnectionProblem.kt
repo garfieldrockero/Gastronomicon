@@ -93,6 +93,9 @@ fun NetworkError.toConnectionProblem(): ConnectionProblem = when (this) {
     NetworkError.InvalidResponse -> ConnectionProblem.Unknown
     NetworkError.ResponseTooLarge -> ConnectionProblem.Unknown
     NetworkError.LocalHttpNotAllowedOnThisNetwork -> ConnectionProblem.LocalHttpNeedsHomeNetwork
+    // El envoltorio no cambia el motivo: la persona ve lo mismo que si no
+    // supiera si el servidor llegó a recibir la petición.
+    is NetworkError.AfterSend -> original.toConnectionProblem()
 }
 
 /**

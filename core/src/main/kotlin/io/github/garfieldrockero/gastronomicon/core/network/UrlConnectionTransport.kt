@@ -4,6 +4,7 @@ import io.github.garfieldrockero.gastronomicon.core.ServerUrl
 import io.github.garfieldrockero.gastronomicon.core.config.ApiToken
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.net.HttpRetryException
 import java.net.HttpURLConnection
 import java.net.ConnectException
@@ -56,14 +57,20 @@ import javax.net.ssl.SSLException
  *
  * Límites del plazo total (asumidos a sabiendas, porque cortarlo de verdad
  * pediría un hilo vigilante que cierre la conexión desde fuera):
- * - Se comprueba al empezar cada salto y entre lecturas del cuerpo, no
- *   durante una lectura ya empezada: una lectura que arranca justo antes de
- *   que venza puede esperar su tiempo de lectura entero. El peor caso es el
- *   plazo total más un tiempo de lectura (con los valores por defecto,
- *   60 s + 30 s).
+ * - Se comprueba al empezar cada salto y entre lecturas o bloques de
+ *   escritura del cuerpo, no durante una lectura o escritura ya empezada: una
+ *   que arranca justo antes de que venza puede esperar su tiempo entero. El
+ *   peor caso es el plazo total más un tiempo de lectura (con los valores por
+ *   defecto, 60 s + 30 s); en la escritura, además, una escritura bloqueada en
+ *   el socket no tiene tiempo de espera propio.
  * - La resolución DNS no la limita HttpURLConnection: ni el tiempo de
  *   conexión ni el de lectura la cubren, así que un resolvedor lento puede
  *   pasarse del plazo antes de que este código vuelva a mirarlo.
+ * - Si el servidor (o un proxy) contesta y cierra antes de recibir el cuerpo
+ *   entero, el fallo de escritura puede esconder ese código. Se intenta leer
+ *   la respuesta y, si se consigue, se entrega como [NetworkError.HttpError];
+ *   si no, el fallo va envuelto en [NetworkError.AfterSend] para que quien
+ *   crea o importa no repita a ciegas.
  *
  * Conexiones: una respuesta 2xx leída entera deja la conexión en el pool del
  * sistema para la siguiente petición (ver [performHop]); cualquier otro
@@ -245,6 +252,11 @@ class UrlConnectionTransport internal constructor(
         // bytes, plazo agotado) quedan bytes sin leer o un estado dudoso, así
         // que se desconecta para que nadie herede esa conexión.
         var reusable = false
+        // Solo cuenta un cuerpo de verdad: se marca cuando ha salido entero.
+        // En un GET, o en un POST/PUT/DELETE sin cuerpo, no hay nada que el
+        // servidor pueda haber empezado a procesar a medias, así que el fallo
+        // conserva su tipo de siempre.
+        var bodySent = false
         try {
             connection.instanceFollowRedirects = false
             connection.useCaches = false
@@ -264,7 +276,26 @@ class UrlConnectionTransport internal constructor(
             if (body != null) {
                 connection.doOutput = true
                 connection.setFixedLengthStreamingMode(body.size.toLong())
-                connection.outputStream.use { it.write(body) }
+                // Abrir el flujo es lo que conecta (y, si toca, hace el TLS):
+                // un fallo aquí es anterior a enviar y no deja dudas.
+                val output = try {
+                    connection.outputStream
+                } catch (error: IOException) {
+                    throw mapNetworkError(error)
+                }
+                try {
+                    // A trozos y con el plazo total mirado entre bloques: una
+                    // escritura no tiene tiempo de espera propio en
+                    // HttpURLConnection (ver el KDoc de la clase).
+                    writeBody(output, body, deadlineNanos)
+                } catch (error: NetworkError.Timeout) {
+                    // Plazo agotado a mitad del cuerpo: no se sabe cuánto ha
+                    // llegado al servidor, así que el fallo es ambiguo.
+                    throw NetworkError.AfterSend(error)
+                } catch (error: IOException) {
+                    throw afterWriteFailure(connection, error)
+                }
+                bodySent = true
             } else if (method != HttpMethod.GET) {
                 // POST, PUT y DELETE sin cuerpo: el JDK, si no está en modo
                 // «streaming», puede reintentar un POST por su cuenta
@@ -317,7 +348,11 @@ class UrlConnectionTransport internal constructor(
             reusable = true
             return Hop.Final(HttpResponse(statusCode, lowercaseHeaders(rawHeaders), responseBody))
         } catch (error: NetworkError) {
-            throw error
+            // Un plazo agotado con el cuerpo ya enviado es ambiguo: el
+            // servidor pudo recibirlo y estar tardando en contestar. Los
+            // errores con código HTTP no llegan por aquí (son HttpError) y los
+            // de configuración se lanzan antes de enviar nada.
+            throw if (bodySent && error === NetworkError.Timeout) NetworkError.AfterSend(error) else error
         } catch (error: HttpRetryException) {
             // Un 401 (o 407) sobre una petición con cuerpo de longitud fija: el
             // JDK no puede reenviar el cuerpo tras pedir credenciales y lanza
@@ -328,7 +363,10 @@ class UrlConnectionTransport internal constructor(
             if (code in 400..599) throw NetworkError.HttpError(code)
             throw NetworkError.InvalidResponse
         } catch (error: IOException) {
-            throw mapNetworkError(error)
+            val mapped = mapNetworkError(error)
+            // Si el cuerpo ya está enviado, un corte al leer la respuesta no
+            // permite saber si el servidor llegó a procesarla.
+            throw if (bodySent && isAmbiguousAfterSend(mapped)) NetworkError.AfterSend(mapped) else mapped
         } catch (error: RuntimeException) {
             // Cualquier reventón de la implementación (ProtocolException no es
             // lo único que puede salir de aquí) se queda en un error fijo: la
@@ -481,6 +519,79 @@ class UrlConnectionTransport internal constructor(
     }
 
     /**
+     * Escribe el cuerpo por bloques y mira el plazo total entre uno y otro.
+     *
+     * HttpURLConnection no tiene un tiempo de espera de escritura: una
+     * escritura bloqueada (el búfer del socket lleno porque el servidor no
+     * lee) no se interrumpe desde aquí. Lo único que se puede hacer sin un
+     * hilo vigilante que cierre la conexión desde fuera es no empezar otro
+     * bloque con el plazo vencido; el peor caso es el plazo total más lo que
+     * tarde el sistema en aceptar el bloque en curso (ver el KDoc de la clase).
+     */
+    private fun writeBody(output: OutputStream, body: ByteArray, deadlineNanos: Long) {
+        // El cierre se hace a mano: si el cuerpo ya ha fallado, un error al
+        // cerrar por el mismo motivo no debe tapar el motivo real.
+        var finished = false
+        try {
+            var offset = 0
+            while (offset < body.size) {
+                if (System.nanoTime() - deadlineNanos > 0) throw NetworkError.Timeout
+                val chunk = minOf(WRITE_CHUNK, body.size - offset)
+                output.write(body, offset, chunk)
+                offset += chunk
+            }
+            output.flush()
+            finished = true
+        } finally {
+            if (finished) {
+                output.close()
+            } else {
+                try {
+                    output.close()
+                } catch (ignored: IOException) {
+                    // Ya hay un error en curso; este no añade nada.
+                }
+            }
+        }
+    }
+
+    /**
+     * Un fallo al escribir el cuerpo puede esconder una respuesta temprana del
+     * servidor o de un proxy (401, 403, 413…) que cierra la conexión sin
+     * recibir el cuerpo entero. Cuando el código se puede leer, se devuelve tal
+     * cual; si no (el JDK ya no puede reconstruir la respuesta), el fallo es
+     * ambiguo y va envuelto en [NetworkError.AfterSend], nunca como un «no hay
+     * conexión» que oculte un rechazo real.
+     */
+    private fun afterWriteFailure(connection: HttpURLConnection, error: IOException): NetworkError {
+        val code = try {
+            connection.responseCode
+        } catch (retry: HttpRetryException) {
+            // Un 401 sobre una petición de longitud fija también puede salir
+            // así al preguntar por la respuesta (ver performHop).
+            retry.responseCode()
+        } catch (ignored: IOException) {
+            -1
+        } catch (ignored: RuntimeException) {
+            -1
+        }
+        if (code in 400..599) return NetworkError.HttpError(code)
+        val mapped = mapNetworkError(error)
+        // Aunque se haya llamado a escribir, un «conexión rechazada» o un
+        // fallo de TLS significan que no ha salido ni un byte: no hay duda.
+        return if (isAmbiguousAfterSend(mapped)) NetworkError.AfterSend(mapped) else mapped
+    }
+
+    /**
+     * ¿El fallo deja la duda de si el servidor llegó a procesar la petición?
+     * Los de antes de que exista conexión no: no ha salido nada.
+     */
+    private fun isAmbiguousAfterSend(problem: NetworkError): Boolean =
+        problem !== NetworkError.ConnectionRefused &&
+            problem !== NetworkError.DnsFailure &&
+            problem !== NetworkError.TlsError
+
+    /**
      * Cabeceras del último salto, con el nombre en minúsculas y sin la línea
      * de estado.
      *
@@ -547,6 +658,9 @@ class UrlConnectionTransport internal constructor(
         /** Tope del plazo total: más allá, la suma en nanosegundos pierde sentido. */
         private const val MAX_TOTAL_TIMEOUT_MS = 600_000L
         private const val READ_CHUNK = 8192
+
+        /** Bloque de escritura: el plazo total se mira entre bloques, no dentro de uno. */
+        private const val WRITE_CHUNK = 8192
 
         /** 422 «Unprocessable Content»: el único error del que se lee el cuerpo. */
         private const val STATUS_UNPROCESSABLE = 422

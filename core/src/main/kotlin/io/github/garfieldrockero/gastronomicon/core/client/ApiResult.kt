@@ -54,6 +54,21 @@ sealed interface ApiResult<out T> {
      */
     data class SavedButNotReloaded(val problem: ConnectionProblem) : ApiResult<Nothing>
 
+    /**
+     * Solo en `createRecipe` e `importFromUrl`: **puede** que la receta se haya
+     * creado y no se sabe. Es el resultado de cualquier desenlace posterior al
+     * envío del cuerpo que no sea un rechazo definitivo: un plazo agotado, un
+     * corte de conexión, un 5xx (proxies incluidos, que pueden cortar mientras
+     * el servidor sigue importando), una respuesta demasiado grande o un 2xx
+     * con un slug ausente o inválido.
+     *
+     * La interfaz debe avisar de que puede estar ya creada y pedir que se mire
+     * la lista antes de repetir. Nunca se reintenta solo: repetir a ciegas
+     * dejaría dos recetas. [problem] es el motivo real, para el mensaje; este
+     * valor no lleva ningún dato del servidor.
+     */
+    data class MaybeCreated(val problem: ConnectionProblem) : ApiResult<Nothing>
+
     /** Red, TLS, redirección bloqueada, 5xx, respuesta inválida o demasiado grande. */
     data class Failure(val problem: ConnectionProblem) : ApiResult<Nothing>
 }
@@ -71,6 +86,16 @@ enum class InputProblem {
 
     /** La imagen pasa del tope de subida. */
     ImageTooLarge,
+
+    /**
+     * La imagen lleva metadatos o no es de fiar: EXIF o XMP en JPEG, IPTC o
+     * comentarios en JPEG, chunks de texto o `eXIf` en PNG, chunks `EXIF`/`XMP `
+     * o bits de VP8X en WebP; también un fichero truncado, malformado o con
+     * datos después del fin de la imagen (ver `ImageMetadata.hasMetadata`).
+     * `app/` tiene que recodificarla antes de subirla: una foto con coordenadas
+     * no debe salir del móvil.
+     */
+    ImageHasMetadata,
 }
 
 /**

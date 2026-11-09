@@ -21,6 +21,7 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.Recipe
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraft
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraftValidator
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftValidation
+import io.github.garfieldrockero.gastronomicon.core.recipes.ImageMetadata
 import io.github.garfieldrockero.gastronomicon.core.recipes.ImageSize
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeImage
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailSource
@@ -82,6 +83,12 @@ class MealieClient(
      * es [transport].
      */
     private val importTransport: HttpTransport = transport,
+    /**
+     * Transporte con token y un plazo total propio, solo para [uploadImage].
+     * Por defecto es [transport], que ya trae su plazo; [create] le pone
+     * [UPLOAD_TOTAL_TIMEOUT_MS] explícito.
+     */
+    private val uploadTransport: HttpTransport = transport,
 ) : RecipeListSource, RecipeDetailSource {
 
     /**
@@ -190,14 +197,21 @@ class MealieClient(
 
     /**
      * `POST /api/recipes`: crea una receta vacía con ese nombre y devuelve su
-     * slug (ya validado con la lista blanca; si el servidor manda otro, es
-     * [ApiResult.Failure] con [ConnectionProblem.Unknown]). El nombre se sanea
-     * y se valida igual que el del borrador.
+     * slug (ya validado con la lista blanca). El nombre se sanea y se valida
+     * igual que el del borrador.
+     *
+     * No se reintenta nunca. La regla de «¿se creó?» es la de
+     * [importFromUrl]: solo un rechazo DEFINITIVO del servidor (400, 401, 403,
+     * 404, 405, 409, 413, 415 y 422) o un fallo anterior al envío permiten
+     * afirmar que no se creó. Un 5xx, una respuesta demasiado grande, un 2xx
+     * con un slug ausente o fuera de la lista blanca y un plazo o un corte de
+     * conexión después de enviar el cuerpo devuelven [ApiResult.MaybeCreated]:
+     * la receta puede existir y hay que mirar la lista antes de repetir.
      */
     fun createRecipe(name: String): ApiResult<String> {
         val (clean, errors) = RecipeDraftValidator.validateName(name)
         if (clean == null) return ApiResult.DraftInvalid(errors)
-        return guarded {
+        return guardedCreate {
             val body = JsonObject(mapOf("name" to JsonPrimitive(clean)))
             val response = transport.execute(
                 HttpRequest.json(HttpMethod.POST, RECIPES_PATH, encode(body), readErrorBody = true),
@@ -291,6 +305,15 @@ class MealieClient(
      * toca esa URL. Solo se admite `https` (con [SafeUrl]: sin usuario, sin
      * espacios, ASCII) y, si no cumple, [ApiResult.InputRejected] sin enviar
      * nada. Devuelve el slug de la receta creada, validado.
+     *
+     * No se reintenta nunca (y menos aquí, que el servidor tarda en descargar
+     * la página). Una vez enviado el cuerpo, solo un rechazo DEFINITIVO (400,
+     * 401, 403, 404, 405, 409, 413, 415 y 422) prueba que no se creó. Todo lo
+     * demás es [ApiResult.MaybeCreated]: un 5xx (también el 500/502/503/504 de
+     * un proxy, que puede cortar mientras Mealie sigue importando), una
+     * respuesta demasiado grande, un 2xx sin slug legible y un plazo o un
+     * corte de conexión. Solo lo anterior al envío (URL inválida, sin red,
+     * error al conectar) es un [ApiResult.Failure] de «no se creó».
      */
     fun importFromUrl(
         url: String,
@@ -301,7 +324,7 @@ class MealieClient(
         if (safe == null || !safe.startsWith("https://", ignoreCase = true)) {
             return ApiResult.InputRejected(InputProblem.InvalidUrl)
         }
-        return guarded {
+        return guardedCreate {
             val body = JsonObject(
                 mapOf(
                     "url" to JsonPrimitive(safe),
@@ -319,10 +342,21 @@ class MealieClient(
     /**
      * `PUT /api/recipes/{slug}/image` (multipart: `image` y `extension`).
      *
-     * El recodificado y el borrado de EXIF los hace `app/`; aquí solo se
-     * rechaza lo que no sea una imagen: extensión distinta de
-     * `webp`/`jpeg`/`png`, bytes cuyo inicio (bytes mágicos) no sea de ese
-     * mismo formato, vacía o de más de [MAX_IMAGE_BYTES].
+     * El recodificado y el borrado de EXIF los hace `app/`; aquí, como defensa
+     * en profundidad, se rechaza lo que no sea una imagen: extensión distinta
+     * de `webp`/`jpeg`/`png`, bytes cuyo inicio (bytes mágicos) no sea de ese
+     * mismo formato, vacía, de más de [MAX_IMAGE_BYTES] o que aún lleve
+     * metadatos ([ImageMetadata.hasMetadata]: EXIF, XMP, IPTC, comentarios,
+     * texto en PNG y bits de VP8X, además de un fichero truncado o con datos
+     * después del fin de imagen).
+     *
+     * Usa [uploadTransport], con un plazo total de [UPLOAD_TOTAL_TIMEOUT_MS]
+     * para escribir el cuerpo y leer la respuesta. El plazo se mira entre
+     * bloques de escritura (HttpURLConnection no tiene tiempo de espera de
+     * escritura), así que una escritura ya bloqueada puede alargarlo; el
+     * detalle está en el KDoc de `UrlConnectionTransport`. Al vencer, el
+     * resultado es [ApiResult.Failure] con
+     * [ConnectionProblem.ServerNotResponding], no un cuelgue.
      *
      * @throws IllegalArgumentException si [slug] no pasa la lista blanca.
      */
@@ -333,6 +367,7 @@ class MealieClient(
         if (bytes.isEmpty()) return ApiResult.InputRejected(InputProblem.InvalidImage)
         if (bytes.size > MAX_IMAGE_BYTES) return ApiResult.InputRejected(InputProblem.ImageTooLarge)
         if (ImageTypes.fromMagic(bytes) != wanted) return ApiResult.InputRejected(InputProblem.InvalidImage)
+        if (ImageMetadata.hasMetadata(bytes)) return ApiResult.InputRejected(InputProblem.ImageHasMetadata)
         val ext = typeExtension(wanted)
         val multipart = MultipartBody.build(
             listOf(
@@ -341,7 +376,7 @@ class MealieClient(
             ),
         )
         return guarded {
-            transport.execute(
+            uploadTransport.execute(
                 HttpRequest.multipart(HttpMethod.PUT, "$RECIPES_PATH/$checked/image", multipart, readErrorBody = true),
             )
             ApiResult.Success(Unit)
@@ -417,6 +452,60 @@ class MealieClient(
         } catch (error: NetworkError) {
             ApiErrors.map(error)
         }
+
+    /**
+     * Como [guarded], pero para crear o importar: un fallo ambiguo después de
+     * enviar el cuerpo no se puede contar como «no se creó», porque repetir
+     * dejaría dos recetas. Se avisa con [ApiResult.MaybeCreated] para que la
+     * interfaz pida mirar la lista antes de reintentar.
+     */
+    private inline fun <T> guardedCreate(block: () -> ApiResult<T>): ApiResult<T> =
+        try {
+            block()
+        } catch (error: NetworkError.AfterSend) {
+            ApiResult.MaybeCreated(error.original.toConnectionProblem())
+        } catch (error: NetworkError) {
+            creationFailure(error)
+        }
+
+    /**
+     * Clasifica un fallo de crear o importar.
+     *
+     * «No se creó» solo si el fallo es anterior al envío o si el servidor ha
+     * contestado un rechazo DEFINITIVO. Cualquier otra cosa posterior al envío
+     * es ambigua: un proxy puede contestar 502 mientras Mealie sigue
+     * importando, y un 2xx puede traer un slug que no se sabe leer.
+     *
+     * [NetworkError.InvalidResponse] y [NetworkError.RedirectRejected] también
+     * cuentan como ambiguos: el transporte usa el primero tanto para una
+     * respuesta ilegible como para un destino que no se puede abrir, y una
+     * redirección bloqueada llega después de que el servidor haya podido
+     * procesar el cuerpo. Preferir [ApiResult.MaybeCreated] de más solo hace
+     * mirar la lista; decir «no se creó» de menos deja dos recetas.
+     */
+    private fun creationFailure(error: NetworkError): ApiResult<Nothing> = when {
+        error.happenedBeforeSend() -> ApiErrors.map(error)
+        error is NetworkError.HttpError && error.statusCode in DEFINITIVE_CREATION_REJECTIONS ->
+            ApiErrors.map(error)
+        else -> ApiResult.MaybeCreated(error.toConnectionProblem())
+    }
+
+    /**
+     * ¿El fallo prueba que la petición no llegó a salir? El transporte envuelve
+     * en [NetworkError.AfterSend] todo lo ambiguo posterior al envío, así que
+     * estos subtipos, cuando llegan sueltos, son de antes: abrir el flujo de
+     * salida, resolver el nombre, el TLS o el plazo inicial.
+     */
+    private fun NetworkError.happenedBeforeSend(): Boolean = when (this) {
+        NetworkError.NoConnection,
+        NetworkError.ConnectionRefused,
+        NetworkError.DnsFailure,
+        NetworkError.TlsError,
+        NetworkError.Timeout,
+        NetworkError.InvalidRequest,
+        NetworkError.LocalHttpNotAllowedOnThisNetwork -> true
+        else -> false
+    }
 
     private fun encode(element: JsonElement): String =
         CoreJson.json.encodeToString(JsonElement.serializer(), element)
@@ -518,6 +607,15 @@ class MealieClient(
         const val SELF_PATH = "/api/users/self"
         const val RECIPES_PATH = "/api/recipes"
 
+        /**
+         * Códigos con los que el servidor (o un proxy) contesta que NO ha
+         * aceptado la creación: 400, 401, 403, 404, 405, 409, 413, 415 y 422.
+         * Solo estos permiten responder «no se creó»; el resto de códigos,
+         * una vez enviado el cuerpo, son ambiguos y van a
+         * [ApiResult.MaybeCreated].
+         */
+        private val DEFINITIVE_CREATION_REJECTIONS = setOf(400, 401, 403, 404, 405, 409, 413, 415, 422)
+
         private const val MAX_VERSION_LENGTH = 64
         private const val ORGANIZER_SEARCH_MAX = 100
 
@@ -527,6 +625,22 @@ class MealieClient(
         /** Importar por URL: el servidor descarga y analiza la página, que puede tardar. */
         private const val IMPORT_READ_TIMEOUT_MS = 110_000
         private const val IMPORT_TOTAL_TIMEOUT_MS = 120_000L
+
+        /**
+         * Plazo total de una subida de imagen: escribir el cuerpo (hasta
+         * [MAX_IMAGE_BYTES] más el envoltorio) y leer la respuesta.
+         *
+         * Se mira entre bloques de escritura, y una lectura ya empezada puede
+         * alargarlo hasta [UPLOAD_READ_TIMEOUT_MS] más (el límite general de
+         * `UrlConnectionTransport`): `HttpURLConnection` no tiene tiempo de
+         * espera de escritura y su tiempo de lectura no se puede cambiar una
+         * vez conectado. Al vencer, la subida falla con un error tipado en vez
+         * de quedarse colgada.
+         */
+        const val UPLOAD_TOTAL_TIMEOUT_MS = 60_000L
+
+        /** Tiempo de lectura de la respuesta de la subida, dentro del plazo total. */
+        private const val UPLOAD_READ_TIMEOUT_MS = 30_000
 
         /** `AppInfo` son unos cientos de bytes: más que esto no es un Mealie. */
         private const val ABOUT_MAX_RESPONSE_BYTES = 64L * 1024
@@ -576,6 +690,14 @@ class MealieClient(
                 activeNetwork = activeNetwork,
                 readTimeoutMs = IMPORT_READ_TIMEOUT_MS,
                 totalTimeoutMs = IMPORT_TOTAL_TIMEOUT_MS,
+            ),
+            uploadTransport = UrlConnectionTransport.create(
+                serverUrl = session.serverUrl,
+                token = session.token,
+                allowLocalHttp = allowLocalHttp,
+                activeNetwork = activeNetwork,
+                readTimeoutMs = UPLOAD_READ_TIMEOUT_MS,
+                totalTimeoutMs = UPLOAD_TOTAL_TIMEOUT_MS,
             ),
             anonymousTransport = UrlConnectionTransport.createWithoutToken(
                 serverUrl = session.serverUrl,

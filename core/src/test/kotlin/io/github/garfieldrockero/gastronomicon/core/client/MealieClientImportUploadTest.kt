@@ -26,9 +26,10 @@ class MealieClientImportUploadTest {
     private val uuid1 = "0f8fad5b-d9cb-469f-a165-70867728950e"
     private val uuid2 = "1f8fad5b-d9cb-469f-a165-70867728950e"
 
-    private val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4)
-    private val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 16, 1, 2, 3)
-    private val webp = "RIFF".toByteArray() + byteArrayOf(4, 0, 0, 0) + "WEBP".toByteArray() + byteArrayOf(1, 2, 3, 4)
+    // Imágenes bien formadas: ImageMetadata falla cerrado y rechaza truncados.
+    private val png = FakeMealie.minimalPng()
+    private val jpeg = FakeMealie.minimalJpeg()
+    private val webp = FakeMealie.minimalWebp()
 
     @Before
     fun start() {
@@ -101,9 +102,15 @@ class MealieClientImportUploadTest {
         mealie.fixed("POST", "/api/recipes/create/url", 401)
         assertEquals(ApiResult.Unauthorized, mealie.client().importFromUrl("https://ejemplo.org/r"))
         mealie.fixed("POST", "/api/recipes/create/url", 502)
-        assertEquals(ApiResult.Failure(ConnectionProblem.ServerError), mealie.client().importFromUrl("https://ejemplo.org/r"))
+        assertEquals(
+            ApiResult.MaybeCreated(ConnectionProblem.ServerError),
+            mealie.client().importFromUrl("https://ejemplo.org/r"),
+        )
         mealie.fixed("POST", "/api/recipes/create/url", 201, "\"../x\"")
-        assertEquals(ApiResult.Failure(ConnectionProblem.Unknown), mealie.client().importFromUrl("https://ejemplo.org/r"))
+        assertEquals(
+            ApiResult.MaybeCreated(ConnectionProblem.Unknown),
+            mealie.client().importFromUrl("https://ejemplo.org/r"),
+        )
         mealie.fixed("POST", "/api/recipes/create/url", 422, """{"detail":[{"loc":["body","url"],"msg":"URL no válida"}]}""")
         assertEquals(
             ApiResult.Invalid(listOf(ValidationDetail(null, null, "URL no válida"))),
@@ -179,9 +186,11 @@ class MealieClientImportUploadTest {
         val huge = png + ByteArray(MealieClient.MAX_IMAGE_BYTES.toInt())
         assertEquals(ApiResult.InputRejected(InputProblem.ImageTooLarge), mealie.client().uploadImage("tarta", huge, "png"))
         assertTrue(mealie.seen.isEmpty())
-        // Justo en el tope sí se envia.
+        // Justo en el tope sí se envia. El relleno va dentro de un IDAT: unos
+        // ceros detrás de IEND serían «datos después del fin» y no valdrían.
         mealie.fixed("PUT", "/api/recipes/tarta/image", 200, "{}")
-        val atLimit = png + ByteArray(MealieClient.MAX_IMAGE_BYTES.toInt() - png.size)
+        val atLimit = FakeMealie.pngOfSize(MealieClient.MAX_IMAGE_BYTES.toInt())
+        assertEquals(MealieClient.MAX_IMAGE_BYTES, atLimit.size.toLong())
         assertEquals(ApiResult.Success(Unit), mealie.client().uploadImage("tarta", atLimit, "png"))
     }
 
@@ -196,7 +205,7 @@ class MealieClientImportUploadTest {
         )
         for ((status, result) in errors) {
             mealie.fixed("PUT", "/api/recipes/tarta/image", status, "{\"detail\":\"SECRETO-DEL-SERVIDOR\"}")
-            val actual = mealie.client().uploadImage("tarta", png + ByteArray(30_000), "png")
+            val actual = mealie.client().uploadImage("tarta", FakeMealie.pngWithData(30_000), "png")
             assertEquals(status.toString(), result, actual)
             assertFalse(actual.toString().contains("SECRETO"))
         }

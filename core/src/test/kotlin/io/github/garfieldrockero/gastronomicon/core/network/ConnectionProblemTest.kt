@@ -30,9 +30,19 @@ class ConnectionProblemTest {
         NetworkError.LocalHttpNotAllowedOnThisNetwork to ConnectionProblem.LocalHttpNeedsHomeNetwork,
     )
 
+    /**
+     * El envoltorio «pudo enviarse» no cambia el motivo: la persona ve lo que
+     * le toca hacer, no si el servidor llegó a recibir la petición.
+     */
+    private val wrapperCases: Map<NetworkError, ConnectionProblem> = mapOf(
+        NetworkError.AfterSend(NetworkError.NoConnection) to ConnectionProblem.NoNetwork,
+        NetworkError.AfterSend(NetworkError.Timeout) to ConnectionProblem.ServerNotResponding,
+        NetworkError.AfterSend(NetworkError.TlsError) to ConnectionProblem.SecureConnectionFailed,
+    )
+
     @Test
     fun `cada error sin codigo lleva a su motivo`() {
-        for ((error, expected) in objectCases) {
+        for ((error, expected) in objectCases + wrapperCases) {
             assertEquals("Motivo de ${error::class.java.simpleName}", expected, error.toConnectionProblem())
         }
     }
@@ -126,9 +136,10 @@ class ConnectionProblemTest {
             .filter { NetworkError::class.java.isAssignableFrom(it) }
             .map { it.name }
             .toSet()
-        val covered = (objectCases.keys.map { it::class.java } + NetworkError.HttpError::class.java)
-            .map { it.name }
-            .toSet()
+        val covered = (
+            (objectCases.keys + wrapperCases.keys).map { it::class.java } +
+                NetworkError.HttpError::class.java
+            ).map { it.name }.toSet()
         assertEquals(declared, covered)
     }
 

@@ -42,10 +42,24 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.session.SessionPayloadFormatTest
   io.github.garfieldrockero.gastronomicon.core.network.MultipartBodyTest
   io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransportWriteTest
+  io.github.garfieldrockero.gastronomicon.core.network.UrlConnectionTransportUploadCutoffTest
   io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraftValidatorTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.ImageMetadataTest
+  io.github.garfieldrockero.gastronomicon.core.recipes.ImageRecodePlanTest
   io.github.garfieldrockero.gastronomicon.core.client.RecipeDraftMergeTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientWriteTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientImportUploadTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientMaybeCreatedTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClientTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListControllerTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListViewTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingTextTest
+  io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingRawJsonTest
+  io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanClientTest
+  io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanControllerTest
+  io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDraftTest
+  io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanWeekViewTest
+  io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanRawJsonTest
 )
 
 # Valor numérico del atributo $1 en la etiqueta de apertura $2 (comillas dobles o

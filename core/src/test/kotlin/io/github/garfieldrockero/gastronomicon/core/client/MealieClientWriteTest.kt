@@ -98,11 +98,15 @@ class MealieClientWriteTest {
     }
 
     @Test
-    fun `un slug devuelto que no es de fiar es una respuesta invalida`() {
+    fun `un 2xx con slug ilegible no afirma que no se creo y no reintenta`() {
         for (body in listOf("\"../etc\"", "\"a/b\"", "\"\"", "{\"slug\":\"x\"}", "[]", "12", "null", "no es json", "")) {
+            mealie.seen.clear()
             mealie.fixed("POST", "/api/recipes", 201, body)
             val result = mealie.client().createRecipe("Tarta")
-            assertEquals(body, ApiResult.Failure(ConnectionProblem.Unknown), result)
+            assertEquals(body, ApiResult.MaybeCreated(ConnectionProblem.Unknown), result)
+            // La receta puede existir: no se repite sola.
+            assertEquals(body, 1, mealie.requestsTo("POST", "/api/recipes").size)
+            assertNoSecrets(result)
         }
     }
 
@@ -110,20 +114,30 @@ class MealieClientWriteTest {
 
     @Test
     fun `cada codigo de error se traduce a su resultado tipado`() {
+        // Los 4xx de la lista son rechazos definitivos: el servidor contestó
+        // que no lo aceptaba. Los 5xx, en cambio, son ambiguos una vez enviado
+        // el cuerpo (puede ser un proxy mientras Mealie sigue trabajando).
         val expected = mapOf(
             401 to ApiResult.Unauthorized,
             403 to ApiResult.Forbidden,
             404 to ApiResult.NotFound,
             409 to ApiResult.Conflict,
             400 to ApiResult.Rejected(400),
+            405 to ApiResult.Rejected(405),
             413 to ApiResult.Rejected(413),
-            500 to ApiResult.Failure(ConnectionProblem.ServerError),
-            503 to ApiResult.Failure(ConnectionProblem.ServerError),
+            415 to ApiResult.Rejected(415),
+            422 to ApiResult.Invalid(emptyList()),
+            500 to ApiResult.MaybeCreated(ConnectionProblem.ServerError),
+            502 to ApiResult.MaybeCreated(ConnectionProblem.ServerError),
+            503 to ApiResult.MaybeCreated(ConnectionProblem.ServerError),
+            504 to ApiResult.MaybeCreated(ConnectionProblem.ServerError),
         )
         for ((status, result) in expected) {
+            mealie.seen.clear()
             mealie.fixed("POST", "/api/recipes", status, "{\"detail\":\"SECRETO-DEL-SERVIDOR\"}")
             val actual = mealie.client().createRecipe("Tarta")
             assertEquals(status.toString(), result, actual)
+            assertEquals(status.toString(), 1, mealie.requestsTo("POST", "/api/recipes").size)
             assertNoSecrets(actual)
         }
     }

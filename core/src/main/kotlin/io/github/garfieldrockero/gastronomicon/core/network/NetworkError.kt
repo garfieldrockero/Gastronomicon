@@ -110,6 +110,22 @@ sealed class NetworkError(message: String) : Exception(message, null, false, fal
      */
     class HttpError(val statusCode: Int, internal val body: ByteArray? = null) : NetworkError(messageFor(statusCode))
 
+    /**
+     * El fallo ha ocurrido después de empezar a enviar el cuerpo de la petición
+     * (o de enviarlo entero): no se puede saber si el servidor llegó a
+     * procesarla. [original] es el motivo real, que es el que se enseña; este
+     * envoltorio solo añade el «no se sabe».
+     *
+     * Lo usa el transporte cuando la escritura del cuerpo falla o el plazo se
+     * agota con el cuerpo ya enviado. El cliente lo convierte en
+     * [io.github.garfieldrockero.gastronomicon.core.client.ApiResult.MaybeCreated]
+     * solo al crear o importar (las dos operaciones que no se pueden repetir a
+     * ciegas); en todo lo demás se reduce a [original] y nada cambia.
+     */
+    class AfterSend(val original: NetworkError) : NetworkError(
+        original.message ?: "No se sabe si el servidor llegó a procesar la petición.",
+    )
+
     companion object {
         /**
          * El número siempre viaja en el mensaje: ayuda a diagnosticar y no es

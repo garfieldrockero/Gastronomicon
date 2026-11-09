@@ -27,6 +27,9 @@ class SecretRedactionTest {
             NetworkError.InvalidRequest,
             NetworkError.LocalHttpNotAllowedOnThisNetwork,
             NetworkError.InvalidResponse,
+            // El envoltorio de «pudo enviarse» tampoco puede repetir el token.
+            NetworkError.AfterSend(NetworkError.NoConnection),
+            NetworkError.AfterSend(NetworkError.Timeout),
         ) + listOf(400, 401, 403, 404, 418, 422, 500, 503, 599).map {
             // Recorre todas las ramas del mensaje HTTP, no solo una instancia.
             NetworkError.HttpError(it)
