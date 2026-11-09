@@ -28,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -101,7 +102,12 @@ fun RecipeListScreen(
     onRetry: () -> Unit,
     onOpenRecipe: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onCreateRecipe: () -> Unit,
+    onImportRecipe: () -> Unit,
     modifier: Modifier = Modifier,
+    // Con la barra de pestañas debajo, quien la pinta quita aquí el inset inferior
+    // (ya lo consume la barra). Suelto, el valor por defecto es el de siempre.
+    contentWindowInsets: WindowInsets = WindowInsets.safeDrawing,
 ) {
     // Buscar y «Ver todas» cierran el teclado: si no, tapa los resultados que se acaban de pedir.
     val keyboard = LocalSoftwareKeyboardController.current
@@ -117,7 +123,7 @@ fun RecipeListScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         // Con el teclado abierto, el buscador sube con él.
-        contentWindowInsets = WindowInsets.safeDrawing,
+        contentWindowInsets = contentWindowInsets,
         topBar = {
             TopAppBar(
                 title = {
@@ -127,6 +133,12 @@ fun RecipeListScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = onImportRecipe) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_link),
+                            contentDescription = stringResource(R.string.recipes_import),
+                        )
+                    }
                     IconButton(onClick = onRefresh, enabled = !state.list.isLoading) {
                         Icon(
                             painter = painterResource(R.drawable.ic_refresh),
@@ -150,6 +162,14 @@ fun RecipeListScreen(
                 onSubmit = submitSearch,
                 onClearSearch = clearSearch,
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = onCreateRecipe) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_add),
+                    contentDescription = stringResource(R.string.recipes_create),
+                )
+            }
         },
     ) { innerPadding ->
         Column(
@@ -187,6 +207,7 @@ fun RecipeListScreen(
                 onRetry = onRetry,
                 onOpenRecipe = onOpenRecipe,
                 onOpenSettings = onOpenSettings,
+                onCreateRecipe = onCreateRecipe,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -207,6 +228,7 @@ private fun RecipeListContent(
     onRetry: () -> Unit,
     onOpenRecipe: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onCreateRecipe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val problem = list.problem
@@ -236,8 +258,10 @@ private fun RecipeListContent(
         list.isEmpty -> MessageBlock(
             title = stringResource(R.string.recipes_empty_title),
             text = stringResource(R.string.recipes_empty_text),
-            primaryLabel = stringResource(R.string.recipes_reload),
-            onPrimary = onRefresh,
+            primaryLabel = stringResource(R.string.recipes_empty_create),
+            onPrimary = onCreateRecipe,
+            secondaryLabel = stringResource(R.string.recipes_reload),
+            onSecondary = onRefresh,
             modifier = modifier,
         )
 
@@ -296,7 +320,13 @@ private fun RecipeLazyList(
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(Spacing.medium),
+        // Abajo, sitio para que el botón flotante no tape la última tarjeta ni «Cargar más».
+        contentPadding = PaddingValues(
+            start = Spacing.medium,
+            top = Spacing.medium,
+            end = Spacing.medium,
+            bottom = 88.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(Spacing.medium),
     ) {
         items(items = list.visibleRows, key = { it.slug }) { row ->
@@ -581,6 +611,8 @@ private fun ListPreview(state: RecipeListUiState) {
         onRetry = {},
         onOpenRecipe = {},
         onOpenSettings = {},
+        onCreateRecipe = {},
+        onImportRecipe = {},
     )
 }
 

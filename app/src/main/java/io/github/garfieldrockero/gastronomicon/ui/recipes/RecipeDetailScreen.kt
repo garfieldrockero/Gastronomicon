@@ -19,16 +19,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -66,6 +72,7 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.SourceLink
 import io.github.garfieldrockero.gastronomicon.core.recipes.TimeKind
 import io.github.garfieldrockero.gastronomicon.core.recipes.TimeLine
 import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
+import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBlock
@@ -73,6 +80,7 @@ import io.github.garfieldrockero.gastronomicon.ui.components.RecipePhoto
 import io.github.garfieldrockero.gastronomicon.ui.components.SanitizedHtmlContent
 import io.github.garfieldrockero.gastronomicon.ui.components.StarRating
 import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
+import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
@@ -98,6 +106,7 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
 @Composable
 fun RecipeDetailScreen(
     state: RecipeDetailState,
+    deleteState: RecipeDeleteUiState,
     imageLoader: ImageLoader?,
     onBack: () -> Unit,
     onRetry: () -> Unit,
@@ -105,6 +114,10 @@ fun RecipeDetailScreen(
     onFewerServings: () -> Unit,
     onOpenSource: (SourceLink) -> Boolean,
     onOpenSettings: () -> Unit,
+    onEdit: () -> Unit,
+    onDeleteClick: () -> Unit,
+    onDeleteDismiss: () -> Unit,
+    onDeleteConfirm: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -135,6 +148,45 @@ fun RecipeDetailScreen(
                             painter = painterResource(R.drawable.ic_arrow_back),
                             contentDescription = stringResource(R.string.nav_back),
                         )
+                    }
+                },
+                actions = {
+                    if (state is RecipeDetailState.Ready) {
+                        IconButton(onClick = onEdit) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_edit),
+                                contentDescription = stringResource(R.string.detail_edit),
+                            )
+                        }
+                        // Lo destructivo, apartado de lo frecuente: va en un menú.
+                        var menuOpen by rememberSaveable { mutableStateOf(false) }
+                        IconButton(onClick = { menuOpen = true }, enabled = !deleteState.deleting) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_more_vert),
+                                contentDescription = stringResource(R.string.detail_more),
+                            )
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(R.string.detail_delete),
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_delete),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    onDeleteClick()
+                                },
+                            )
+                        }
                     }
                 },
             )
@@ -185,6 +237,101 @@ fun RecipeDetailScreen(
             )
         }
     }
+
+    if (deleteState.confirming && state is RecipeDetailState.Ready) {
+        DeleteRecipeDialog(
+            name = state.view.name,
+            deleting = deleteState.deleting,
+            problem = deleteState.problem,
+            rejected = deleteState.rejected,
+            onConfirm = onDeleteConfirm,
+            onDismiss = onDeleteDismiss,
+            onOpenSettings = onOpenSettings,
+        )
+    }
+}
+
+@Composable
+private fun DeleteRecipeDialog(
+    name: String,
+    deleting: Boolean,
+    problem: ConnectionProblem?,
+    rejected: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!deleting) onDismiss() },
+        title = { Text(stringResource(R.string.detail_delete_dialog_title, name)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
+                Text(stringResource(R.string.detail_delete_dialog_text))
+                if (problem != null) {
+                    Text(
+                        text = stringResource(errorTextRes(problem)),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (rejected) {
+                    Text(
+                        text = stringResource(R.string.detail_delete_rejected),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (deleting) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.small),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(stringResource(R.string.detail_delete_deleting))
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !deleting,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.detail_delete_dialog_cancel))
+            }
+        },
+        confirmButton = {
+            val unauthorized = problem == ConnectionProblem.Unauthorized
+            TextButton(
+                onClick = {
+                    if (unauthorized) {
+                        onDismiss()
+                        onOpenSettings()
+                    } else {
+                        onConfirm()
+                    }
+                },
+                enabled = !deleting,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                if (deleting) BusyIndicator()
+                Text(
+                    stringResource(
+                        when {
+                            unauthorized -> R.string.problem_open_settings
+                            problem != null || rejected -> R.string.detail_delete_retry
+                            else -> R.string.detail_delete_dialog_confirm
+                        },
+                    ),
+                )
+            }
+        },
+    )
 }
 
 // ------------------------------------------------------------------ contenido
@@ -644,9 +791,10 @@ private val IngredientRowMinHeight = 56.dp
 // ------------------------------------------------------------------ previews
 
 @Composable
-private fun DetailPreview(state: RecipeDetailState) {
+private fun DetailPreview(state: RecipeDetailState, deleteState: RecipeDeleteUiState = RecipeDeleteUiState()) {
     RecipeDetailScreen(
         state = state,
+        deleteState = deleteState,
         imageLoader = null,
         onBack = {},
         onRetry = {},
@@ -654,6 +802,10 @@ private fun DetailPreview(state: RecipeDetailState) {
         onFewerServings = {},
         onOpenSource = { true },
         onOpenSettings = {},
+        onEdit = {},
+        onDeleteClick = {},
+        onDeleteDismiss = {},
+        onDeleteConfirm = {},
     )
 }
 
@@ -699,4 +851,29 @@ private fun RecipeDetailUnauthorizedPreview() {
 @Composable
 private fun RecipeDetailNotFoundPreview() {
     GastronomiconTheme { DetailPreview(RecipeDetailState.NotFound) }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeDetailDeleteDialogPreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Ready(RecipePreviewData.detail),
+            deleteState = RecipeDeleteUiState(confirming = true),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun RecipeDetailDeleteFailedPreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            state = RecipeDetailState.Ready(RecipePreviewData.detail),
+            deleteState = RecipeDeleteUiState(
+                confirming = true,
+                problem = ConnectionProblem.NoNetwork,
+            ),
+        )
+    }
 }

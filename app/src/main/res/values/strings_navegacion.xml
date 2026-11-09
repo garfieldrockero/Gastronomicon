@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Barra inferior de pestañas (prefijo nav_tab_). Son las tres listas raíz.
+        El nombre visible y el `contentDescription` de cada pestaña son el mismo
+        texto: son nombres cortos que ya se leen solos.
+    -->
+    <string name="nav_tab_recipes">Recetas</string>
+    <string name="nav_tab_meal_plan">Planificador</string>
+    <string name="nav_tab_shopping">Compra</string>
+</resources>

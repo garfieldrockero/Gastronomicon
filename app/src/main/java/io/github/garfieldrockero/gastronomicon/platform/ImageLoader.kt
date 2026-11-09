@@ -108,6 +108,33 @@ class ImageLoader(
         }
     }
 
+    /**
+     * Olvida lo que se guardó de la receta [recipeId]: su foto ha cambiado (se
+     * acaba de subir o de borrar), así que la próxima vez que se pinte hay que
+     * pedirla de nuevo.
+     *
+     * Solo toca las entradas de esa receta: la lista y el resto de fotos siguen
+     * en memoria. Tampoco sube [epoch]: una carga de la MISMA receta que
+     * empezara antes de la subida podría dejar la foto vieja en la caché, así
+     * que quien la pide después de subir la foto recarga el detalle (y con él,
+     * la foto) en vez de fiarse de una carga anterior.
+     */
+    fun invalidate(recipeId: String) {
+        val prefix = "$recipeId|"
+        synchronized(epochLock) {
+            val keys = cache.snapshot().keys
+            for (key in keys) {
+                if (key.startsWith(prefix)) cache.remove(key)
+            }
+            synchronized(missing) {
+                // Copia: no se puede quitar de la colección mientras se recorre.
+                for (key in missing.keys.toList()) {
+                    if (key.startsWith(prefix)) missing.remove(key)
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------- privados
 
     private suspend fun loadBlocking(key: String, startedAt: Int, recipeId: String, size: ImageSize, maxSidePx: Int): ImageLoadResult {

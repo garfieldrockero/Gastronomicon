@@ -1,0 +1,145 @@
+package io.github.garfieldrockero.gastronomicon.ui.mealplan
+
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanActionFailure
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanOperation
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanPhase
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanProblem
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanState
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanWeekView
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealType
+import io.github.garfieldrockero.gastronomicon.core.mealplan.PlannedMeal
+import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummary
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeTimes
+import java.time.LocalDate
+
+/**
+ * Datos inventados para las previews del planificador. Nada de servidores, URL
+ * ni tokens: los identificadores son de ejemplo.
+ */
+internal object MealPlanPreviewData {
+
+    /** Miércoles; la semana de la preview va del lunes 9 al domingo 15 de noviembre de 2026. */
+    val TODAY: LocalDate = LocalDate.of(2026, 11, 11)
+    private val WEEK_START: LocalDate = LocalDate.of(2026, 11, 9)
+
+    private const val RECIPE_LENTILS = "11111111-1111-4111-8111-111111111111"
+    private const val RECIPE_RICE = "22222222-2222-4222-8222-222222222222"
+    private const val RECIPE_OMELETTE = "33333333-3333-4333-8333-333333333333"
+
+    private fun meal(
+        id: Long,
+        date: LocalDate,
+        type: MealType,
+        title: String = "",
+        note: String = "",
+        recipeId: String? = null,
+        recipeName: String? = null,
+        scale: Double = 1.0,
+    ) = PlannedMeal(
+        id = id,
+        date = date,
+        mealType = type,
+        title = title,
+        note = note,
+        recipeId = recipeId,
+        recipeName = recipeName,
+        recipeSlug = null,
+        recipeScale = scale,
+        groupId = null,
+        userId = null,
+    )
+
+    private val meals = listOf(
+        meal(1, WEEK_START, MealType.LUNCH, recipeId = RECIPE_LENTILS, recipeName = "Lentejas de la abuela"),
+        meal(2, WEEK_START, MealType.DINNER, title = "Sobras de las lentejas"),
+        meal(3, TODAY, MealType.BREAKFAST, title = "Tostadas con tomate"),
+        meal(4, TODAY, MealType.LUNCH, recipeId = RECIPE_RICE, recipeName = "Arroz con verduras", scale = 2.0),
+        // La receta ya no existe en el servidor: la vista lo dice en vez de inventarse un nombre.
+        meal(5, TODAY, MealType.DINNER, recipeId = "44444444-4444-4444-8444-444444444444"),
+        meal(6, TODAY.plusDays(2), MealType.DINNER, title = "Cena fuera", note = "Reserva a las 21:00"),
+    )
+
+    private fun week(start: LocalDate, list: List<PlannedMeal>, today: LocalDate = TODAY) =
+        MealPlanWeekView.of(start, list, today)
+
+    private fun uiState(plan: MealPlanState) = MealPlanUiState(
+        plan = plan,
+        dialog = MealPlanDialog.None,
+        picker = picker(),
+        notice = null,
+    )
+
+    /** Semana con comidas; los parámetros dejan probar la recarga fallida, un fallo al guardar o «guardando». */
+    fun ready(
+        phase: MealPlanPhase = MealPlanPhase.Idle,
+        loadProblem: MealPlanProblem? = null,
+        actionFailure: MealPlanActionFailure? = null,
+    ): MealPlanUiState = uiState(
+        MealPlanState(
+            weekStart = WEEK_START,
+            today = TODAY,
+            week = week(WEEK_START, meals),
+            phase = phase,
+            loadProblem = loadProblem,
+            actionFailure = actionFailure,
+        ),
+    )
+
+    /** Otra semana distinta de la actual: enseña «Ir a esta semana». */
+    fun otherWeek(): MealPlanUiState {
+        val start = WEEK_START.plusWeeks(1)
+        return uiState(
+            MealPlanState(
+                weekStart = start,
+                today = TODAY,
+                week = week(start, listOf(meal(7, start.plusDays(1), MealType.LUNCH, title = "Pizza casera"))),
+            ),
+        )
+    }
+
+    fun emptyWeek(): MealPlanUiState = uiState(
+        MealPlanState(weekStart = WEEK_START, today = TODAY, week = week(WEEK_START, emptyList())),
+    )
+
+    fun loading(): MealPlanUiState = uiState(
+        MealPlanState(weekStart = WEEK_START, today = TODAY, phase = MealPlanPhase.Loading),
+    )
+
+    fun loadFailed(problem: MealPlanProblem): MealPlanUiState = uiState(
+        MealPlanState(weekStart = WEEK_START, today = TODAY, loadProblem = problem),
+    )
+
+    fun maybeCreated(): MealPlanActionFailure = MealPlanActionFailure(
+        MealPlanOperation.Create,
+        MealPlanProblem.MaybeCreated(ConnectionProblem.ServerNotResponding),
+    )
+
+    private fun recipe(id: String, slug: String, name: String, total: String) = RecipeSummary(
+        id = id,
+        slug = slug,
+        name = name,
+        description = "",
+        hasImage = false,
+        servings = 4.0,
+        rating = null,
+        times = RecipeTimes(total = total),
+        categories = emptyList(),
+        tags = emptyList(),
+    )
+
+    /** Selector con tres recetas de ejemplo ya cargadas. */
+    fun picker(): RecipePickerUiState = RecipePickerUiState(
+        list = RecipeListState(
+            items = listOf(
+                recipe(RECIPE_LENTILS, "lentejas-de-la-abuela", "Lentejas de la abuela", "1 h 30 min"),
+                recipe(RECIPE_RICE, "arroz-con-verduras", "Arroz con verduras", "50 min"),
+                recipe(RECIPE_OMELETTE, "tortilla-de-patatas", "Tortilla de patatas", "35 min"),
+            ),
+            lastPage = 1,
+            loadedOnce = true,
+        ),
+        query = "",
+    )
+}

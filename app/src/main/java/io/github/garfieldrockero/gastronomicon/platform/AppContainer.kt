@@ -2,11 +2,17 @@ package io.github.garfieldrockero.gastronomicon.platform
 
 import android.content.Context
 import io.github.garfieldrockero.gastronomicon.core.client.MealieClient
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanClient
 import io.github.garfieldrockero.gastronomicon.core.network.ActiveNetworkProvider
 import io.github.garfieldrockero.gastronomicon.core.session.Session
 import io.github.garfieldrockero.gastronomicon.core.session.SessionStore
+import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClient
+import io.github.garfieldrockero.gastronomicon.ui.mealplan.MealPlanAccess
+import io.github.garfieldrockero.gastronomicon.ui.mealplan.StoreMealPlanAccess
 import io.github.garfieldrockero.gastronomicon.ui.settings.AppPreferences
 import io.github.garfieldrockero.gastronomicon.ui.settings.ConnectionTester
+import io.github.garfieldrockero.gastronomicon.ui.shopping.ShoppingAccess
+import io.github.garfieldrockero.gastronomicon.ui.shopping.StoreShoppingAccess
 
 /**
  * Las piezas reales de Android que usa la app, montadas en un solo sitio.
@@ -26,8 +32,32 @@ class AppContainer(context: Context) {
     /** Un cliente nuevo por operación, sacado de la sesión guardada (ver [StoreClientAccess]). */
     val clientAccess: ClientAccess = StoreClientAccess(sessionStore) { session -> newClient(session) }
 
+    /**
+     * Lista de la compra: un cliente nuevo por operación, con la sesión guardada
+     * (ver [StoreShoppingAccess]). Vuelve a leer el interruptor HTTP y la red en
+     * cada llamada; no se guarda ningún cliente.
+     */
+    val shoppingAccess: ShoppingAccess = StoreShoppingAccess(sessionStore) { session ->
+        ShoppingClient.create(session, preferences.allowLocalHttp, activeNetwork)
+    }
+
+    /**
+     * Planificador: una fuente nueva por operación, con la sesión guardada
+     * (ver [StoreMealPlanAccess]). Misma política de sesión, red y HTTP local.
+     */
+    val mealPlanAccess: MealPlanAccess = StoreMealPlanAccess(sessionStore) { session ->
+        MealPlanClient.create(session, preferences.allowLocalHttp, activeNetwork)
+    }
+
     /** Imágenes de receta: caché solo en memoria. Se vacía al cambiar de sesión. */
     val imageLoader: ImageLoader = ImageLoader(clientAccess)
+
+    /**
+     * Prepara la foto elegida (galería o cámara) para subirla: la reduce, la
+     * endereza y le quita los metadatos. Solo guarda el `applicationContext`, así
+     * que se puede tener aquí sin retener la pantalla.
+     */
+    val imageRecoder: ImageRecoder = ImageRecoder(appContext)
 
     /**
      * Cliente para una sesión ya cargada. Vuelve a leer el interruptor

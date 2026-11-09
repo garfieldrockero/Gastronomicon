@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Lista de la compra -->
+    <string name="shopping_title">Compra</string>
+    <string name="shopping_reload">Recargar</string>
+    <string name="shopping_loading">Abriendo tu lista de la compra…</string>
+
+    <!-- Resumen -->
+    <plurals name="shopping_pending">
+        <item quantity="one">Falta %d cosa</item>
+        <item quantity="other">Faltan %d cosas</item>
+    </plurals>
+    <plurals name="shopping_checked">
+        <item quantity="one">%d en el carro</item>
+        <item quantity="other">%d en el carro</item>
+    </plurals>
+    <string name="shopping_all_done">¡Todo en el carro! Ya puedes quitar los marcados.</string>
+
+    <!-- Filas -->
+    <string name="shopping_item_checked_state">En el carro</string>
+    <string name="shopping_item_unchecked_state">Por comprar</string>
+    <string name="shopping_item_edit">Editar «%1$s»</string>
+
+    <!-- Añadir -->
+    <string name="shopping_add_label">Qué te falta</string>
+    <string name="shopping_add_button">Añadir a la lista</string>
+    <string name="shopping_adding">Añadiendo…</string>
+
+    <!-- Quitar marcados -->
+    <string name="shopping_clear_button">Quitar los marcados (%d)</string>
+    <string name="shopping_clearing">Quitando los marcados…</string>
+    <string name="shopping_clear_dialog_title">¿Quitar los marcados?</string>
+    <plurals name="shopping_clear_dialog_text">
+        <item quantity="one">Se quitará %d cosa de la lista, también en tu Mealie.</item>
+        <item quantity="other">Se quitarán %d cosas de la lista, también en tu Mealie.</item>
+    </plurals>
+    <string name="shopping_clear_dialog_confirm">Quitar</string>
+    <string name="shopping_dialog_cancel">Cancelar</string>
+
+    <!-- Editar -->
+    <string name="shopping_edit_title">Editar nota</string>
+    <string name="shopping_edit_label">Nota</string>
+    <string name="shopping_edit_save">Guardar</string>
+    <string name="shopping_edit_delete">Quitar de la lista</string>
+
+    <!-- Estados vacíos -->
+    <string name="shopping_empty_title">Tu lista está vacía</string>
+    <string name="shopping_empty_text">Apunta lo que te falta y lo tendrás a mano en el súper. Lo que escribas aquí también lo verás en tu Mealie.</string>
+    <string name="shopping_empty_action">Escribir lo primero</string>
+    <string name="shopping_no_list_title">Todavía no tienes ninguna lista</string>
+    <string name="shopping_no_list_text">Crea una lista de la compra en tu Mealie, desde el navegador, y vuelve aquí. La app todavía no puede crearlas.</string>
+    <string name="shopping_no_list_action">Volver a mirar</string>
+
+    <!-- Fallos -->
+    <string name="shopping_problem_title">No se ha podido abrir la lista de la compra</string>
+    <string name="shopping_offline_hint">Sin cobertura no se puede ver ni cambiar la lista. Todavía no se guarda para usarla sin conexión.</string>
+    <string name="shopping_problem_not_found">Esa lista o esa cosa ya no está en tu Mealie. Recarga para ver cómo está ahora.</string>
+    <string name="shopping_problem_rejected">Tu Mealie no ha aceptado el cambio. Recarga la lista y vuelve a intentarlo.</string>
+    <string name="shopping_problem_empty_text">Escribe qué necesitas comprar.</string>
+    <string name="shopping_problem_too_long">Eso es demasiado largo. Acórtalo un poco.</string>
+    <string name="shopping_problem_invalid_quantity">La cantidad no es válida.</string>
+    <string name="shopping_change_failed">El último cambio puede no haberse guardado</string>
+    <string name="shopping_problem_dismiss">Entendido</string>
+</resources>

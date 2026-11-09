@@ -1,13 +1,21 @@
 package io.github.garfieldrockero.gastronomicon.ui.recipes
 
+import android.graphics.Bitmap
+import io.github.garfieldrockero.gastronomicon.core.client.ValidationDetail
 import io.github.garfieldrockero.gastronomicon.core.html.HtmlBlock
 import io.github.garfieldrockero.gastronomicon.core.html.InlineSpan
 import io.github.garfieldrockero.gastronomicon.core.html.ListItem
 import io.github.garfieldrockero.gastronomicon.core.html.SanitizedHtml
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftError
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftIngredient
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftOrganizer
+import io.github.garfieldrockero.gastronomicon.core.recipes.DraftStep
 import io.github.garfieldrockero.gastronomicon.core.recipes.Ingredient
 import io.github.garfieldrockero.gastronomicon.core.recipes.Label
+import io.github.garfieldrockero.gastronomicon.core.recipes.Organizer
 import io.github.garfieldrockero.gastronomicon.core.recipes.Recipe
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailView
+import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDraft
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeNote
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummary
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeTimes
@@ -127,4 +135,128 @@ internal object RecipePreviewData {
     )
 
     val detail: RecipeDetailView = RecipeDetailView.from(recipe)
+
+    /** Borrador de ejemplo con ids válidos: nada de servidores, URL ni tokens reales. */
+    val draft: RecipeDraft = RecipeDraft(
+        name = "Arroz con verduras",
+        description = "Un arroz de domingo, con lo que haya en la nevera.",
+        servings = 4.0,
+        totalTime = "50 min",
+        prepTime = "15 min",
+        cookTime = "35 min",
+        ingredients = listOf(
+            DraftIngredient(
+                quantity = 300.0,
+                unit = "gramos",
+                food = "arroz redondo",
+                title = "Para el arroz",
+                sourceId = "11111111-1111-4111-8111-111111111111",
+            ),
+            DraftIngredient(
+                quantity = 2.0,
+                unit = "cucharadas",
+                food = "aceite de oliva",
+                sourceId = "22222222-2222-4222-8222-222222222222",
+            ),
+            DraftIngredient(
+                quantity = 1.5,
+                food = "pimiento rojo",
+                sourceId = "33333333-3333-4333-8333-333333333333",
+            ),
+        ),
+        steps = listOf(
+            DraftStep(
+                title = "Sofrito",
+                text = "Calienta el aceite y sofríe el pimiento.",
+                sourceId = "44444444-4444-4444-8444-444444444444",
+            ),
+            DraftStep(
+                text = "Añade el arroz y el caldo.",
+                sourceId = "55555555-5555-4555-8555-555555555555",
+            ),
+        ),
+        tags = listOf(
+            DraftOrganizer(
+                id = "66666666-6666-4666-8666-666666666666",
+                name = "Vegetariano",
+                slug = "vegetariano",
+            ),
+        ),
+        categories = listOf(
+            DraftOrganizer(
+                id = "77777777-7777-4777-8777-777777777777",
+                name = "Arroces",
+                slug = "arroces",
+            ),
+        ),
+    )
+
+    val organizerTags: List<Organizer> = listOf(
+        Organizer(
+            id = "66666666-6666-4666-8666-666666666666",
+            name = "Vegetariano",
+            slug = "vegetariano",
+        ),
+        Organizer(
+            id = "88888888-8888-4888-8888-888888888888",
+            name = "Fácil",
+            slug = "facil",
+        ),
+    )
+
+    val organizerCategories: List<Organizer> = listOf(
+        Organizer(
+            id = "77777777-7777-4777-8777-777777777777",
+            name = "Arroces",
+            slug = "arroces",
+        ),
+        Organizer(
+            id = "99999999-9999-4999-8999-999999999999",
+            name = "Comidas",
+            slug = "comidas",
+        ),
+    )
+
+    fun editorState(
+        mode: EditorMode = EditorMode.Edit("arroz-con-verduras"),
+        errors: List<DraftError> = emptyList(),
+        serverDetails: List<ValidationDetail> = emptyList(),
+        saving: Boolean = false,
+        showDiscardConfirm: Boolean = false,
+        createdIncomplete: Boolean = false,
+        photo: PhotoState = PhotoState(),
+        maybeCreated: Boolean = false,
+        showDuplicateConfirm: Boolean = false,
+    ): RecipeEditorState.Editing = RecipeEditorState.Editing(
+        mode = mode,
+        form = RecipeForm.from(draft),
+        baseline = draft,
+        errors = errors,
+        serverDetails = serverDetails,
+        catalogs = OrganizerCatalog(
+            tags = organizerTags.map { it.toDraft() },
+            categories = organizerCategories.map { it.toDraft() },
+            loading = false,
+            problem = null,
+        ),
+        saving = saving,
+        saveProblem = null,
+        rejected = false,
+        createdIncomplete = createdIncomplete,
+        showDiscardConfirm = showDiscardConfirm,
+        dirty = true,
+        photo = photo,
+        maybeCreated = maybeCreated,
+        showDuplicateConfirm = showDuplicateConfirm,
+    )
+
+    /**
+     * Bitmap de prueba para las previews de la foto: un color plano inventado. No es
+     * ninguna foto real, no viene de ningún fichero y no lleva ningún dato de nadie.
+     */
+    fun photoPreviewBitmap(): Bitmap {
+        val bitmap = Bitmap.createBitmap(96, 72, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(android.graphics.Color.rgb(0xC8, 0xA2, 0x5A))
+        return bitmap
+    }
 }

@@ -22,5 +22,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Para hacer la foto con la cámara del sistema (TakePicture) sin permiso CAMERA:
+          la app de cámara escribe en un fichero de nuestra caché y le damos permiso
+          temporal solo para ese Uri. No exportado y sin permisos de almacenamiento.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.camara"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rutas_camara" />
+        </provider>
     </application>
 </manifest>

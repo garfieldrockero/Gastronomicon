@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Planificador de comidas (prefijo plan_). Los motivos de conexión reutilizan problem_* y setup_error_*. -->
+    <string name="plan_title">Planificador</string>
+    <string name="plan_reload">Recargar la semana</string>
+    <string name="plan_loading">Cargando la semana…</string>
+    <string name="plan_saving">Guardando…</string>
+
+    <!-- Navegación entre semanas -->
+    <string name="plan_week_previous">Semana anterior</string>
+    <string name="plan_week_next">Semana siguiente</string>
+    <string name="plan_week_today">Ir a esta semana</string>
+    <string name="plan_today_badge">Hoy</string>
+
+    <!-- Día y comidas -->
+    <string name="plan_add_to_day">Añadir comida a este día</string>
+    <string name="plan_add_to_day_description">Añadir comida el %1$s</string>
+    <string name="plan_add_fab">Añadir comida</string>
+    <string name="plan_meal_move">Mover</string>
+    <string name="plan_meal_delete">Quitar</string>
+    <string name="plan_meal_move_description">Mover «%1$s» a otro día</string>
+    <string name="plan_meal_delete_description">Quitar «%1$s» del planificador</string>
+    <string name="plan_meal_scale">Raciones %1$s</string>
+
+    <!-- Estado vacío de la semana -->
+    <string name="plan_empty_title">Esta semana no hay nada planeado</string>
+    <string name="plan_empty_text">Apunta qué vais a comer cada día, con una receta de tu Mealie o con una nota, y lo tendrás a mano al hacer la compra.</string>
+    <string name="plan_empty_action">Añadir la primera comida</string>
+
+    <!-- Confirmaciones (se anuncian al terminar) -->
+    <string name="plan_notice_added">Comida añadida.</string>
+    <string name="plan_notice_moved">Comida movida.</string>
+    <string name="plan_notice_deleted">Comida quitada del planificador.</string>
+
+    <!-- Hoja de añadir -->
+    <string name="plan_add_title">Añadir comida</string>
+    <string name="plan_add_day">¿Qué día?</string>
+    <string name="plan_add_meal_type">¿Qué comida del día?</string>
+    <string name="plan_add_kind">¿Qué vas a apuntar?</string>
+    <string name="plan_add_kind_recipe">Una receta</string>
+    <string name="plan_add_kind_note">Una nota</string>
+    <string name="plan_add_recipe_none">Todavía no has elegido receta</string>
+    <string name="plan_add_recipe_pick">Elegir receta</string>
+    <string name="plan_add_recipe_change">Cambiar de receta</string>
+    <string name="plan_add_note_title">Qué vais a comer</string>
+    <string name="plan_add_note_title_hint">Por ejemplo: sobras de ayer</string>
+    <string name="plan_add_note_text">Más detalles (opcional)</string>
+    <string name="plan_add_confirm">Añadir al planificador</string>
+    <string name="plan_cancel">Cancelar</string>
+
+    <!-- Elegir receta -->
+    <string name="plan_picker_title">Elige una receta</string>
+    <string name="plan_picker_back">Volver</string>
+    <string name="plan_picker_search">Buscar receta</string>
+    <string name="plan_picker_search_all">Buscar en todo Mealie</string>
+    <string name="plan_picker_loading">Cargando tus recetas…</string>
+    <string name="plan_picker_empty_title">Aún no tienes recetas</string>
+    <string name="plan_picker_empty_text">Crea una receta primero, o apunta una nota en su lugar.</string>
+    <string name="plan_picker_no_match_title">Ninguna receta coincide</string>
+    <string name="plan_picker_no_match_text">Prueba con otra palabra o busca en todo tu Mealie.</string>
+    <string name="plan_picker_more">Cargar más recetas</string>
+    <string name="plan_picker_failed">No se han podido cargar las recetas</string>
+    <string name="plan_picker_choose_description">Elegir la receta «%1$s»</string>
+
+    <!-- Mover -->
+    <string name="plan_move_title">Mover comida</string>
+    <string name="plan_move_text">«%1$s» está ahora en %2$s. Elige a dónde la llevas.</string>
+    <string name="plan_move_confirm">Mover aquí</string>
+
+    <!-- Quitar -->
+    <string name="plan_delete_title">¿Quitar esta comida?</string>
+    <string name="plan_delete_text">«%1$s» dejará de estar en el planificador. La receta no se borra.</string>
+    <string name="plan_delete_confirm">Quitar comida</string>
+
+    <!-- Fallos de la semana (pantalla entera) -->
+    <string name="plan_error_title">No se ha podido cargar el planificador</string>
+    <string name="plan_offline_hint">El planificador necesita conexión con tu Mealie. Cuando vuelva la cobertura, reintenta.</string>
+    <string name="plan_forbidden_title">Tu token no llega al planificador</string>
+    <string name="plan_forbidden_text">Mealie no deja a este token ver el planificador. Genera un token con más permisos en tu Mealie y pégalo en Ajustes.</string>
+    <string name="plan_not_found_title">No encuentro el planificador</string>
+    <string name="plan_not_found_text">Tu Mealie no responde en la ruta del planificador. Puede que sea una versión antigua o que la dirección esté mal.</string>
+    <string name="plan_rejected_title">Mealie no ha aceptado la petición</string>
+    <string name="plan_rejected_text">Tu Mealie ha rechazado la petición. Vuelve a intentarlo; si sigue igual, revisa Ajustes.</string>
+    <string name="plan_date_title">Esa semana no se puede mostrar</string>
+    <string name="plan_date_text">La fecha queda fuera del calendario que admite la app. Vuelve a esta semana.</string>
+    <string name="plan_reload_failed">No se ha podido actualizar la semana</string>
+
+    <!-- Fallos al guardar (dentro de la hoja o del diálogo, o en un aviso) -->
+    <string name="plan_action_failed_create">No se ha podido añadir la comida</string>
+    <string name="plan_action_failed_move">No se ha podido mover la comida</string>
+    <string name="plan_action_failed_delete">No se ha podido quitar la comida</string>
+    <string name="plan_action_failed_other">No se ha podido completar la acción</string>
+    <string name="plan_action_dismiss">Entendido</string>
+    <string name="plan_action_forbidden">Mealie no deja a este token cambiar el planificador. Necesita un token con permiso para editar.</string>
+    <string name="plan_action_not_found">Esa comida ya no está en tu Mealie. Recarga la semana para verla al día.</string>
+    <string name="plan_action_rejected">Tu Mealie ha rechazado el cambio. Vuelve a intentarlo.</string>
+    <string name="plan_action_invalid">Tu Mealie no ha aceptado esos datos. Revisa lo que has escrito.</string>
+    <string name="plan_action_maybe_created">La conexión se cortó y puede que la comida ya esté apuntada. Recarga la semana antes de volver a añadirla, para no repetirla.</string>
+    <string name="plan_action_entry_missing">No tengo a mano esa comida. Recarga la semana e inténtalo de nuevo.</string>
+    <string name="plan_action_reload">Recargar la semana</string>
+
+    <!-- Datos que la persona puede corregir -->
+    <string name="plan_input_date">Esa fecha queda fuera del calendario que admite la app.</string>
+    <string name="plan_input_range">El rango de fechas no es válido.</string>
+    <string name="plan_input_meal_type">Elige qué comida del día es.</string>
+    <string name="plan_input_empty">Elige una receta o escribe qué vais a comer.</string>
+    <string name="plan_input_title_long">El título es demasiado largo. Acórtalo un poco.</string>
+    <string name="plan_input_text_long">Los detalles son demasiado largos. Acórtalos un poco.</string>
+    <string name="plan_input_recipe">Esa receta no se puede usar. Elige otra.</string>
+    <string name="plan_input_scale">Las raciones no son válidas.</string>
+    <string name="plan_input_entry">No se puede identificar esa comida. Recarga la semana.</string>
+    <string name="plan_input_identity">Esta comida no se puede mover desde la app. Recarga la semana e inténtalo de nuevo.</string>
+</resources>

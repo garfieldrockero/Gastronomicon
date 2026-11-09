@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.garfieldrockero.gastronomicon.core.session.SessionReset
 import io.github.garfieldrockero.gastronomicon.core.session.SessionStore
 import io.github.garfieldrockero.gastronomicon.platform.SessionStorageException
+import io.github.garfieldrockero.gastronomicon.ui.navigation.MainTab
 import io.github.garfieldrockero.gastronomicon.ui.settings.AppPreferences
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
@@ -51,6 +52,14 @@ class AppViewModel(
     val screen: StateFlow<AppScreen> = _screen.asStateFlow()
 
     /**
+     * Pestaña elegida en la barra inferior. Vive aquí, con la pantalla, para que
+     * girar el móvil o ir a Ajustes y volver no devuelva a Recetas. La raíz la
+     * reinicia a [MainTab.Recipes] cuando la sesión cambia o se borra.
+     */
+    private val _tab = MutableStateFlow(MainTab.Recipes)
+    val tab: StateFlow<MainTab> = _tab.asStateFlow()
+
+    /**
      * Se llama antes de entrar en la primera configuración o en el aviso del almacén desde
      * cualquier sitio: lo cargado (lista, detalle, fotos) es de una sesión que ya no vale.
      * Lo pone la raíz de la interfaz, que es quien tiene los ViewModels de recetas.
@@ -84,6 +93,11 @@ class AppViewModel(
     fun onSetupSaved() {
         onSessionDiscarded?.invoke()
         _screen.value = AppScreen.Recipes
+    }
+
+    /** Cambia de pestaña sin tocar la pantalla: las tres viven en [AppScreen.Recipes]. */
+    fun onTabSelected(tab: MainTab) {
+        _tab.value = tab
     }
 
     fun onOpenSettings() {
