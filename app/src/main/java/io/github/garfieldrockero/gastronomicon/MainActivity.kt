@@ -20,6 +20,7 @@ import io.github.garfieldrockero.gastronomicon.platform.AppContainer
 import io.github.garfieldrockero.gastronomicon.ui.recipes.RecipeDetailViewModel
 import io.github.garfieldrockero.gastronomicon.ui.recipes.RecipeListViewModel
 import io.github.garfieldrockero.gastronomicon.ui.recipes.RecipesRoute
+import io.github.garfieldrockero.gastronomicon.ui.recipes.TopRequestMemo
 import io.github.garfieldrockero.gastronomicon.ui.settings.SettingsRoute
 import io.github.garfieldrockero.gastronomicon.ui.settings.SettingsViewModel
 import io.github.garfieldrockero.gastronomicon.ui.setup.SetupRoute
