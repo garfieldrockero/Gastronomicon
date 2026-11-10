@@ -139,3 +139,26 @@ internal class RecipeDto(
     val recipeInstructions: List<StepDto?>? = null,
     val notes: List<NoteDto?>? = null,
 )
+
+/**
+ * `GroupSummary` de `GET /api/groups/self`, reducido a lo que la app pregunta:
+ * si el grupo tiene IA configurada. Lo demás (nombre, preferencias, proveedores
+ * con sus claves) no se declara, así que ni se lee.
+ */
+@Serializable
+internal class GroupSummaryDto(
+    val aiProviderSettings: AiProviderSettingsDto? = null,
+)
+
+/**
+ * `AIProviderSettingsOut`, solo con `aiEnabled`.
+ *
+ * Es anulable a propósito: `coerceInputValues` convertiría un `null` en el
+ * valor por defecto de un `Boolean` no anulable, y aquí un «no viene» tiene que
+ * poder distinguirse de un `false` para no esconder una función que el servidor
+ * sí tiene.
+ */
+@Serializable
+internal class AiProviderSettingsDto(
+    val aiEnabled: Boolean? = null,
+)

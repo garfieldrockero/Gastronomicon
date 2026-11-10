@@ -7,11 +7,13 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailState
 import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
+import io.github.garfieldrockero.gastronomicon.platform.ImportFileReader
 import io.github.garfieldrockero.gastronomicon.platform.openInBrowser
 
 /**
@@ -61,6 +63,9 @@ fun RecipesRoute(
     val editorState by editorViewModel.state.collectAsStateWithLifecycle()
     val importState by importViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // Lector del archivo que se elija para importar: solo lee lo que devuelve el
+    // selector del sistema, con tope y en UTF-8 estricto (ver `ImportFileReader`).
+    val importFileReader = remember(context) { ImportFileReader(context) }
 
     // Primera carga al entrar; si ya hay recetas o se está cargando, no hace nada.
     LaunchedEffect(Unit) { listViewModel.onShown() }
@@ -199,6 +204,12 @@ fun RecipesRoute(
             },
             onUrlChange = importViewModel::onUrlChange,
             onImport = importViewModel::onImport,
+            onDataTextChange = importViewModel::onDataTextChange,
+            onImportData = importViewModel::onImportData,
+            // El lector vive aquí (necesita el contexto) y el ViewModel lanza la
+            // lectura para poder cancelarla al cerrar o al cambiar de sesión.
+            onFilePicked = { uri -> importViewModel.onFilePicked(uri, importFileReader) },
+            onRemoveFile = importViewModel::onRemoveFile,
             onCancel = importViewModel::onCancel,
             onReviewList = {
                 listViewModel.onRefresh()

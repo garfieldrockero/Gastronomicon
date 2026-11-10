@@ -11,7 +11,7 @@ import java.util.Locale
  * transporte de mentira (para vistas previas de la interfaz) reciba algo que
  * no deba salir de la app.
  */
-class HttpRequest(
+class HttpRequest internal constructor(
     val method: HttpMethod,
     val path: String,
     val headers: Map<String, String> = emptyMap(),
@@ -30,6 +30,16 @@ class HttpRequest(
      * validación, y el resto de errores se quedan en el código HTTP.
      */
     val readErrorBody: Boolean = false,
+    /**
+     * Tope del cuerpo de ESTA petición. Casi siempre [MAX_BODY_BYTES]; solo
+     * importar con la IA lo sube, porque manda hasta 15 MiB de fotos además
+     * del texto (ver [multipartWithBodyLimit]). No es una propiedad: solo lo
+     * mira el `init` y después no hay nada que leer.
+     *
+     * El constructor es `internal` para que ese tope no se pueda ampliar desde
+     * fuera del núcleo por descuido: la app no construye peticiones.
+     */
+    bodyLimitBytes: Int = MAX_BODY_BYTES,
 ) {
     init {
         // Un GET no puede llevar cuerpo: en HttpURLConnection, poner
@@ -43,8 +53,8 @@ class HttpRequest(
         }
         // Tope del cuerpo que sale: una subida enorme por error (o un cuerpo
         // hostil construido por otro módulo) no debe llegar a la red.
-        if (body != null && body.size > MAX_BODY_BYTES) {
-            throw IllegalArgumentException("El cuerpo de la petición supera los $MAX_BODY_BYTES bytes.")
+        if (body != null && body.size > bodyLimitBytes) {
+            throw IllegalArgumentException("El cuerpo de la petición supera los $bodyLimitBytes bytes.")
         }
         if (!path.startsWith("/")) {
             throw IllegalArgumentException("La ruta de la petición tiene que empezar por «/».")
@@ -136,6 +146,32 @@ class HttpRequest(
             headers = mapOf("Content-Type" to body.contentType),
             body = body.bytes,
             readErrorBody = readErrorBody,
+        )
+
+        /**
+         * Como [multipart], pero con un tope de cuerpo propio, para la única
+         * petición que no cabe en [MAX_BODY_BYTES]: importar con la IA, que
+         * manda el texto y hasta 15 MiB de fotos juntos
+         * (`MealieClient.createRecipeWithAi`).
+         *
+         * Es `internal` a propósito: el tope de las peticiones normales no se
+         * toca y nadie fuera del núcleo puede ampliarlo. Quien llama ya ha
+         * comprobado que el cuerpo cabe; si aun así no cupiera, el `init`
+         * lanza y quien llama lo convierte en un rechazo local.
+         */
+        internal fun multipartWithBodyLimit(
+            method: HttpMethod,
+            path: String,
+            body: MultipartBody.Built,
+            maxBodyBytes: Int,
+            readErrorBody: Boolean = false,
+        ): HttpRequest = HttpRequest(
+            method = method,
+            path = path,
+            headers = mapOf("Content-Type" to body.contentType),
+            body = body.bytes,
+            readErrorBody = readErrorBody,
+            bodyLimitBytes = maxBodyBytes,
         )
 
         private val PRINTABLE_ASCII_WITH_SPACE = 0x20..0x7E

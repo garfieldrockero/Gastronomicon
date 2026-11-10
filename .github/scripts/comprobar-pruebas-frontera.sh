@@ -55,8 +55,11 @@ clases=(
   io.github.garfieldrockero.gastronomicon.core.client.RecipeDraftIngredientMergeTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientWriteTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientImportUploadTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientImportDataTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientMaybeCreatedTest
   io.github.garfieldrockero.gastronomicon.core.client.MealieClientCatalogTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientAiTest
+  io.github.garfieldrockero.gastronomicon.core.client.MealieClientAiLimitsTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingClientTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListControllerTest
   io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerControllerTest

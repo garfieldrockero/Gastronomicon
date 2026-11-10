@@ -45,7 +45,7 @@ sealed interface ApiResult<out T> {
     /** El borrador no ha pasado la validación local: no se ha enviado nada. */
     data class DraftInvalid(val errors: List<DraftError>) : ApiResult<Nothing>
 
-    /** Un dato de entrada no vale (URL, imagen): no se ha enviado nada. */
+    /** Un dato de entrada no vale (URL, imagen o texto a importar): no se ha enviado nada. */
     data class InputRejected(val reason: InputProblem) : ApiResult<Nothing>
 
     /**
@@ -55,12 +55,14 @@ sealed interface ApiResult<out T> {
     data class SavedButNotReloaded(val problem: ConnectionProblem) : ApiResult<Nothing>
 
     /**
-     * Solo en `createRecipe`, `importFromUrl`, `createUnit` y `createFood`:
-     * **puede** que el recurso se haya creado y no se sabe. Es el resultado de
-     * cualquier desenlace posterior al envío del cuerpo que no sea un rechazo
-     * definitivo: un plazo agotado, un corte de conexión, un 5xx (proxies
-     * incluidos, que pueden cortar mientras el servidor sigue trabajando), una
-     * respuesta demasiado grande o un 2xx sin el id o el nombre legibles.
+     * Solo en `createRecipe`, `importFromUrl`, `importFromData`,
+     * `createRecipeWithAi`, `createUnit` y `createFood`: **puede** que el
+     * recurso se haya creado y no se sabe. Es el resultado de cualquier
+     * desenlace posterior al envío del cuerpo que no sea un rechazo
+     * definitivo: un plazo agotado (también el de la IA, que tarda minutos), un
+     * corte de conexión, un 5xx (proxies incluidos, que pueden cortar mientras
+     * el servidor sigue trabajando), una respuesta demasiado grande o un 2xx
+     * sin el id o el nombre legibles.
      *
      * La interfaz debe avisar de que puede estar ya creado y pedir que se mire
      * la lista (de recetas o del catálogo) antes de repetir. Nunca se reintenta
@@ -79,14 +81,49 @@ enum class InputProblem {
     /** La URL a importar no es una `https` válida. */
     InvalidUrl,
 
+    /**
+     * El texto a importar (`importFromData`) está vacío o solo tiene espacios:
+     * el servidor contestaría un 422 y se habría gastado una petición.
+     *
+     * En la importación con IA (`createRecipeWithAi`) significa lo mismo con
+     * todo el conjunto: no hay ni texto, ni enlace, ni fotos que mandar (un
+     * texto en blanco cuenta como «no hay texto»).
+     */
+    EmptyData,
+
+    /** El texto a importar pasa de `MealieClient.MAX_IMPORT_DATA_BYTES` en UTF-8. */
+    DataTooLarge,
+
+    /**
+     * El texto a importar no es texto UTF-8 utilizable: lleva un carácter de
+     * control (NUL incluido; solo se admiten tabulador, salto de línea y
+     * retorno de carro) o un surrogado suelto, que no se puede codificar.
+     */
+    DataNotText,
+
     /** Los bytes no son una imagen webp, jpeg o png, o no coinciden con la extensión. */
     InvalidImage,
 
     /** La extensión no es `webp`, `jpeg` ni `png`. */
     UnsupportedImageType,
 
-    /** La imagen pasa del tope de subida. */
+    /**
+     * La imagen pasa del tope de subida (5 MiB).
+     *
+     * En la importación con IA también es este motivo cuando lo que pasa del
+     * tope es **el conjunto** de fotos (`MealieClient.MAX_AI_TOTAL_IMAGE_BYTES`,
+     * 15 MiB): el mensaje que toca es el mismo («quita fotos o hazlas más
+     * pequeñas»), y añadir otro valor solo multiplicaría los `when` de la
+     * interfaz.
+     */
     ImageTooLarge,
+
+    /**
+     * Se han elegido más fotos de las que admite la importación con IA
+     * (`MealieClient.MAX_AI_IMAGES`). Se rechaza antes de enviar nada: subir
+     * treinta fotos por error a un servicio de pago no se deshace.
+     */
+    TooManyImages,
 
     /**
      * La imagen lleva metadatos o no es de fiar: EXIF o XMP en JPEG, IPTC o

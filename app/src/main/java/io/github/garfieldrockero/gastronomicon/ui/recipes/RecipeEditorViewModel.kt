@@ -1468,7 +1468,13 @@ class RecipeEditorViewModel(
                     InputProblem.ImageHasMetadata -> PhotoProblem.HasMetadata
                     InputProblem.ImageTooLarge -> PhotoProblem.TooLarge
                     InputProblem.InvalidImage -> PhotoProblem.NotAnImage
-                    InputProblem.InvalidUrl, InputProblem.UnsupportedImageType -> PhotoProblem.Rejected
+                    InputProblem.InvalidUrl, InputProblem.UnsupportedImageType,
+                    // Los tres motivos siguientes son de importar texto y el último de la
+                    // importación con IA: subir una foto no los devuelve nunca, pero el
+                    // `when` sobre el enum tiene que agotarse.
+                    InputProblem.EmptyData, InputProblem.DataTooLarge, InputProblem.DataNotText,
+                    InputProblem.TooManyImages ->
+                        PhotoProblem.Rejected
                 },
             )
             ApiResult.Unauthorized ->

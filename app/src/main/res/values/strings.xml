@@ -167,7 +167,7 @@
     <string name="recipes_add">Añadir receta</string>
     <string name="recipes_add_write">Escribir una receta</string>
     <string name="recipes_add_write_hint">Rellena los datos a mano en este móvil.</string>
-    <string name="recipes_add_import">Importar de una web</string>
+    <string name="recipes_add_import">Importar (web, archivo o texto)</string>
     <string name="recipes_add_import_hint">Pega la dirección de la receta; la descarga tu Mealie.</string>
     <string name="detail_edit">Editar receta</string>
     <string name="detail_more">Más opciones</string>
@@ -331,7 +331,8 @@
 
     <!-- Importar receta por URL. -->
     <string name="import_title">Importar receta</string>
-    <string name="import_intro">Pega la dirección de una receta. La descarga y la guarda tu Mealie, no este móvil; a veces tarda hasta dos minutos.</string>
+    <string name="import_intro">Pega la dirección de la receta o, si la tienes guardada, elige el archivo o pega su JSON o su HTML. Lo interpreta tu Mealie, no este móvil; a veces tarda hasta dos minutos.</string>
+    <string name="import_url_section">Desde una dirección</string>
     <string name="import_url_label">Dirección de la receta</string>
     <string name="import_url_supporting">Tiene que empezar por https://</string>
     <string name="import_url_invalid">Esa dirección no vale. Tiene que empezar por https:// y ser una página de receta.</string>
@@ -342,6 +343,11 @@
     <string name="import_leave_text">Si sales, la app deja de esperar, pero tu Mealie puede terminar de importar la receta. Revisa la lista después.</string>
     <string name="import_leave_keep">Seguir esperando</string>
     <string name="import_leave_confirm">Dejar de esperar</string>
+    <!-- Salir con algo escrito o un archivo cargado, sin importación en curso. -->
+    <string name="import_leave_discard_title">¿Salir sin importar?</string>
+    <string name="import_leave_discard_text">Lo que has pegado o el archivo que has cargado se perderá. Tu Mealie no ha recibido nada todavía.</string>
+    <string name="import_leave_discard_keep">Seguir aquí</string>
+    <string name="import_leave_discard_confirm">Salir sin importar</string>
     <string name="import_cancel">Cancelar la importación</string>
     <string name="import_cancelled_title">Has dejado de esperar</string>
     <string name="import_cancelled_text">Puede que tu Mealie termine de importar la receta igualmente. Revisa la lista antes de repetir.</string>

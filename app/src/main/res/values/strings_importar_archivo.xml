@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Importar una receta desde un archivo o pegando texto.
+  El servidor interpreta el contenido (JSON de schema.org o el HTML de la
+  receta); la app no lo lee. Los textos no prometen nada que la app no haga.
+-->
+<resources>
+
+    <string name="import_data_section">Desde un archivo o texto pegado</string>
+    <string name="import_data_intro">Si tienes la receta guardada, elige el archivo de tu móvil o pégala aquí. La interpreta tu Mealie, no este móvil, y también puede tardar hasta dos minutos.</string>
+    <string name="import_data_text_label">Pegar JSON o HTML</string>
+    <string name="import_data_text_supporting">El JSON de la receta o el HTML de su página, tal cual.</string>
+    <string name="import_data_pick_file">Elegir archivo</string>
+    <string name="import_data_reading">Leyendo el archivo…</string>
+    <string name="import_data_file_loaded">Archivo cargado: %1$d KiB</string>
+    <string name="import_data_file_remove">Quitar</string>
+    <string name="import_data_file_remove_description">Quitar el archivo cargado y volver a pegar texto</string>
+    <string name="import_data_file_only">Se enviará el archivo elegido. Quítalo para pegar un texto.</string>
+    <string name="import_data_action_text">Importar el texto</string>
+    <string name="import_data_action_file">Importar el archivo</string>
+    <string name="import_data_rejected">Tu Mealie no ha aceptado ese contenido. Revisa que sea la receta en JSON o el HTML de su página.</string>
+    <string name="import_data_empty">El texto está vacío. Pega el JSON o el HTML de la receta.</string>
+    <string name="import_data_too_large">El contenido pasa de 1 MiB. Elige un archivo o un texto más pequeño.</string>
+    <string name="import_data_not_text">El contenido lleva caracteres que no se pueden enviar. Vuelve a copiar la receta o elige otro archivo.</string>
+    <string name="import_data_not_utf8">Ese archivo no es texto UTF-8. Abre la receta y copia su contenido.</string>
+    <string name="import_data_unreadable">No se ha podido leer el archivo. Prueba con otro.</string>
+
+</resources>

@@ -80,18 +80,21 @@ class CurrentUser internal constructor(val id: String) {
  * [NetworkError.InvalidResponse] si el cuerpo no es el JSON esperado. Esos
  * mensajes son fijos y no llevan token, URL ni cuerpo de la respuesta.
  *
- * Las operaciones de escritura, importar, subir imagen, listar organizadores,
- * el catálogo de unidades y alimentos (más abajo) y [currentUser] no lanzan por
- * red: devuelven [ApiResult]. El cuerpo de un 422 se lee solo ahí, con límite
- * de bytes, y se entrega saneado y acotado ([ValidationDetail]). Ninguna de las
- * dos formas lleva token, URL ni cuerpo crudo.
+ * Las operaciones de escritura, importar, importar con la IA, subir imagen,
+ * listar organizadores, el catálogo de unidades y alimentos (más abajo),
+ * [currentUser] y [aiAvailable] no lanzan por red: devuelven [ApiResult]. El
+ * cuerpo de un 422 se lee solo ahí, con límite de bytes, y se entrega saneado y
+ * acotado ([ValidationDetail]). Ninguna de las dos formas lleva token, URL ni
+ * cuerpo crudo.
  */
 class MealieClient(
     private val transport: HttpTransport,
     private val anonymousTransport: HttpTransport,
     /**
      * Transporte con token y límite de respuesta pequeño, solo para
-     * `/api/users/self` en [checkConnection]. Por defecto es [transport].
+     * `/api/users/self` ([checkConnection] y [currentUser]) y para
+     * `/api/groups/self` ([aiAvailable]): son respuestas de unos cientos de
+     * bytes. Por defecto es [transport].
      */
     private val selfTransport: HttpTransport = transport,
     /**
@@ -111,6 +114,13 @@ class MealieClient(
      * [UPLOAD_TOTAL_TIMEOUT_MS] explícito.
      */
     private val uploadTransport: HttpTransport = transport,
+    /**
+     * Transporte con token y un plazo total propio, solo para
+     * [createRecipeWithAi]: la IA del servidor puede tardar minutos. Por
+     * defecto es [transport]; [create] le pone [AI_TOTAL_TIMEOUT_MS] y su
+     * tiempo de lectura.
+     */
+    private val aiTransport: HttpTransport = transport,
 ) : RecipeListSource, RecipeDetailSource {
 
     /**
@@ -174,6 +184,48 @@ class MealieClient(
         val id = RecipeImage.normalizeId(dto.id)
             ?: return ApiResult.Failure(ConnectionProblem.Unknown)
         return ApiResult.Success(CurrentUser(id))
+    }
+
+    /**
+     * ¿Tiene este servidor la IA configurada? La interfaz lo usa para ofrecer o
+     * esconder «importar con IA»: si la IA la pone y la paga el servidor, sin
+     * proveedor configurado la opción solo llevaría a un error.
+     *
+     * **Fuente**: `GET /api/groups/self` (grupo «Groups: Self Service»: «Returns the Group
+     * Data for the Current User»), que devuelve un `GroupSummary` con
+     * `aiProviderSettings.aiEnabled`. Se usa ese y no
+     * `GET /api/groups/ai-providers/settings` porque aquel es el par de configuración del
+     * grupo (puede exigir ser administrador del grupo; el `openapi.json` no lo aclara) y
+     * expone además los proveedores: la app no debe pedir ser administrador para pintar un
+     * botón.
+     *
+     * **Desconocido**: si `aiProviderSettings` viene `null` o no viene (un
+     * Mealie anterior a esta función, o una respuesta recortada) no se puede
+     * afirmar ni que sí ni que no, y devolver `false` escondería una función
+     * que el servidor sí tiene. En ese caso el resultado es
+     * [ApiResult.Failure] con [ConnectionProblem.Unknown]: la interfaz ofrece la
+     * opción igualmente y, si de verdad no hay IA, el servidor contestará su
+     * error al intentarlo.
+     *
+     * No lanza por red: todo desenlace es un [ApiResult]. Ni el resultado ni sus
+     * mensajes llevan token, URL ni cuerpo de la respuesta.
+     */
+    fun aiAvailable(): ApiResult<Boolean> {
+        val response = try {
+            // Con el transporte de respuesta pequeña: un GroupSummary son unos
+            // cientos de bytes y no hay razón para leer 2 MiB.
+            selfTransport.execute(HttpRequest(HttpMethod.GET, GROUPS_SELF_PATH))
+        } catch (error: NetworkError) {
+            return ApiErrors.map(error)
+        }
+        val dto = try {
+            decode(GroupSummaryDto.serializer(), response)
+        } catch (error: NetworkError) {
+            return ApiErrors.map(error)
+        }
+        val enabled = dto.aiProviderSettings?.aiEnabled
+            ?: return ApiResult.Failure(ConnectionProblem.Unknown)
+        return ApiResult.Success(enabled)
     }
 
     /**
@@ -381,6 +433,133 @@ class MealieClient(
             )
             val response = importTransport.execute(
                 HttpRequest.json(HttpMethod.POST, "$RECIPES_PATH/create/url", encode(body), readErrorBody = true),
+            )
+            ApiResult.Success(readSlug(response))
+        }
+    }
+
+    /**
+     * `POST /api/recipes/create/html-or-json`: manda al SERVIDOR el HTML de una
+     * receta o su objeto `schema.org/Recipe` en JSON (campo `data` de
+     * `ScrapeRecipeData`), y es el servidor quien lo interpreta. La app no lo
+     * sanea, ni lo parsea, ni lo guarda: solo lo acota y lo envía.
+     *
+     * Antes de enviar nada ([ImportData.problemOf]): que no esté vacío ni sea
+     * solo espacios, que no pase de [MAX_IMPORT_DATA_BYTES] contados en **bytes
+     * UTF-8** (no en caracteres) y que no lleve controles —NUL incluido; solo se
+     * admiten tabulador, salto de línea y retorno de carro— ni surrogados
+     * sueltos. Si no cumple, [ApiResult.InputRejected] y no sale ninguna
+     * petición.
+     *
+     * `url` NO se manda: es opcional en el esquema y este endpoint no descarga
+     * nada. El resto de reglas son las de [importFromUrl] porque es la misma
+     * operación: [importTransport] (mismos plazos), sin reintento automático, y
+     * [ApiResult.MaybeCreated] en cuanto haya cualquier duda posterior al envío
+     * (5xx, plazo agotado, corte o 2xx sin slug legible). [ApiResult.Failure]
+     * solo si el fallo es anterior al envío.
+     *
+     * El texto no entra nunca en un mensaje, en un log ni en un `toString`: los
+     * resultados llevan solo el motivo.
+     */
+    fun importFromData(
+        data: String,
+        includeTags: Boolean = false,
+        includeCategories: Boolean = false,
+    ): ApiResult<String> {
+        val problem = ImportData.problemOf(data, MAX_IMPORT_DATA_BYTES)
+        if (problem != null) return ApiResult.InputRejected(problem)
+        // `url` se deja fuera a propósito: el esquema lo admite nulo y aquí no
+        // hay ninguna que mandar; mandarlo vacío sería inventarse un campo.
+        val body = JsonObject(
+            mapOf(
+                "data" to JsonPrimitive(data),
+                "includeTags" to JsonPrimitive(includeTags),
+                "includeCategories" to JsonPrimitive(includeCategories),
+            ),
+        )
+        val payload = encode(body)
+        // Defensa en profundidad, no un caso real: el tope de datos es 1 MiB y
+        // escapar comillas, barras y controles lo dobla como mucho. Si aun así
+        // el cuerpo pasara del tope de HttpRequest, su constructor lanzaría
+        // IllegalArgumentException y rompería el contrato de no lanzar.
+        if (payload.toByteArray(Charsets.UTF_8).size > HttpRequest.MAX_BODY_BYTES) {
+            return ApiResult.InputRejected(InputProblem.DataTooLarge)
+        }
+        return guardedCreate {
+            val response = importTransport.execute(
+                HttpRequest.json(
+                    HttpMethod.POST,
+                    "$RECIPES_PATH/create/html-or-json",
+                    payload,
+                    readErrorBody = true,
+                ),
+            )
+            ApiResult.Success(readSlug(response))
+        }
+    }
+
+    /**
+     * `POST /api/recipes/create/ai`: manda al SERVIDOR —que pone y paga su
+     * proveedor de IA— cualquier combinación de texto ([content]), enlace
+     * ([url]) y fotos ([images]), y devuelve el slug de la receta creada, ya
+     * validado. La app no habla con ninguna IA ni descarga el enlace.
+     *
+     * Antes de enviar nada ([AiImport.check]): al menos uno de los tres; el
+     * texto, con las mismas reglas que [importFromData] (máximo
+     * [MAX_IMPORT_DATA_BYTES] en bytes UTF-8, sin controles ni surrogados
+     * sueltos); el enlace, solo `https` y por [SafeUrl], como en
+     * [importFromUrl]; y las fotos, como en [uploadImage] (jpeg, png o webp,
+     * bytes mágicos de ese formato, máximo [MAX_IMAGE_BYTES] cada una y sin
+     * metadatos), con los topes de [MAX_AI_IMAGES] fotos y
+     * [MAX_AI_TOTAL_IMAGE_BYTES] en total. Si algo no cumple,
+     * [ApiResult.InputRejected] y no sale ninguna petición.
+     *
+     * `translateLanguage` **no se manda**: la app no traduce. El resto de
+     * reglas son las de sus hermanos: sin reintento automático nunca, y
+     * [ApiResult.MaybeCreated] en cuanto haya cualquier duda posterior al envío
+     * (5xx, plazo agotado, corte o 2xx sin slug legible). [ApiResult.Failure]
+     * solo si el fallo es anterior al envío.
+     *
+     * **Plazo**: la IA puede tardar minutos (el proveedor tiene su propio
+     * tiempo de espera de 300 s), así que va por [aiTransport] con
+     * [AI_TOTAL_TIMEOUT_MS]. Al vencer con el cuerpo ya enviado, el resultado es
+     * [ApiResult.MaybeCreated] con
+     * [ConnectionProblem.ServerNotResponding]: la receta puede estar
+     * creándose, o incluso creada, y repetir a ciegas dejaría dos. La interfaz
+     * tiene que decir «puede tardar» y mandar a mirar la lista antes de
+     * reintentar.
+     *
+     * El texto, el enlace y las fotos no entran nunca en un mensaje, en un log
+     * ni en un `toString`: los resultados llevan solo el motivo, y
+     * [AiImage.toString] no enseña los bytes.
+     */
+    fun createRecipeWithAi(
+        content: String?,
+        url: String?,
+        images: List<AiImage>,
+        createNewOrganizers: Boolean = false,
+    ): ApiResult<String> {
+        val plan = when (val check = AiImport.check(content, url, images)) {
+            is AiImportCheck.Invalid -> return ApiResult.InputRejected(check.problem)
+            is AiImportCheck.Valid -> check.plan
+        }
+        val body = AiImport.multipart(plan, createNewOrganizers)
+        // Defensa en profundidad, no un caso real: los topes de texto y de
+        // fotos ya dejan el cuerpo por debajo de MAX_BODY_BYTES. Si aun así no
+        // cupiera, el constructor de HttpRequest lanzaría y rompería el
+        // contrato de no lanzar.
+        if (body.bytes.size > AiImport.MAX_BODY_BYTES) {
+            return ApiResult.InputRejected(InputProblem.DataTooLarge)
+        }
+        return guardedCreate {
+            val response = aiTransport.execute(
+                HttpRequest.multipartWithBodyLimit(
+                    method = HttpMethod.POST,
+                    path = AI_PATH,
+                    body = body,
+                    maxBodyBytes = AiImport.MAX_BODY_BYTES,
+                    readErrorBody = true,
+                ),
             )
             ApiResult.Success(readSlug(response))
         }
@@ -834,6 +1013,16 @@ class MealieClient(
         const val ABOUT_PATH = "/api/app/about"
         const val SELF_PATH = "/api/users/self"
         const val RECIPES_PATH = "/api/recipes"
+
+        /**
+         * `GET /api/groups/self`: el grupo de la cuenta, con
+         * `aiProviderSettings` si el servidor lo rellena. Lo lee
+         * [aiAvailable] porque no exige ser administrador del grupo.
+         */
+        const val GROUPS_SELF_PATH = "/api/groups/self"
+
+        /** `POST /api/recipes/create/ai`: importar con la IA del servidor. */
+        const val AI_PATH = "/api/recipes/create/ai"
         const val UNITS_PATH = "/api/units"
         const val FOODS_PATH = "/api/foods"
 
@@ -855,6 +1044,13 @@ class MealieClient(
 
         /** Tope de elementos por página de etiquetas o categorías. */
         const val MAX_ORGANIZERS_PER_PAGE = 100
+
+        /**
+         * Tope del texto de importar desde JSON o HTML: 1 MiB contado en bytes
+         * UTF-8, no en caracteres (ver [ImportData]). [importFromData] rechaza
+         * lo que pase de aquí sin enviarlo.
+         */
+        const val MAX_IMPORT_DATA_BYTES = 1024 * 1024
 
         /** Importar por URL: el servidor descarga y analiza la página, que puede tardar. */
         private const val IMPORT_READ_TIMEOUT_MS = 110_000
@@ -884,6 +1080,44 @@ class MealieClient(
 
         /** Tope de una imagen de receta: una foto de móvil recodificada cabe de sobra. */
         const val MAX_IMAGE_BYTES = 5L * 1024 * 1024
+
+        /**
+         * Fotos como máximo en una importación con IA ([createRecipeWithAi]).
+         *
+         * Es una frontera local, no un límite del esquema: el servidor acepta
+         * la lista que le llegue, pero cada foto es una llamada al proveedor
+         * que paga la persona. Con seis, se rechaza antes de enviar nada.
+         */
+        const val MAX_AI_IMAGES = 5
+
+        /**
+         * Tope del conjunto de fotos de una importación con IA: 15 MiB, tres
+         * fotos de [MAX_IMAGE_BYTES] o cinco más pequeñas. El esquema tampoco
+         * lo pone; es para que una importación no se convierta en una subida de
+         * decenas de MiB por el móvil.
+         */
+        const val MAX_AI_TOTAL_IMAGE_BYTES = 15L * 1024 * 1024
+
+        /**
+         * Plazo total de la importación con IA: 180 s. El proveedor del
+         * servidor tiene 300 s de tiempo de espera, pero la app no puede tener
+         * al móvil pendiente de una petición indefinidamente; a los tres
+         * minutos se corta con un error tipado.
+         *
+         * Al vencer **con el cuerpo ya enviado** el resultado es
+         * [ApiResult.MaybeCreated], no un fallo: la IA puede seguir trabajando y
+         * la receta puede acabar creada. Si vence antes de enviar (conexión,
+         * TLS), es [ApiResult.Failure].
+         */
+        const val AI_TOTAL_TIMEOUT_MS = 180_000L
+
+        /**
+         * Tiempo de lectura de la respuesta de la IA, dentro del plazo total.
+         * Diez segundos menos que el total: así el plazo se agota entre lecturas
+         * con un [ConnectionProblem.ServerNotResponding] claro, y no justo al
+         * empezar a esperar la respuesta.
+         */
+        private const val AI_READ_TIMEOUT_MS = 170_000
 
         /**
          * Cliente para la sesión guardada, con el transporte real. Las
@@ -932,6 +1166,14 @@ class MealieClient(
                 activeNetwork = activeNetwork,
                 readTimeoutMs = UPLOAD_READ_TIMEOUT_MS,
                 totalTimeoutMs = UPLOAD_TOTAL_TIMEOUT_MS,
+            ),
+            aiTransport = UrlConnectionTransport.create(
+                serverUrl = session.serverUrl,
+                token = session.token,
+                allowLocalHttp = allowLocalHttp,
+                activeNetwork = activeNetwork,
+                readTimeoutMs = AI_READ_TIMEOUT_MS,
+                totalTimeoutMs = AI_TOTAL_TIMEOUT_MS,
             ),
             anonymousTransport = UrlConnectionTransport.createWithoutToken(
                 serverUrl = session.serverUrl,
