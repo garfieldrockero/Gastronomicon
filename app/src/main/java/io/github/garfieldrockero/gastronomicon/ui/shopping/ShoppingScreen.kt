@@ -94,6 +94,7 @@ import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.NoticeCard
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
 import io.github.garfieldrockero.gastronomicon.ui.components.problemTextRes
@@ -418,7 +419,12 @@ private fun ShoppingLines(
     val view = list.view
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = Spacing.medium, vertical = Spacing.small),
+        contentPadding = PaddingValues(
+            start = Spacing.medium,
+            end = Spacing.medium,
+            top = Spacing.small,
+            bottom = 0.dp,
+        ),
     ) {
         item(key = "summary") {
             Summary(
@@ -440,15 +446,18 @@ private fun ShoppingLines(
         for ((index, section) in view.sections.withIndex()) {
             if (section.title.isNotEmpty()) {
                 item(key = "section-$index") {
-                    Text(
-                        text = section.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                    // Mismo título de sección que el resto de la app (tamaño y color del
+                    // tema, y marcado como encabezado para TalkBack): aquí solo cambia el
+                    // aire de arriba y abajo. Sin `stickyHeader`, que además no es estable.
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = Spacing.medium, bottom = Spacing.extraSmall)
-                            .semantics { heading() },
-                    )
+                            .padding(top = Spacing.medium, bottom = Spacing.extraSmall),
+                    ) {
+                        // Más pequeña que el título de pantalla: a texto grande una sección
+                        // corta («Verdura») no debe ocupar tres líneas.
+                        SectionTitle(section.title, style = MaterialTheme.typography.titleMedium)
+                    }
                 }
             }
             items(items = section.lines, key = { it.itemId }) { line ->
@@ -495,10 +504,12 @@ private fun ClearCheckedButton(count: Int, clearing: Boolean, enabled: Boolean, 
     OutlinedButton(
         onClick = onClick,
         enabled = enabled && !clearing,
+        // El hueco va por fuera del alto mínimo: así el botón mide los 56 dp del token
+        // (antes el relleno se los comía y se quedaba en 48) y se pulsa con el pulgar.
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = Sizes.ActionMinHeight)
             .padding(vertical = Spacing.extraSmall)
+            .heightIn(min = Sizes.ActionMinHeight)
             .semantics { if (clearing) liveRegion = LiveRegionMode.Polite },
     ) {
         if (clearing) {
@@ -552,7 +563,9 @@ private fun ShoppingRow(
                 )
                 Text(
                     text = line.text,
-                    style = MaterialTheme.typography.titleMedium,
+                    // El mismo tamaño que un renglón de ingrediente del detalle: es la
+                    // misma cosa (texto con casilla) y se lee igual de lejos, de pie.
+                    style = MaterialTheme.typography.bodyLarge,
                     color = if (line.checked) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
@@ -590,56 +603,61 @@ private fun AddBar(
     focus: FocusRequester,
 ) {
     Surface(
+        // El color de superficie del sistema, tal cual: sin elevación tonal que lo tiña
+        // (antes llevaba 3 dp y salía con un velo del color de acento). La barra se
+        // separa de la lista por su línea de arriba, que es lo que se ve de verdad.
         color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 3.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(
-            // Fuera de la zona de gestos/botones del sistema y por encima del teclado.
-            modifier = Modifier
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
-                .padding(Spacing.medium),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.small),
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                label = { Text(stringResource(R.string.shopping_add_label)) },
-                singleLine = true,
-                // readOnly y no enabled: un campo deshabilitado pierde el foco y cierra el teclado.
-                readOnly = adding,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Done,
-                ),
-                keyboardActions = KeyboardActions(onDone = { onAdd() }),
+        Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            Row(
+                // Fuera de la zona de gestos/botones del sistema y por encima del teclado.
                 modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focus),
-            )
-            FilledIconButton(
-                onClick = onAdd,
-                enabled = !adding && draft.isNotBlank(),
-                modifier = Modifier.size(Sizes.AddButton),
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+                    .padding(Spacing.medium),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.small),
             ) {
-                if (adding) {
-                    val addingText = stringResource(R.string.shopping_adding)
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(Sizes.SmallSpinner)
-                            .semantics {
-                                contentDescription = addingText
-                                liveRegion = LiveRegionMode.Polite
-                            },
-                        color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_add),
-                        contentDescription = stringResource(R.string.shopping_add_button),
-                    )
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = onDraftChange,
+                    label = { Text(stringResource(R.string.shopping_add_label)) },
+                    singleLine = true,
+                    // readOnly y no enabled: un campo deshabilitado pierde el foco y cierra el teclado.
+                    readOnly = adding,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { onAdd() }),
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focus),
+                )
+                FilledIconButton(
+                    onClick = onAdd,
+                    enabled = !adding && draft.isNotBlank(),
+                    modifier = Modifier.size(Sizes.AddButton),
+                ) {
+                    if (adding) {
+                        val addingText = stringResource(R.string.shopping_adding)
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(Sizes.SmallSpinner)
+                                .semantics {
+                                    contentDescription = addingText
+                                    liveRegion = LiveRegionMode.Polite
+                                },
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_add),
+                            contentDescription = stringResource(R.string.shopping_add_button),
+                        )
+                    }
                 }
             }
         }
@@ -1715,6 +1733,123 @@ private fun ShoppingSelectorListsPreview() {
             ui(
                 loaded(ShoppingPreviewData.withSections, name = "Mercado del sábado"),
                 picker = choices(openListId = PREVIEW_SECOND_LIST_ID),
+            ),
+        )
+    }
+}
+
+// ------------------------------------------------------------------ piezas sueltas
+
+/**
+ * Tres renglones de ejemplo (uno marcado, uno largo) con su título de sección: es la
+ * pieza que se toca a menudo y no se ve bien dentro de la pantalla entera. Datos
+ * inventados, sin nada del servidor.
+ */
+private val previewLines = listOf(
+    ShoppingLine(
+        itemId = "00000000-0000-4000-8000-000000000201",
+        text = "2 kg de patatas",
+        checked = false,
+        quantity = 2.0,
+        note = "",
+        position = 1,
+    ),
+    ShoppingLine(
+        itemId = "00000000-0000-4000-8000-000000000202",
+        text = "Yogures naturales, los de siempre",
+        checked = true,
+        quantity = 0.0,
+        note = "",
+        position = 2,
+    ),
+    ShoppingLine(
+        itemId = "00000000-0000-4000-8000-000000000203",
+        text = "Bolsas de basura grandes, las de 100 litros",
+        checked = false,
+        quantity = 0.0,
+        note = "",
+        position = 3,
+    ),
+)
+
+@Composable
+private fun ShoppingRowsPreviewContent() {
+    Surface(color = MaterialTheme.colorScheme.background) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.medium, vertical = Spacing.small),
+        ) {
+            SectionTitle("Verdura", style = MaterialTheme.typography.titleMedium)
+            for (line in previewLines) {
+                ShoppingRow(line = line, busy = false, onToggle = {}, onEdit = {})
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShoppingAddBarPreviewContent(draft: String, adding: Boolean) {
+    val focus = remember { FocusRequester() }
+    Surface(color = MaterialTheme.colorScheme.background) {
+        AddBar(
+            draft = draft,
+            adding = adding,
+            onDraftChange = {},
+            onAdd = {},
+            focus = focus,
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 320)
+@Composable
+private fun ShoppingRowsPreview() {
+    GastronomiconTheme { ShoppingRowsPreviewContent() }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 320, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun ShoppingRowsDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) { ShoppingRowsPreviewContent() }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 480, fontScale = 2f)
+@Composable
+private fun ShoppingRowsLargeTextPreview() {
+    GastronomiconTheme { ShoppingRowsPreviewContent() }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 200)
+@Composable
+private fun ShoppingAddBarPreview() {
+    GastronomiconTheme { ShoppingAddBarPreviewContent(draft = "Leche", adding = false) }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 200, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun ShoppingAddBarDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        ShoppingAddBarPreviewContent(draft = "Leche", adding = true)
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 260, fontScale = 2f)
+@Composable
+private fun ShoppingAddBarLargeTextPreview() {
+    GastronomiconTheme { ShoppingAddBarPreviewContent(draft = "Aceite de oliva", adding = false) }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 720, fontScale = 2f, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun ShoppingNoticeLargeTextDarkPreview() {
+    // El aviso con tope del 50 %, de noche y con el texto al 2×: se desplaza por dentro
+    // y deja ver la lista y el botón de recargar.
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        ShoppingPreview(
+            ui(
+                loaded(ShoppingPreviewData.withSections),
+                picker = choices(problem = ShoppingListPickerProblem.Rejected(409)),
             ),
         )
     }

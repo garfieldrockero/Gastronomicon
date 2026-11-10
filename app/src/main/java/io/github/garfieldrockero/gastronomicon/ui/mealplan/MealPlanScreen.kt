@@ -2,6 +2,7 @@ package io.github.garfieldrockero.gastronomicon.ui.mealplan
 
 import android.content.res.Configuration
 import androidx.annotation.StringRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -26,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -66,6 +68,7 @@ import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.problemTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.problemTitleRes
 import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingNoticeCard
@@ -202,6 +205,8 @@ fun MealPlanScreen(
             if (week != null && week.hasMeals) {
                 ExtendedFloatingActionButton(
                     onClick = { if (!plan.isBusy) actions.onAddClick(null) },
+                    // El radio sale del tema (`shapes.large`), no del valor de plantilla.
+                    shape = MaterialTheme.shapes.large,
                     icon = {
                         Icon(
                             painter = painterResource(R.drawable.ic_add),
@@ -383,15 +388,14 @@ private fun WeekHeader(
             .padding(horizontal = if (inList) 0.dp else Spacing.medium, vertical = Spacing.medium),
         verticalArrangement = Arrangement.spacedBy(Spacing.small),
     ) {
-        Text(
+        SectionTitle(
             text = week.title,
+            // Al cambiar de semana el lector de pantalla anuncia la nueva. Es lo único que
+            // necesita el título de la semana, así que se pinta con el de sección común
+            // (mismo tamaño, color y encabezado que el resto de la app).
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            // Un escalón por encima de los días (titleLarge) para que mande la semana.
             style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.primary,
-            // Al cambiar de semana el lector de pantalla anuncia la nueva.
-            modifier = Modifier.semantics {
-                heading()
-                liveRegion = LiveRegionMode.Polite
-            },
         )
         if (!week.isCurrentWeek) {
             OutlinedButton(
@@ -438,11 +442,14 @@ private fun DayCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
+        // La misma tarjeta que la lista de recetas: esquina grande del tema y borde de 1 dp.
+        // El tono solo no la separa del fondo (1,06:1 en claro y 1,07:1 en oscuro).
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
             containerColor = if (day.isToday) {
                 MaterialTheme.colorScheme.primaryContainer
             } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
+                MaterialTheme.colorScheme.surfaceContainer
             },
             contentColor = if (day.isToday) {
                 MaterialTheme.colorScheme.onPrimaryContainer
@@ -450,6 +457,7 @@ private fun DayCard(
                 MaterialTheme.colorScheme.onSurface
             },
         ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
         Column(
             modifier = Modifier.padding(Spacing.medium),
@@ -528,7 +536,9 @@ private fun MealItem(
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = MaterialTheme.shapes.medium,
+        // Concéntrica con la tarjeta del día: 24 dp de esquina menos los 16 dp de relleno dan
+        // 8 dp (`shapes.small`). Es una caja dentro de otra, más pequeña y sin segundo marco.
+        shape = MaterialTheme.shapes.small,
     ) {
         Column(
             modifier = Modifier.padding(Spacing.medium),
@@ -605,42 +615,47 @@ private fun WeekBar(
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        val previous = stringResource(R.string.plan_week_previous)
-        val next = stringResource(R.string.plan_week_next)
-        Row(
-            modifier = Modifier
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
-                .padding(horizontal = Spacing.medium, vertical = Spacing.small),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.small),
-        ) {
-            OutlinedButton(
-                onClick = onPrevious,
-                enabled = !busy,
+        Column {
+            // El tono solo no despega la barra del fondo (1,06:1): la delimita una línea de
+            // 1 dp con `outline`, la misma que llevan las tarjetas de los días.
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            val previous = stringResource(R.string.plan_week_previous)
+            val next = stringResource(R.string.plan_week_next)
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = Sizes.MinTouchTarget)
-                    .semantics { contentDescription = previous },
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+                    .padding(horizontal = Spacing.medium, vertical = Spacing.small),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.small),
             ) {
-                // El chevrón es solo adorno: el lector dice «Semana anterior».
-                Icon(
-                    painter = painterResource(R.drawable.ic_chevron_left),
-                    contentDescription = null,
-                )
-                Text(text = previous, modifier = Modifier.padding(start = Spacing.small))
-            }
-            OutlinedButton(
-                onClick = onNext,
-                enabled = !busy,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = Sizes.MinTouchTarget)
-                    .semantics { contentDescription = next },
-            ) {
-                Text(text = next, modifier = Modifier.padding(end = Spacing.small))
-                Icon(
-                    painter = painterResource(R.drawable.ic_chevron_right),
-                    contentDescription = null,
-                )
+                OutlinedButton(
+                    onClick = onPrevious,
+                    enabled = !busy,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = Sizes.MinTouchTarget)
+                        .semantics { contentDescription = previous },
+                ) {
+                    // El chevrón es solo adorno: el lector dice «Semana anterior».
+                    Icon(
+                        painter = painterResource(R.drawable.ic_chevron_left),
+                        contentDescription = null,
+                    )
+                    Text(text = previous, modifier = Modifier.padding(start = Spacing.small))
+                }
+                OutlinedButton(
+                    onClick = onNext,
+                    enabled = !busy,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = Sizes.MinTouchTarget)
+                        .semantics { contentDescription = next },
+                ) {
+                    Text(text = next, modifier = Modifier.padding(end = Spacing.small))
+                    Icon(
+                        painter = painterResource(R.drawable.ic_chevron_right),
+                        contentDescription = null,
+                    )
+                }
             }
         }
     }
@@ -848,6 +863,20 @@ private fun MealPlanWeekDarkPreview() {
     GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.ready(), MealPlanActions()) }
 }
 
+// Semana llena con texto grande y en oscuro: la tarjeta del día, su borde de 1 dp y el
+// botón flotante, que es lo que más sufre a 2×.
+@Preview(
+    showBackground = true,
+    widthDp = 360,
+    heightDp = 780,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+    fontScale = 2f,
+)
+@Composable
+private fun MealPlanWeekDarkLargeTextPreview() {
+    GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.ready(), MealPlanActions()) }
+}
+
 @Preview(showBackground = true, widthDp = 360, heightDp = 780, fontScale = 2f)
 @Composable
 private fun MealPlanWeekLargeTextPreview() {
@@ -860,9 +889,29 @@ private fun MealPlanOtherWeekPreview() {
     GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.otherWeek(), MealPlanActions()) }
 }
 
+// Otra semana con texto grande y en oscuro: «Ir a esta semana», «Añadir la semana a la
+// compra» y la barra de cambiar de semana son tres filas de botones seguidas.
+@Preview(
+    showBackground = true,
+    widthDp = 360,
+    heightDp = 780,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+    fontScale = 2f,
+)
+@Composable
+private fun MealPlanOtherWeekDarkLargeTextPreview() {
+    GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.otherWeek(), MealPlanActions()) }
+}
+
 @Preview(showBackground = true, widthDp = 360, heightDp = 780)
 @Composable
 private fun MealPlanEmptyPreview() {
+    GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.emptyWeek(), MealPlanActions()) }
+}
+
+@Preview(showBackground = true, widthDp = 360, heightDp = 780, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun MealPlanEmptyDarkPreview() {
     GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.emptyWeek(), MealPlanActions()) }
 }
 
