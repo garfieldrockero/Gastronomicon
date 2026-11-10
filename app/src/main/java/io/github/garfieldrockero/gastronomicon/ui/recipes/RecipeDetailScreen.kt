@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -454,13 +456,22 @@ private fun RecipeDetailContent(
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
         // Sin red no hay foto: la copia no guarda imágenes, así que ni se intenta.
         if (view.imageRecipeId != null && offline == null) {
+            // A sangre, pegada a la barra y con las esquinas de arriba redondeadas. Sin
+            // texto encima: el nombre va justo debajo como encabezado y no se lee dos veces.
             RecipePhoto(
                 recipeId = view.imageRecipeId,
                 loader = imageLoader,
                 maxSidePx = heroPx,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(HERO_ASPECT),
+                    .aspectRatio(HERO_ASPECT)
+                    .clip(
+                        // Las esquinas de arriba de `shapes.large`; abajo, rectas.
+                        MaterialTheme.shapes.large.copy(
+                            bottomStart = ZeroCornerSize,
+                            bottomEnd = ZeroCornerSize,
+                        ),
+                    ),
             )
         }
 
@@ -1004,7 +1015,30 @@ private fun DetailPreview(
 @Preview(showBackground = true)
 @Composable
 private fun RecipeDetailLoadedPreview() {
+    // Sin foto: la receta empieza directamente por el nombre.
     GastronomiconTheme { DetailPreview(RecipeDetailState.Ready(RecipePreviewData.detail)) }
+}
+
+// Con foto: el héroe va a sangre, con las esquinas de arriba redondeadas y sin texto
+// encima. Sin loader no se descarga nada: se ve el marco, como antes de que llegue la foto.
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeDetailPhotoPreview() {
+    GastronomiconTheme { DetailPreview(RecipeDetailState.Ready(RecipePreviewData.detailWithPhoto)) }
+}
+
+@Preview(showBackground = true, widthDp = 360, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeDetailPhotoDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        DetailPreview(RecipeDetailState.Ready(RecipePreviewData.detailWithPhoto))
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeDetailPhotoLargeTextPreview() {
+    GastronomiconTheme { DetailPreview(RecipeDetailState.Ready(RecipePreviewData.detailWithPhoto)) }
 }
 
 @Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)

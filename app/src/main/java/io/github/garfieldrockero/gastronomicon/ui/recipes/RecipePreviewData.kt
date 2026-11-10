@@ -53,6 +53,18 @@ internal object RecipePreviewData {
         summary("lentejas-de-la-abuela", "Lentejas de la abuela", "Con chorizo y un buen sofrito. Mejor del día anterior.", "1 h 30 min", 3.0),
     )
 
+    /**
+     * Las mismas recetas como si el servidor les hubiera dado foto: unas sí y otras no,
+     * como en un servidor de verdad. Sirve para previsualizar la tarjeta con la foto
+     * lateral (en las previews no hay red: se ve el marco de la foto).
+     */
+    val summariesWithPhotos: List<RecipeSummary> = summaries.mapIndexed { index, row ->
+        if (index % 2 == 0) row.copy(id = previewPhotoId(index), hasImage = true) else row
+    }
+
+    /** Id de mentira con forma de UUID: no es de ningún servidor ni de ninguna receta real. */
+    private fun previewPhotoId(index: Int): String = "0a0a0a0a-0000-4000-8000-00000000000$index"
+
     private fun text(vararg spans: InlineSpan) = SanitizedHtml(listOf(HtmlBlock.Paragraph(spans.toList())))
 
     private fun plain(value: String) = InlineSpan.Text(value)
@@ -135,6 +147,14 @@ internal object RecipePreviewData {
     )
 
     val detail: RecipeDetailView = RecipeDetailView.from(recipe)
+
+    /**
+     * La receta de ejemplo como si el servidor le hubiera dado una foto (id inventado):
+     * así se previsualiza el héroe a sangre con las esquinas de arriba redondeadas.
+     */
+    val detailWithPhoto: RecipeDetailView = RecipeDetailView.from(
+        recipe.copy(id = previewPhotoId(9), hasImage = true),
+    )
 
     /**
      * La receta de ejemplo con un paso que traía una imagen o un vídeo: el saneador

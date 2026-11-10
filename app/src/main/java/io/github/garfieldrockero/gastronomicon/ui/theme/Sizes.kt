@@ -17,12 +17,19 @@ object Sizes {
      */
     val MinTouchTarget = 48.dp
 
-    /** Foto de una receta en la lista: cuadrada, y más pequeña con el texto grande. */
-    val RecipeRowPhoto = 88.dp
+    /**
+     * Foto de una receta en la lista: cuadrada, protagonista y lo bastante grande
+     * para reconocer el plato de un vistazo. Con el texto del sistema grande se
+     * achica, porque el nombre necesita ese sitio.
+     */
+    val RecipeRowPhoto = 96.dp
     val RecipeRowPhotoLargeText = 56.dp
 
-    /** Recorte de la foto de una fila (no es una forma del tema: es el marco de la foto). */
-    val PhotoCorner = 12.dp
+    /**
+     * Recorte de la foto de una fila: concéntrico con la tarjeta (24 dp de esquina
+     * menos 8 dp de relleno), para que las dos curvas se vean paralelas.
+     */
+    val PhotoCorner = 16.dp
 
     /** Botones del selector de raciones del detalle. */
     val StepperButton = 56.dp

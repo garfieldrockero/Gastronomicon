@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -632,19 +633,26 @@ private fun RecipeRow(
 ) {
     val recipe = row.summary
     // Con texto grande la foto se achica para dejarle sitio al nombre.
-    val photoSize = if (isLargeText()) Sizes.RecipeRowPhotoLargeText else Sizes.RecipeRowPhoto
+    val largeText = isLargeText()
+    val photoSize = if (largeText) Sizes.RecipeRowPhotoLargeText else Sizes.RecipeRowPhoto
     Card(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = photoSize + Spacing.small * 2),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        // El tono solo no basta (1,06:1 con el fondo): el límite de la tarjeta lo marca un
+        // borde de 1 dp con `outline` (4,3:1 en claro y 5,3:1 en oscuro).
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
         Row(
             modifier = Modifier.padding(Spacing.small),
             horizontalArrangement = Arrangement.spacedBy(Spacing.medium),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Decorativa a propósito: el nombre va al lado y TalkBack no lee la foto.
+            // `photoPx` es el tope que ya calcula la pantalla; aquí no se cambia la carga.
             RecipePhoto(
                 recipeId = if (recipe.hasImage) recipe.id else null,
                 loader = imageLoader,
@@ -661,15 +669,19 @@ private fun RecipeRow(
                     text = row.name,
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 3,
+                    // Dos líneas bastan para reconocer el plato y dejan cuatro o cinco
+                    // filas por pantalla; el nombre entero está en el detalle.
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Una línea también con texto grande: quien lo usa no pierde la información
+                // (el nombre pasó a dos líneas para compensar). Entera en el detalle.
                 if (recipe.description.isNotEmpty()) {
                     Text(
                         text = recipe.description,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -854,6 +866,9 @@ private val loadedList = RecipeListState(
     loadedOnce = true,
 )
 
+// Las mismas recetas como si el servidor les hubiera dado foto (unas sí y otras no).
+private val loadedPhotoList = loadedList.copy(items = RecipePreviewData.summariesWithPhotos)
+
 @Composable
 private fun ListPreview(state: RecipeListUiState) {
     RecipeListScreen(
@@ -876,19 +891,36 @@ private fun ListPreview(state: RecipeListUiState) {
 @Preview(showBackground = true)
 @Composable
 private fun RecipeListLoadedPreview() {
+    // Sin foto: así se ve una receta a la que le falta la imagen.
     GastronomiconTheme { ListPreview(previewState(loadedList.copy(hasMore = false))) }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeListLoadedPhotoPreview() {
+    GastronomiconTheme { ListPreview(previewState(loadedPhotoList.copy(hasMore = false))) }
 }
 
 @Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun RecipeListLoadedDarkPreview() {
-    GastronomiconTheme(mode = ThemeMode.DARK) { ListPreview(previewState(loadedList.copy(hasMore = false))) }
+    GastronomiconTheme(mode = ThemeMode.DARK) { ListPreview(previewState(loadedPhotoList.copy(hasMore = false))) }
 }
 
 @Preview(showBackground = true, widthDp = 360, fontScale = 2f)
 @Composable
 private fun RecipeListLoadedLargeTextPreview() {
-    GastronomiconTheme { ListPreview(previewState(loadedList.copy(phase = ListPhase.LoadingMore))) }
+    GastronomiconTheme {
+        ListPreview(previewState(loadedPhotoList.copy(phase = ListPhase.LoadingMore)))
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeListLoadedLargeTextDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        ListPreview(previewState(loadedPhotoList.copy(hasMore = false)))
+    }
 }
 
 @Preview(showBackground = true)
@@ -1099,4 +1131,49 @@ private fun RecipeListAddSheetPreview() {
 @Composable
 private fun RecipeListAddSheetLargeTextPreview() {
     AddSheetPreview()
+}
+
+// La fila de cerca: la tarjeta sobre el fondo de la app, para comprobar que se distingue
+// en claro, que la foto mide 96 dp y que el texto no se corta ni a 360 dp ni a 2×.
+// En las previews no hay red: de la foto se ve el marco, igual que antes de que llegue.
+
+@Composable
+private fun RowPreview(rows: List<RecipeSummaryRow>) {
+    Surface(color = MaterialTheme.colorScheme.background) {
+        val photoPx = with(LocalDensity.current) { Sizes.RecipeRowPhoto.roundToPx() }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.medium),
+            verticalArrangement = Arrangement.spacedBy(Spacing.medium),
+        ) {
+            for (row in rows) {
+                RecipeRow(row = row, imageLoader = null, photoPx = photoPx, onClick = {})
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeRowPhotoPreview() {
+    GastronomiconTheme { RowPreview(loadedPhotoList.visibleRows) }
+}
+
+@Preview(showBackground = true, widthDp = 360, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeRowPhotoDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) { RowPreview(loadedPhotoList.visibleRows) }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeRowPhotoLargeTextPreview() {
+    GastronomiconTheme { RowPreview(loadedPhotoList.visibleRows) }
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeRowNoPhotoLargeTextDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) { RowPreview(loadedList.visibleRows) }
 }
