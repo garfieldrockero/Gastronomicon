@@ -59,7 +59,7 @@ jobs:
       # Las pruebas de app/ que no necesitan Android (p. ej. el orden de los almacenes de
       # sesión y de ámbito offline). Corre en este job porque no tiene secretos de firma.
       - name: Pruebas de la app
-        run: gradle --no-daemon :app:testReleaseUnitTest
+        run: gradle --no-daemon :app:test
 
       # Que las pruebas de la frontera del HTTP local se hayan ejecutado y pasado
       # (tests > 0, sin fallos, errores ni omitidas), no solo que existan.
