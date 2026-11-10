@@ -1,6 +1,8 @@
 package io.github.garfieldrockero.gastronomicon.ui.recipes
 
 import android.content.res.Configuration
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -21,9 +24,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
@@ -34,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -41,11 +47,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -55,8 +65,10 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,6 +133,9 @@ fun RecipeListScreen(
         keyboard?.hide()
         onClearSearch()
     }
+    // La hoja del «+» es solo interfaz: no guarda nada del servidor, solo que está
+    // abierta. Con `rememberSaveable` no se cierra sola al girar el móvil.
+    var addSheetVisible by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -135,12 +150,6 @@ fun RecipeListScreen(
                     )
                 },
                 actions = {
-                    IconButton(onClick = onImportRecipe) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_link),
-                            contentDescription = stringResource(R.string.recipes_import),
-                        )
-                    }
                     IconButton(onClick = onRefresh, enabled = !state.list.isLoading) {
                         Icon(
                             painter = painterResource(R.drawable.ic_refresh),
@@ -166,10 +175,16 @@ fun RecipeListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onCreateRecipe) {
+            FloatingActionButton(
+                onClick = {
+                    // Con el teclado del buscador abierto, la hoja quedaría medio tapada.
+                    keyboard?.hide()
+                    addSheetVisible = true
+                },
+            ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_add),
-                    contentDescription = stringResource(R.string.recipes_create),
+                    contentDescription = stringResource(R.string.recipes_add),
                 )
             }
         },
@@ -228,6 +243,130 @@ fun RecipeListScreen(
                 onCreateRecipe = onCreateRecipe,
                 modifier = Modifier.weight(1f),
             )
+        }
+    }
+
+    // El «+» no crea nada por su cuenta: pregunta antes qué se quiere hacer. La hoja
+    // se cierra sola (Atrás, arrastre o tocar fuera) y, al elegir, deja paso a la
+    // pantalla que toca: no se queda encima del formulario ni de la importación.
+    if (addSheetVisible) {
+        ModalBottomSheet(
+            onDismissRequest = { addSheetVisible = false },
+            // Es una hoja corta: sin parada a media altura, que solo pediría un gesto más.
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            AddRecipeSheetContent(
+                onCreate = {
+                    addSheetVisible = false
+                    onCreateRecipe()
+                },
+                onImport = {
+                    addSheetVisible = false
+                    onImportRecipe()
+                },
+            )
+        }
+    }
+}
+
+// ------------------------------------------------------------------ hoja del «+»
+
+/**
+ * Hoja del botón «+»: dos acciones grandes, con icono y una línea que dice qué hace
+ * cada una. Sin estado del servidor: no lee ni guarda nada, solo avisa de lo elegido.
+ *
+ * El título va como `paneTitle` para que el lector de pantalla anuncie la hoja al
+ * abrirse, y como encabezado para poder saltar a él.
+ */
+@Composable
+private fun AddRecipeSheetContent(
+    onCreate: () -> Unit,
+    onImport: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = stringResource(R.string.recipes_add)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { paneTitle = title }
+            // La barra de gestos no se come la última acción.
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            // Con el texto al 2× y una pantalla baja, las dos acciones se desplazan
+            // en vez de quedar cortadas.
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.medium, vertical = Spacing.medium),
+        verticalArrangement = Arrangement.spacedBy(Spacing.medium),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.semantics { heading() },
+        )
+        SheetActionRow(
+            iconRes = R.drawable.ic_edit,
+            title = stringResource(R.string.recipes_add_write),
+            description = stringResource(R.string.recipes_add_write_hint),
+            onClick = onCreate,
+        )
+        SheetActionRow(
+            iconRes = R.drawable.ic_link,
+            title = stringResource(R.string.recipes_add_import),
+            description = stringResource(R.string.recipes_add_import_hint),
+            onClick = onImport,
+        )
+    }
+}
+
+/**
+ * Acción de la hoja: fila entera pulsable, con el icono a la izquierda y dos líneas de
+ * texto. El título ya es el texto que se lee y el rol anuncia que es un botón: no se
+ * repite como pista del toque, que TalkBack leería dos veces.
+ */
+@Composable
+private fun SheetActionRow(
+    @DrawableRes iconRes: Int,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizes.MinTouchTarget)
+            // Recorta el toque (y su onda) a la forma de la tarjeta.
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(role = Role.Button, onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            modifier = Modifier.padding(Spacing.medium),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(iconRes),
+                // El texto de al lado ya dice qué hace: repetirlo aquí sobraría.
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(SheetActionIcon),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(Spacing.extraSmall),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -708,6 +847,9 @@ private val PhotoSizeLargeText = 56.dp
 private val PhotoCorner = 12.dp
 private val SmallSpinner = 24.dp
 
+/** Icono de las acciones de la hoja del «+»: algo mayor que el de una barra. */
+private val SheetActionIcon = 28.dp
+
 // ------------------------------------------------------------------ previews
 
 private fun previewState(list: RecipeListState, query: String = "") = RecipeListUiState(list, query)
@@ -941,4 +1083,28 @@ private fun RecipeListServerSearchPreview() {
             ),
         )
     }
+}
+
+// La hoja se prevé por dentro (sin el `ModalBottomSheet`, que en preview no se ve):
+// lo que importa es que las dos acciones quepan y se lean a 360 dp y a 2×.
+
+@Composable
+private fun AddSheetPreview() {
+    GastronomiconTheme {
+        Surface {
+            AddRecipeSheetContent(onCreate = {}, onImport = {})
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeListAddSheetPreview() {
+    AddSheetPreview()
+}
+
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeListAddSheetLargeTextPreview() {
+    AddSheetPreview()
 }

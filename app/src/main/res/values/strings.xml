@@ -121,7 +121,11 @@
     <string name="problem_title_no_network">Sin cobertura</string>
     <string name="problem_title_not_responding">Tu Mealie no responde</string>
     <string name="problem_title_unauthorized">Tu sesión ya no es válida</string>
-    <string name="problem_text_unauthorized">Mealie ya no acepta el token guardado. Entra en Ajustes y pega uno nuevo. No se ha borrado nada.</string>
+    <!-- Neutra y cierta en cualquier pantalla: lista, detalle, compra y planificador. -->
+    <string name="problem_text_unauthorized">Tu token ya no vale. Pega uno nuevo en Ajustes.</string>
+    <!-- Solo donde hay algo que perder (formulario, foto, importación, selector): cambiar
+         el token cierra esa pantalla. No se usa en pantallas sin nada escrito. -->
+    <string name="problem_text_unauthorized_form">Tu token ya no vale. Si lo cambias en Ajustes, se cierra esta pantalla y se pierde lo escrito.</string>
     <string name="problem_retry">Volver a intentar</string>
     <string name="problem_open_settings">Abrir Ajustes</string>
     <string name="problem_offline_hint">Solo se ven las recetas que ya habías abierto en este móvil.</string>
@@ -158,9 +162,13 @@
     <string name="detail_offline_hint">Copia guardada en el móvil, sin foto. No se puede editar hasta que vuelva la conexión.</string>
 
     <!-- Recetas: acciones de la lista y del detalle. -->
-    <string name="recipes_create">Nueva receta</string>
-    <string name="recipes_import">Importar receta</string>
     <string name="recipes_empty_create">Crear una receta</string>
+    <!-- La hoja del «+»: dos maneras de empezar una receta desde el móvil. -->
+    <string name="recipes_add">Añadir receta</string>
+    <string name="recipes_add_write">Escribir una receta</string>
+    <string name="recipes_add_write_hint">Rellena los datos a mano en este móvil.</string>
+    <string name="recipes_add_import">Importar de una web</string>
+    <string name="recipes_add_import_hint">Pega la dirección de la receta; la descarga tu Mealie.</string>
     <string name="detail_edit">Editar receta</string>
     <string name="detail_more">Más opciones</string>
     <string name="detail_delete">Borrar receta</string>

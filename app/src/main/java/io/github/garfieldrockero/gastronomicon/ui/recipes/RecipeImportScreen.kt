@@ -261,6 +261,8 @@ private fun ImportForm(
                 message = stringResource(R.string.import_failed_title),
                 onRetry = importAndHide,
                 onOpenSettings = onOpenSettings,
+                // La dirección escrita se pierde si se va a Ajustes: el aviso lo dice.
+                unauthorizedTextRes = R.string.problem_text_unauthorized_form,
             )
         }
 

@@ -159,7 +159,13 @@ fun ProblemBlock(
     )
 }
 
-/** Fallo a mitad de una lista que ya tiene contenido (cargar más): aviso con su acción, sin tapar lo que hay. */
+/**
+ * Fallo a mitad de una lista que ya tiene contenido (cargar más): aviso con su acción, sin tapar lo que hay.
+ *
+ * [unauthorizedTextRes] solo se usa con [ConnectionProblem.Unauthorized]: una pantalla con
+ * un formulario abierto pasa aquí el texto que avisa de que ir a Ajustes cierra la pantalla
+ * y pierde lo escrito. Sin él, el aviso es neutro y cierto en cualquier sitio.
+ */
 @Composable
 fun ProblemBanner(
     problem: ConnectionProblem,
@@ -168,6 +174,7 @@ fun ProblemBanner(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     showDetail: Boolean = true,
+    @StringRes unauthorizedTextRes: Int = R.string.problem_text_unauthorized,
 ) {
     val unauthorized = problem == ConnectionProblem.Unauthorized
     Surface(
@@ -189,7 +196,7 @@ fun ProblemBanner(
             // se coma la lista; el detalle sigue en el aviso de abajo y en la pantalla de error.
             if (showDetail) {
                 Text(
-                    text = stringResource(problemTextRes(problem)),
+                    text = stringResource(problemTextRes(problem, unauthorizedTextRes)),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -214,5 +221,7 @@ private fun problemTitleRes(problem: ConnectionProblem, @StringRes defaultTitle:
 }
 
 @StringRes
-private fun problemTextRes(problem: ConnectionProblem): Int =
-    if (problem == ConnectionProblem.Unauthorized) R.string.problem_text_unauthorized else errorTextRes(problem)
+private fun problemTextRes(
+    problem: ConnectionProblem,
+    @StringRes unauthorizedTextRes: Int = R.string.problem_text_unauthorized,
+): Int = if (problem == ConnectionProblem.Unauthorized) unauthorizedTextRes else errorTextRes(problem)

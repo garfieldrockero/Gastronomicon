@@ -544,6 +544,8 @@ private fun EditorMessages(state: RecipeEditorState.Editing, actions: RecipeEdit
             message = stringResource(R.string.editor_save_failed),
             onRetry = actions.onSave,
             onOpenSettings = actions.onOpenSettings,
+            // El formulario está abierto y con texto: ir a Ajustes lo cierra y lo tira.
+            unauthorizedTextRes = R.string.problem_text_unauthorized_form,
         )
     }
 
@@ -950,7 +952,8 @@ private fun PhotoProblemBox(problem: PhotoProblem, onRetry: () -> Unit, onOpenSe
 private fun photoProblemText(problem: PhotoProblem): String = when (problem) {
     is PhotoProblem.Network ->
         if (problem.problem == ConnectionProblem.Unauthorized) {
-            stringResource(R.string.problem_text_unauthorized)
+            // La foto se pierde con el formulario: el aviso lo dice.
+            stringResource(R.string.problem_text_unauthorized_form)
         } else {
             stringResource(errorTextRes(problem.problem))
         }
@@ -1429,6 +1432,9 @@ private fun CatalogPickerDialog(
                         onRetry = actions.onRetryCatalogPicker,
                         onOpenSettings = actions.onOpenSettings,
                         showDetail = false,
+                        // Aunque aquí el detalle va oculto, el selector vive encima del
+                        // formulario: si algún día se enseña, no puede prometer otra cosa.
+                        unauthorizedTextRes = R.string.problem_text_unauthorized_form,
                     )
                 }
                 // Lo que ya estaba a la vista no desaparece al teclear ni porque falle
@@ -1939,6 +1945,8 @@ private fun OrganizersSection(state: RecipeEditorState.Editing, actions: RecipeE
                 message = stringResource(R.string.editor_catalogs_failed),
                 onRetry = actions.onRetryCatalogs,
                 onOpenSettings = actions.onOpenSettings,
+                // También aquí hay formulario abierto: ir a Ajustes pierde lo escrito.
+                unauthorizedTextRes = R.string.problem_text_unauthorized_form,
             )
         }
         OrganizerChips(
@@ -2516,6 +2524,18 @@ private fun RecipeEditorSavingPreview() {
     GastronomiconTheme {
         RecipeEditorScreen(
             state = RecipePreviewData.editorState(saving = true),
+            actions = previewActions(),
+        )
+    }
+}
+
+/** Sesión caducada al guardar: el aviso dice que ir a Ajustes cierra el formulario. */
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeEditorUnauthorizedPreview() {
+    GastronomiconTheme {
+        RecipeEditorScreen(
+            state = RecipePreviewData.editorState().copy(saveProblem = ConnectionProblem.Unauthorized),
             actions = previewActions(),
         )
     }
