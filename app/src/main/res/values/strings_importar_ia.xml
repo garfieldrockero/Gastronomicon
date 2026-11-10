@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Importar una receta con la IA del servidor Mealie.
+  La IA la pone y la paga el servidor: la app solo manda el texto, el enlace y
+  las fotos a ESE servidor, y nada sale antes de pulsar «Importar con IA».
+  Los textos no prometen nada que la app no haga.
+
+  Los números que salen en la ayuda y en los avisos (%1$d, %2$d…) los pasa la
+  pantalla desde `MealieClient` (fotos, MiB por foto, MiB en total, MiB de
+  texto): aquí no se escriben a mano, para que no se queden viejos si cambian.
+  Mantener sincronizado con `MealieClient.MAX_AI_IMAGES`,
+  `MAX_IMAGE_BYTES`, `MAX_AI_TOTAL_IMAGE_BYTES` y `MAX_IMPORT_DATA_BYTES`.
+-->
+<resources>
+
+    <string name="import_ai_section">Con la IA de tu Mealie</string>
+    <string name="import_ai_intro">Pega un enlace (un vídeo o una página) o el texto de la receta, y añade fotos si las tienes. La receta la prepara la IA que tenga configurada tu Mealie.</string>
+    <string name="import_ai_notice">El contenido y las fotos los envía tu app a tu Mealie, y tu Mealie los manda a su proveedor de IA.</string>
+    <string name="import_ai_notice_cost">Puede tardar unos minutos y gasta la cuota de IA de tu servidor.</string>
+    <string name="import_ai_checking">Comprobando si tu Mealie tiene la IA configurada…</string>
+    <string name="import_ai_unavailable">Tu Mealie no tiene IA configurada. Puedes importar la receta por dirección o con un archivo o un texto.</string>
+
+    <string name="import_ai_link_label">Enlace (opcional)</string>
+    <string name="import_ai_link_supporting">Tiene que empezar por https:// y ser público. Si es un vídeo, pega su enlace.</string>
+    <string name="import_ai_link_invalid">Ese enlace no vale. Tiene que empezar por https:// y ser público.</string>
+    <string name="import_ai_text_label">Texto de la receta (opcional)</string>
+    <string name="import_ai_text_supporting">Una transcripción o la descripción, hasta %1$d MiB.</string>
+
+    <string name="import_ai_photos">Añadir fotos</string>
+    <string name="import_ai_photos_sheet_title">Añadir una foto</string>
+    <string name="import_ai_photos_camera">Hacer una foto</string>
+    <string name="import_ai_photos_gallery">Elegir de la galería</string>
+    <string name="import_ai_photos_hint">Hasta %1$d fotos, ya sin los datos de la cámara. Cada una puede pesar como mucho %2$d MiB.</string>
+    <string name="import_ai_photos_count">%1$d de %2$d fotos</string>
+    <string name="import_ai_photos_total_too_large">Entre todas pasan de %1$d MiB. Quita alguna antes de importar.</string>
+    <string name="import_ai_photo_preparing">Preparando la foto…</string>
+    <string name="import_ai_photo_description">Foto %1$d</string>
+    <string name="import_ai_photo_remove">Quitar</string>
+    <string name="import_ai_photo_remove_description">Quitar foto %1$d</string>
+
+    <string name="import_ai_action">Importar con IA</string>
+    <string name="import_ai_action_hint">Escribe un enlace, pega el texto o añade una foto.</string>
+    <string name="import_ai_running">La IA de tu Mealie está preparando la receta…</string>
+    <string name="import_ai_running_hint">La IA puede tardar unos minutos. Puedes cancelar, pero tu Mealie podría terminar de crearla igualmente.</string>
+    <string name="import_ai_failed_title">No se ha podido importar con la IA</string>
+    <string name="import_ai_rejected">Tu Mealie no ha aceptado la importación con IA. Puede que no tenga ningún proveedor configurado o que no haya podido leer el enlace.</string>
+
+    <string name="import_ai_problem_empty">Añade al menos un texto, un enlace o una foto.</string>
+    <string name="import_ai_problem_text_too_large">El texto pasa de %1$d MiB. Pega menos o quita una parte.</string>
+    <string name="import_ai_problem_text_not_text">El texto lleva caracteres que no se pueden enviar. Vuelve a copiarlo.</string>
+    <string name="import_ai_problem_too_many_photos">Como mucho %1$d fotos. Quita alguna antes de importar.</string>
+    <string name="import_ai_problem_photos_too_large">Las fotos pesan demasiado: %1$d MiB como mucho cada una y %2$d MiB entre todas. Quita alguna o elige otras.</string>
+    <string name="import_ai_problem_photo_unreadable">Una de las fotos no se ha podido preparar. Quítala y elige otra.</string>
+    <string name="import_ai_problem_photo_too_large">Esa foto es demasiado grande para prepararla en el móvil. Prueba con otra.</string>
+    <string name="import_ai_problem_no_camera">Este móvil no tiene una app de cámara. Puedes elegir la foto de la galería.</string>
+    <string name="import_ai_problem_pick_failed">No se ha podido abrir la cámara o la galería. Vuelve a intentarlo.</string>
+
+</resources>

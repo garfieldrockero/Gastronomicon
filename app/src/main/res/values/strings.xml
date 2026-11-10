@@ -163,12 +163,13 @@
 
     <!-- Recetas: acciones de la lista y del detalle. -->
     <string name="recipes_empty_create">Crear una receta</string>
-    <!-- La hoja del «+»: dos maneras de empezar una receta desde el móvil. -->
+    <!-- La hoja del «+»: dos maneras de empezar una receta desde el móvil
+         (escribirla a mano o importarla; las vías de importar están dentro). -->
     <string name="recipes_add">Añadir receta</string>
     <string name="recipes_add_write">Escribir una receta</string>
     <string name="recipes_add_write_hint">Rellena los datos a mano en este móvil.</string>
-    <string name="recipes_add_import">Importar (web, archivo o texto)</string>
-    <string name="recipes_add_import_hint">Pega la dirección de la receta; la descarga tu Mealie.</string>
+    <string name="recipes_add_import">Importar una receta</string>
+    <string name="recipes_add_import_hint">Desde una página, un archivo, un texto o con la IA de tu Mealie.</string>
     <string name="detail_edit">Editar receta</string>
     <string name="detail_more">Más opciones</string>
     <string name="detail_delete">Borrar receta</string>
@@ -329,9 +330,10 @@
     <string name="editor_error_tag_invalid">Esa etiqueta no vale.</string>
     <string name="editor_error_category_invalid">Esa categoría no vale.</string>
 
-    <!-- Importar receta por URL. -->
+    <!-- Importar receta: por dirección, con un archivo o texto, o con la IA del
+         servidor (los textos de la IA están en strings_importar_ia.xml). -->
     <string name="import_title">Importar receta</string>
-    <string name="import_intro">Pega la dirección de la receta o, si la tienes guardada, elige el archivo o pega su JSON o su HTML. Lo interpreta tu Mealie, no este móvil; a veces tarda hasta dos minutos.</string>
+    <string name="import_intro">Pega la dirección de una receta, elige un archivo o pega su JSON o su HTML. También puedes dejar que la IA de tu Mealie la prepare desde un enlace, un texto o unas fotos. Lo interpreta tu Mealie, no este móvil; a veces tarda unos minutos.</string>
     <string name="import_url_section">Desde una dirección</string>
     <string name="import_url_label">Dirección de la receta</string>
     <string name="import_url_supporting">Tiene que empezar por https://</string>
@@ -345,7 +347,7 @@
     <string name="import_leave_confirm">Dejar de esperar</string>
     <!-- Salir con algo escrito o un archivo cargado, sin importación en curso. -->
     <string name="import_leave_discard_title">¿Salir sin importar?</string>
-    <string name="import_leave_discard_text">Lo que has pegado o el archivo que has cargado se perderá. Tu Mealie no ha recibido nada todavía.</string>
+    <string name="import_leave_discard_text">Lo que has pegado, el archivo que has cargado o las fotos que hayas añadido se perderá. Tu Mealie no ha recibido nada todavía.</string>
     <string name="import_leave_discard_keep">Seguir aquí</string>
     <string name="import_leave_discard_confirm">Salir sin importar</string>
     <string name="import_cancel">Cancelar la importación</string>

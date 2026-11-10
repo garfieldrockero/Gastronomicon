@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailState
 import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
+import io.github.garfieldrockero.gastronomicon.platform.ImageRecoder
 import io.github.garfieldrockero.gastronomicon.platform.ImportFileReader
 import io.github.garfieldrockero.gastronomicon.platform.openInBrowser
 
@@ -66,6 +67,9 @@ fun RecipesRoute(
     // Lector del archivo que se elija para importar: solo lee lo que devuelve el
     // selector del sistema, con tope y en UTF-8 estricto (ver `ImportFileReader`).
     val importFileReader = remember(context) { ImportFileReader(context) }
+    // Recodificador de las fotos de la importación con IA: las reduce, las endereza
+    // y les quita los EXIF antes de que salgan del móvil (ver `ImageRecoder`).
+    val importPhotoRecoder = remember(context) { ImageRecoder(context) }
 
     // Primera carga al entrar; si ya hay recetas o se está cargando, no hace nada.
     LaunchedEffect(Unit) { listViewModel.onShown() }
@@ -211,6 +215,17 @@ fun RecipesRoute(
             onFilePicked = { uri -> importViewModel.onFilePicked(uri, importFileReader) },
             onRemoveFile = importViewModel::onRemoveFile,
             onCancel = importViewModel::onCancel,
+            onAiLinkChange = importViewModel::onAiLinkChange,
+            onAiTextChange = importViewModel::onAiTextChange,
+            // Igual que el lector: el ViewModel lanza la recodificación para poder
+            // cancelarla al cerrar o al cambiar de sesión. El segundo valor dice si la
+            // foto es un temporal de la cámara (hay que borrarlo al acabar).
+            onAiPhotoPicked = { uri, fromCamera ->
+                importViewModel.onAiPhotoPicked(uri, importPhotoRecoder, fromCamera)
+            },
+            onAiPhotoProblem = importViewModel::onAiPhotoProblem,
+            onRemoveAiPhoto = importViewModel::onRemoveAiPhoto,
+            onImportAi = importViewModel::onImportAi,
             onReviewList = {
                 listViewModel.onRefresh()
                 importViewModel.close()
