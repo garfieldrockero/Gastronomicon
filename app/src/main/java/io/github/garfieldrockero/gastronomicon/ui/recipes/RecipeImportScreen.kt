@@ -643,8 +643,8 @@ private fun dataProblemTextRes(problem: ImportDataProblem): Int = when (problem)
 }
 
 /**
- * Tipos que ofrece el selector de archivos. `text/*` cubre los proveedores que
- * etiquetan el HTML o el JSON como `text/xhtml` o `text/json`. No hace falta
+ * Tipos que ofrece el selector de archivos. El comodín de texto (la última entrada) cubre los
+ * proveedores que etiquetan el HTML o el JSON como `text/xhtml` o `text/json`. No hace falta
  * ningún permiso: el sistema solo deja leer lo que se elige.
  */
 private val importMimeTypes = arrayOf(
