@@ -20,7 +20,11 @@ import androidx.compose.ui.semantics.semantics
  * una línea. Con dos, el botón sí baja, y es lo correcto: manda el aviso.
  */
 @Composable
-fun StatusText(text: String, color: Color, modifier: Modifier = Modifier) {
+fun StatusText(
+    text: String,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier: Modifier = Modifier,
+) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodyMedium,

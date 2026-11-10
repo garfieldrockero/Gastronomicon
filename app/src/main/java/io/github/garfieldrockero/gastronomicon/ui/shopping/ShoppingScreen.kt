@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -46,7 +45,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,7 +58,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -92,11 +89,15 @@ import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingPhase
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingProblem
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingText
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
+import io.github.garfieldrockero.gastronomicon.ui.components.NoticeCard
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
+import io.github.garfieldrockero.gastronomicon.ui.components.problemTextRes
+import io.github.garfieldrockero.gastronomicon.ui.components.problemTitleRes
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.LocalExtendedColors
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
@@ -161,7 +162,7 @@ fun ShoppingScreen(
         // Con el teclado abierto, el campo de añadir sube con él.
         contentWindowInsets = contentWindowInsets,
         topBar = {
-            TopAppBar(
+            GastronomiconTopBar(
                 title = {
                     ListSelector(
                         title = title,
@@ -496,7 +497,7 @@ private fun ClearCheckedButton(count: Int, clearing: Boolean, enabled: Boolean, 
         enabled = enabled && !clearing,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = ActionMinHeight)
+            .heightIn(min = Sizes.ActionMinHeight)
             .padding(vertical = Spacing.extraSmall)
             .semantics { if (clearing) liveRegion = LiveRegionMode.Polite },
     ) {
@@ -532,7 +533,7 @@ private fun ShoppingRow(
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = RowMinHeight)
+                    .heightIn(min = Sizes.ShoppingRow)
                     .toggleable(
                         value = line.checked,
                         role = Role.Checkbox,
@@ -547,7 +548,7 @@ private fun ShoppingRow(
                     onCheckedChange = null,
                     modifier = Modifier
                         .padding(horizontal = Spacing.medium, vertical = Spacing.small)
-                        .scale(CHECKBOX_SCALE),
+                        .scale(Sizes.CheckboxScale),
                 )
                 Text(
                     text = line.text,
@@ -620,13 +621,13 @@ private fun AddBar(
             FilledIconButton(
                 onClick = onAdd,
                 enabled = !adding && draft.isNotBlank(),
-                modifier = Modifier.size(AddButtonSize),
+                modifier = Modifier.size(Sizes.AddButton),
             ) {
                 if (adding) {
                     val addingText = stringResource(R.string.shopping_adding)
                     CircularProgressIndicator(
                         modifier = Modifier
-                            .size(24.dp)
+                            .size(Sizes.SmallSpinner)
                             .semantics {
                                 contentDescription = addingText
                                 liveRegion = LiveRegionMode.Polite
@@ -956,54 +957,6 @@ private fun EditItemDialog(
 // ------------------------------------------------------------------ avisos
 
 /**
- * Aviso con tope de altura: el texto se desplaza **por dentro** y las acciones
- * quedan siempre a la vista. Con el texto del sistema al 2× y 360 dp de ancho el
- * aviso no se come la lista ni esconde sus botones, que es lo que pasaba con los
- * avisos fijos sin scroll.
- */
-@Composable
-private fun NoticeCard(
-    maxHeight: Dp,
-    containerColor: Color,
-    contentColor: Color,
-    title: String,
-    detail: String?,
-    modifier: Modifier = Modifier,
-    actions: @Composable ColumnScope.() -> Unit,
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(max = maxHeight),
-        color = containerColor,
-        contentColor = contentColor,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.medium),
-            verticalArrangement = Arrangement.spacedBy(Spacing.small),
-        ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(Spacing.small),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
-                if (detail != null) {
-                    Text(text = detail, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            actions()
-        }
-    }
-}
-
-/**
  * Aviso de «puede que la lista se haya creado». No lleva «crear otra vez» a
  * propósito: repetir a ciegas crearía una segunda lista. Solo se mira otra vez
  * (recargar) o se cierra.
@@ -1100,15 +1053,8 @@ private fun ShoppingProblemBlock(
 ) {
     val unauthorized = problem == ConnectionProblem.Unauthorized
     MessageBlock(
-        title = stringResource(
-            when (problem) {
-                ConnectionProblem.NoNetwork -> R.string.problem_title_no_network
-                ConnectionProblem.ServerNotResponding -> R.string.problem_title_not_responding
-                ConnectionProblem.Unauthorized -> R.string.problem_title_unauthorized
-                else -> R.string.shopping_problem_title
-            },
-        ),
-        text = stringResource(if (unauthorized) R.string.problem_text_unauthorized else errorTextRes(problem)),
+        title = stringResource(problemTitleRes(problem, R.string.shopping_problem_title)),
+        text = stringResource(problemTextRes(problem)),
         hint = if (problem == ConnectionProblem.NoNetwork) stringResource(R.string.shopping_offline_hint) else null,
         primaryLabel = stringResource(if (unauthorized) R.string.problem_open_settings else R.string.problem_retry),
         onPrimary = if (unauthorized) onOpenSettings else onRetry,
@@ -1139,15 +1085,8 @@ private fun ListsProblemBlock(
     }
     val unauthorized = connection == ConnectionProblem.Unauthorized
     MessageBlock(
-        title = stringResource(
-            when (connection) {
-                ConnectionProblem.NoNetwork -> R.string.problem_title_no_network
-                ConnectionProblem.ServerNotResponding -> R.string.problem_title_not_responding
-                ConnectionProblem.Unauthorized -> R.string.problem_title_unauthorized
-                else -> R.string.shopping_lists_problem_title
-            },
-        ),
-        text = stringResource(if (unauthorized) R.string.problem_text_unauthorized else errorTextRes(connection)),
+        title = stringResource(problemTitleRes(connection, R.string.shopping_lists_problem_title)),
+        text = stringResource(problemTextRes(connection)),
         hint = if (connection == ConnectionProblem.NoNetwork) stringResource(R.string.shopping_offline_hint) else null,
         primaryLabel = stringResource(if (unauthorized) R.string.problem_open_settings else R.string.problem_retry),
         onPrimary = if (unauthorized) onOpenSettings else onRetry,
@@ -1269,11 +1208,6 @@ private fun createProblemText(problem: ShoppingListPickerProblem): String = when
     is ShoppingListPickerProblem.InvalidData -> stringResource(R.string.shopping_new_list_rejected)
     else -> pickerProblemText(problem)
 }
-
-private val RowMinHeight = 64.dp
-private val ActionMinHeight = 56.dp
-private val AddButtonSize = 56.dp
-private const val CHECKBOX_SCALE = 1.4f
 
 /** Cuánto del hueco del cuerpo puede ocupar un aviso fijo como mucho (y escrolear por dentro). */
 private const val NOTICE_MAX_SHARE = 0.5f

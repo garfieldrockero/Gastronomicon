@@ -30,7 +30,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -56,7 +55,9 @@ import io.github.garfieldrockero.gastronomicon.R
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
 import io.github.garfieldrockero.gastronomicon.ui.components.ClearSessionDialog
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LocalHttpSwitch
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.SecureWindowEffect
 import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
@@ -153,7 +154,7 @@ fun SettingsScreen(
         // Con el teclado abierto, el contenido sube y el campo enfocado se ve.
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            TopAppBar(
+            GastronomiconTopBar(
                 title = {
                     Text(
                         text = stringResource(R.string.settings_title),
@@ -180,7 +181,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(Spacing.extraLarge),
         ) {
             when {
-                state.loading -> LoadingBlock()
+                state.loading -> SettingsLoadingRow()
                 state.loadFailed -> LoadFailedBlock(onRetry = onRetryLoad)
                 else -> ServerSection(
                     state = state,
@@ -226,17 +227,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.semantics { heading() },
-    )
-}
-
-@Composable
-private fun LoadingBlock() {
+private fun SettingsLoadingRow() {
     // Un solo nodo para TalkBack: el texto se anuncia al aparecer.
     Row(
         modifier = Modifier

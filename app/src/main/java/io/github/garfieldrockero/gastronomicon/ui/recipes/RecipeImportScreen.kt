@@ -42,7 +42,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,9 +76,11 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.DraftField
 import io.github.garfieldrockero.gastronomicon.platform.PhotoPickResult
 import io.github.garfieldrockero.gastronomicon.platform.PhotoSource
 import io.github.garfieldrockero.gastronomicon.platform.rememberPhotoPicker
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.fieldError
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
@@ -211,7 +212,7 @@ fun RecipeImportScreen(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            TopAppBar(
+            GastronomiconTopBar(
                 title = {
                     Text(
                         text = stringResource(R.string.import_title),
@@ -1178,16 +1179,6 @@ private fun NoticeBlock(text: String, details: List<ValidationDetail>) {
             }
         }
     }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.semantics { heading() },
-    )
 }
 
 /** El texto de cada motivo local, en el idioma de quien cocina. */

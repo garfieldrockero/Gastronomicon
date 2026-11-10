@@ -36,7 +36,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,12 +72,19 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.SourceLink
 import io.github.garfieldrockero.gastronomicon.core.recipes.TimeKind
 import io.github.garfieldrockero.gastronomicon.core.recipes.TimeLine
 import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingDialog
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingNoticeCard
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingOutcome
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingPreviewData
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingUi
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.RecipePhoto
 import io.github.garfieldrockero.gastronomicon.ui.components.SanitizedHtmlContent
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.StarRating
 import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
@@ -139,7 +145,7 @@ fun RecipeDetailScreen(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            TopAppBar(
+            GastronomiconTopBar(
                 title = {
                     if (shownName != null) {
                         // El nombre en una línea con «…»; el encabezado completo está en el cuerpo,
@@ -515,16 +521,6 @@ private fun RecipeDetailContent(
     }
 }
 
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.semantics { heading() },
-    )
-}
-
 /**
  * Aviso de que lo que se está viendo es una copia guardada: la fecha (ya en
  * texto, del núcleo), el motivo real si no fue simple falta de red, y «Volver a
@@ -697,7 +693,7 @@ private fun ServingsStepper(view: RecipeDetailView, onMore: () -> Unit, onFewer:
         FilledTonalIconButton(
             onClick = onFewer,
             enabled = view.canDecreaseServings,
-            modifier = Modifier.size(StepperButtonSize),
+            modifier = Modifier.size(Sizes.StepperButton),
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_remove),
@@ -710,7 +706,7 @@ private fun ServingsStepper(view: RecipeDetailView, onMore: () -> Unit, onFewer:
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center,
             modifier = Modifier
-                .widthIn(min = StepperButtonSize)
+                .widthIn(min = Sizes.StepperButton)
                 .semantics {
                     contentDescription = valueDescription
                     liveRegion = LiveRegionMode.Polite
@@ -719,7 +715,7 @@ private fun ServingsStepper(view: RecipeDetailView, onMore: () -> Unit, onFewer:
         FilledTonalIconButton(
             onClick = onMore,
             enabled = view.canIncreaseServings,
-            modifier = Modifier.size(StepperButtonSize),
+            modifier = Modifier.size(Sizes.StepperButton),
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_add),
@@ -810,7 +806,7 @@ private fun IngredientItem(line: IngredientLine, checked: Boolean, onToggle: () 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = IngredientRowMinHeight)
+            .heightIn(min = Sizes.IngredientRow)
             .toggleable(value = checked, role = Role.Checkbox, onValueChange = { onToggle() })
             // TalkBack lee la frase entera («2 cucharadas aceite»), no cantidad y descripción por separado.
             .semantics { contentDescription = spoken },
@@ -823,7 +819,7 @@ private fun IngredientItem(line: IngredientLine, checked: Boolean, onToggle: () 
             onCheckedChange = null,
             modifier = Modifier
                 .padding(Spacing.small)
-                .scale(CHECKBOX_SCALE),
+                .scale(Sizes.CheckboxScale),
         )
         if (largeText || (line.quantityText.isEmpty() && line.description.isEmpty())) {
             Text(
@@ -971,13 +967,9 @@ private fun SourceBlock(link: SourceLink, onOpen: (SourceLink) -> Boolean) {
 }
 
 private const val HERO_ASPECT = 16f / 9f
-private const val CHECKBOX_SCALE = 1.35f
-
-private val StepperButtonSize = 56.dp
 
 // Ancho mínimo de la columna de cantidades, en sp para que crezca con la letra.
 private val QuantityColumnWidth = 64.sp
-private val IngredientRowMinHeight = 56.dp
 
 // ------------------------------------------------------------------ previews
 

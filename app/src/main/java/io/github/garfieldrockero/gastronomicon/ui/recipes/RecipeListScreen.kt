@@ -46,7 +46,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -81,6 +80,7 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.ListPhase
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummaryRow
 import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
@@ -142,7 +142,7 @@ fun RecipeListScreen(
         // Con el teclado abierto, el buscador sube con él.
         contentWindowInsets = contentWindowInsets,
         topBar = {
-            TopAppBar(
+            GastronomiconTopBar(
                 title = {
                     Text(
                         text = stringResource(R.string.recipes_title),
@@ -350,7 +350,7 @@ private fun SheetActionRow(
                 // El texto de al lado ya dice qué hace: repetirlo aquí sobraría.
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(SheetActionIcon),
+                modifier = Modifier.size(Sizes.SheetActionIcon),
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -442,7 +442,7 @@ private fun OfflineListBanner(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(SmallSpinner),
+                        modifier = Modifier.size(Sizes.SmallSpinner),
                         color = MaterialTheme.colorScheme.primary,
                         strokeWidth = 3.dp,
                     )
@@ -576,7 +576,7 @@ private fun RecipeLazyList(
         if (nearEnd && autoLoad) onLoadMore()
     }
 
-    val photoPx = with(LocalDensity.current) { PhotoSize.roundToPx() }
+    val photoPx = with(LocalDensity.current) { Sizes.RecipeRowPhoto.roundToPx() }
     val problem = list.problem
 
     LazyColumn(
@@ -587,7 +587,7 @@ private fun RecipeLazyList(
             start = Spacing.medium,
             top = Spacing.medium,
             end = Spacing.medium,
-            bottom = 88.dp,
+            bottom = Sizes.FabClearance,
         ),
         verticalArrangement = Arrangement.spacedBy(Spacing.medium),
     ) {
@@ -632,7 +632,7 @@ private fun RecipeRow(
 ) {
     val recipe = row.summary
     // Con texto grande la foto se achica para dejarle sitio al nombre.
-    val photoSize = if (isLargeText()) PhotoSizeLargeText else PhotoSize
+    val photoSize = if (isLargeText()) Sizes.RecipeRowPhotoLargeText else Sizes.RecipeRowPhoto
     Card(
         onClick = onClick,
         modifier = Modifier
@@ -651,7 +651,7 @@ private fun RecipeRow(
                 maxSidePx = photoPx,
                 modifier = Modifier
                     .size(photoSize)
-                    .clip(RoundedCornerShape(PhotoCorner)),
+                    .clip(RoundedCornerShape(Sizes.PhotoCorner)),
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -726,7 +726,7 @@ private fun LoadingMoreRow() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CircularProgressIndicator(
-            modifier = Modifier.size(SmallSpinner),
+            modifier = Modifier.size(Sizes.SmallSpinner),
             color = MaterialTheme.colorScheme.primary,
             strokeWidth = 3.dp,
         )
@@ -841,14 +841,6 @@ private const val LOAD_MORE_MARGIN = 3
 private const val FOOTER_LOADING_KEY = "footer-loading"
 private const val FOOTER_PROBLEM_KEY = "footer-problem"
 private const val FOOTER_SEARCH_ALL_KEY = "footer-search-all"
-
-private val PhotoSize = 88.dp
-private val PhotoSizeLargeText = 56.dp
-private val PhotoCorner = 12.dp
-private val SmallSpinner = 24.dp
-
-/** Icono de las acciones de la hoja del «+»: algo mayor que el de una barra. */
-private val SheetActionIcon = 28.dp
 
 // ------------------------------------------------------------------ previews
 

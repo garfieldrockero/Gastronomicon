@@ -4,7 +4,7 @@ import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanMealView
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanState
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealType
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
-import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingUi
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingUi
 import java.time.LocalDate
 
 /** Qué se apunta en una comida nueva: una receta del servidor o texto libre. */

@@ -45,7 +45,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -96,10 +95,12 @@ import io.github.garfieldrockero.gastronomicon.platform.PhotoPickResult
 import io.github.garfieldrockero.gastronomicon.platform.PhotoSource
 import io.github.garfieldrockero.gastronomicon.platform.rememberPhotoPicker
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBlock
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.fieldError
@@ -217,7 +218,7 @@ fun RecipeEditorScreen(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            TopAppBar(
+            GastronomiconTopBar(
                 title = {
                     Text(
                         text = stringResource(titleRes(state)),
@@ -2046,16 +2047,6 @@ private fun OrganizerChips(
 }
 
 // ------------------------------------------------------------------ auxiliares
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.semantics { heading() },
-    )
-}
 
 @Composable
 private fun MoveButtons(

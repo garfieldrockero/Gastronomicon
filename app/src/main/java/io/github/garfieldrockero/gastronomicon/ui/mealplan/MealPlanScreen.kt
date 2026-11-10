@@ -39,7 +39,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -64,12 +63,14 @@ import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanProblem
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanState
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanWeekView
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
-import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
-import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingNoticeCard
-import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingOutcome
-import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingUi
+import io.github.garfieldrockero.gastronomicon.ui.components.problemTextRes
+import io.github.garfieldrockero.gastronomicon.ui.components.problemTitleRes
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingNoticeCard
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingOutcome
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingUi
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
@@ -162,7 +163,7 @@ fun MealPlanScreen(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = contentWindowInsets,
         topBar = {
-            TopAppBar(
+            GastronomiconTopBar(
                 title = {
                     Text(
                         text = stringResource(R.string.plan_title),
@@ -339,7 +340,7 @@ private fun WeekContent(
                 contentPadding = PaddingValues(
                     start = Spacing.medium,
                     end = Spacing.medium,
-                    bottom = FabClearance,
+                    bottom = Sizes.FabClearance,
                 ),
                 verticalArrangement = Arrangement.spacedBy(Spacing.medium),
             ) {
@@ -721,12 +722,7 @@ private fun loadTitleRes(problem: MealPlanProblem): Int = when (problem) {
     is MealPlanProblem.InvalidInput -> R.string.plan_date_title
     is MealPlanProblem.Invalid, is MealPlanProblem.Rejected, is MealPlanProblem.MaybeCreated ->
         R.string.plan_rejected_title
-    is MealPlanProblem.Connection -> when (problem.problem) {
-        ConnectionProblem.NoNetwork -> R.string.problem_title_no_network
-        ConnectionProblem.ServerNotResponding -> R.string.problem_title_not_responding
-        ConnectionProblem.Unauthorized -> R.string.problem_title_unauthorized
-        else -> R.string.plan_error_title
-    }
+    is MealPlanProblem.Connection -> problemTitleRes(problem.problem, R.string.plan_error_title)
 }
 
 @StringRes
@@ -737,8 +733,7 @@ private fun loadTextRes(problem: MealPlanProblem): Int = when (problem) {
     is MealPlanProblem.InvalidInput -> R.string.plan_date_text
     is MealPlanProblem.Invalid, is MealPlanProblem.Rejected, is MealPlanProblem.MaybeCreated ->
         R.string.plan_rejected_text
-    is MealPlanProblem.Connection ->
-        if (problem.problem == ConnectionProblem.Unauthorized) R.string.problem_text_unauthorized else errorTextRes(problem.problem)
+    is MealPlanProblem.Connection -> problemTextRes(problem.problem)
 }
 
 /** Fallo al cargar la semana, a pantalla completa (no hay semana que enseñar). */
@@ -838,8 +833,6 @@ private fun LoadProblemBanner(
         }
     }
 }
-
-private val FabClearance = 88.dp
 
 // ------------------------------------------------------------------- previews
 

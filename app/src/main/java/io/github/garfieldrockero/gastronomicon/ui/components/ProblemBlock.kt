@@ -14,7 +14,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -177,51 +176,46 @@ fun ProblemBanner(
     @StringRes unauthorizedTextRes: Int = R.string.problem_text_unauthorized,
 ) {
     val unauthorized = problem == ConnectionProblem.Unauthorized
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.errorContainer,
+    NoticeCard(
+        title = if (unauthorized) stringResource(R.string.problem_title_unauthorized) else message,
+        containerColor = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        shape = MaterialTheme.shapes.medium,
+        // Con el texto muy grande el aviso de arriba se queda en título y botón, para que no
+        // se coma la lista; el detalle sigue en el aviso de abajo y en la pantalla de error.
+        detail = if (showDetail) stringResource(problemTextRes(problem, unauthorizedTextRes)) else null,
+        modifier = modifier,
     ) {
-        Column(
-            modifier = Modifier.padding(Spacing.medium),
-            verticalArrangement = Arrangement.spacedBy(Spacing.small),
+        Button(
+            onClick = if (unauthorized) onOpenSettings else onRetry,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = Sizes.MinTouchTarget),
         ) {
-            Text(
-                text = if (unauthorized) stringResource(R.string.problem_title_unauthorized) else message,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-            // Con el texto muy grande el aviso de arriba se queda en título y botón, para que no
-            // se coma la lista; el detalle sigue en el aviso de abajo y en la pantalla de error.
-            if (showDetail) {
-                Text(
-                    text = stringResource(problemTextRes(problem, unauthorizedTextRes)),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Button(
-                onClick = if (unauthorized) onOpenSettings else onRetry,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = Sizes.MinTouchTarget),
-            ) {
-                Text(stringResource(if (unauthorized) R.string.problem_open_settings else R.string.problem_retry))
-            }
+            Text(stringResource(if (unauthorized) R.string.problem_open_settings else R.string.problem_retry))
         }
     }
 }
 
+/**
+ * Título de un fallo de conexión. Público para las pantallas que dicen lo mismo
+ * con otro texto de último recurso (la compra habla de la compra): el mapeo
+ * motivo→texto vive aquí y en ningún otro sitio.
+ */
 @StringRes
-private fun problemTitleRes(problem: ConnectionProblem, @StringRes defaultTitle: Int): Int = when (problem) {
+fun problemTitleRes(problem: ConnectionProblem, @StringRes defaultTitle: Int): Int = when (problem) {
     ConnectionProblem.NoNetwork -> R.string.problem_title_no_network
     ConnectionProblem.ServerNotResponding -> R.string.problem_title_not_responding
     ConnectionProblem.Unauthorized -> R.string.problem_title_unauthorized
     else -> defaultTitle
 }
 
+/**
+ * Texto de un fallo de conexión. [unauthorizedTextRes] solo se usa con
+ * [ConnectionProblem.Unauthorized], que en un formulario abierto avisa de que ir
+ * a Ajustes cierra la pantalla.
+ */
 @StringRes
-private fun problemTextRes(
+fun problemTextRes(
     problem: ConnectionProblem,
     @StringRes unauthorizedTextRes: Int = R.string.problem_text_unauthorized,
 ): Int = if (problem == ConnectionProblem.Unauthorized) unauthorizedTextRes else errorTextRes(problem)

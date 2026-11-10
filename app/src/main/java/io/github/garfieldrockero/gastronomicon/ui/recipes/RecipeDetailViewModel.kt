@@ -25,6 +25,11 @@ import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerP
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingListPickerState
 import io.github.garfieldrockero.gastronomicon.platform.ClientAccess
 import io.github.garfieldrockero.gastronomicon.platform.OfflineRecipes
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShopping
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingOutcome
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingUi
+import io.github.garfieldrockero.gastronomicon.ui.components.guardedBy
+import io.github.garfieldrockero.gastronomicon.ui.components.servingsInputText
 import io.github.garfieldrockero.gastronomicon.ui.shopping.ShoppingAccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher

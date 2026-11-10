@@ -43,6 +43,7 @@ fun GastronomiconTheme(
         MaterialTheme(
             colorScheme = if (dark) DarkColors else LightColors,
             typography = GastronomiconTypography,
+            shapes = GastronomiconShapes,
             content = content,
         )
     }

@@ -83,7 +83,7 @@ import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
-import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingDialog
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingDialog
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing

@@ -13,8 +13,8 @@ import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummary
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeTimes
-import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingOutcome
-import io.github.garfieldrockero.gastronomicon.ui.recipes.AddToShoppingUi
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingOutcome
+import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingUi
 import java.time.LocalDate
 
 /**
