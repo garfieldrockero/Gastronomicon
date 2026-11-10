@@ -32,31 +32,6 @@ class ServerUrlTest {
     }
 
     @Test
-    fun `la subruta se conserva y queda sin barra final`() {
-        assertEquals(
-            "https://servidor.example.com/mealie",
-            ServerUrl.normalize("https://servidor.example.com/mealie/"),
-        )
-        // Sin barra final de origen: no se toca nada.
-        assertEquals(
-            "https://servidor.example.com/mealie",
-            ServerUrl.normalize("https://servidor.example.com/mealie"),
-        )
-        assertEquals(
-            "https://servidor.example.com/cocina/postres",
-            ServerUrl.normalize("https://servidor.example.com/cocina/postres/"),
-        )
-    }
-
-    @Test
-    fun `las barras finales sobrantes se quitan todas`() {
-        assertEquals(
-            "https://servidor.example.com/mealie",
-            ServerUrl.normalize("https://servidor.example.com/mealie//"),
-        )
-    }
-
-    @Test
     fun `el esquema en mayúsculas se acepta y se normaliza a minúsculas`() {
         assertEquals(
             "https://mealie.example.com",
@@ -98,10 +73,10 @@ class ServerUrlTest {
     }
 
     @Test
-    fun `esquema en mayúscula, puerto y subruta juntos`() {
+    fun `esquema en mayúscula y puerto se normalizan juntos`() {
         assertEquals(
-            "https://servidor.example.com:8443/mealie",
-            ServerUrl.normalize("HTTPS://servidor.example.com:8443/mealie/"),
+            "https://servidor.example.com:8443",
+            ServerUrl.normalize("HTTPS://servidor.example.com:8443/"),
         )
     }
 
@@ -155,16 +130,6 @@ class ServerUrlTest {
     @Test
     fun `se rechaza una IPv6 sin corchetes`() {
         assertRejected("https://2001:db8::1/")
-    }
-
-    @Test
-    fun `la ruta escapada se conserva tal cual, sin descodificarla`() {
-        // rawPath y no path: si se descodificara, «caf%C3%A9» volvería a tener
-        // un carácter no ASCII y la URL dejaría de ser válida.
-        assertEquals(
-            "https://servidor.example.com/caf%C3%A9",
-            ServerUrl.normalize("https://servidor.example.com/caf%C3%A9/"),
-        )
     }
 
     // ---------------------------------------------------------------- rechaza
@@ -325,11 +290,10 @@ class ServerUrlTest {
     }
 
     @Test
-    fun `con la opción se conserva la subruta en http`() {
-        assertEquals(
-            "http://192.168.1.50:9000/mealie",
-            ServerUrl.normalize("http://192.168.1.50:9000/mealie/", allowLocalHttp = true),
-        )
+    fun `con la opción se sigue rechazando la ruta en http`() {
+        // Mealie no admite subruta ni en http local: la dirección es el host.
+        assertUnsupportedPath("http://192.168.1.50:9000/mealie/", allowLocalHttp = true)
+        assertUnsupportedPath("http://192.168.1.50/mealie", allowLocalHttp = true)
     }
 
     @Test
@@ -431,7 +395,7 @@ class ServerUrlTest {
     fun `https no cambia con la opción`() {
         val cases = listOf(
             "https://mealie.example.com/",
-            "HTTPS://MEALIE.Example.COM:8443/mealie/",
+            "HTTPS://MEALIE.Example.COM:8443/",
             "https://mealie.example.com:443",
             "https://[2001:db8::1]/",
             "https://8.8.8.8/",
@@ -472,7 +436,7 @@ class ServerUrlTest {
     fun `http local es idempotente`() {
         val cases = listOf(
             "http://192.168.1.50:9000/",
-            "HTTP://192.168.1.50:80/mealie/",
+            "HTTP://192.168.1.50:80/",
             "http://[FD00::5]:9000",
         )
         for (input in cases) {
@@ -535,26 +499,55 @@ class ServerUrlTest {
 
     @Test
     fun `se rechaza una ruta no ASCII sin escapar`() {
+        // Antes se validaba la ruta; ahora cualquier ruta sobra, así que la
+        // pregunta es si el rechazo no depende de que la ruta sea legible.
         assertRejected("https://mealie.example.com/café")
     }
 
     // ---------------------------------------------------------------- rutas
 
     @Test
-    fun `se rechazan los segmentos vacios y los puntos`() {
-        assertRejected("https://mealie.example.com/a//b")
-        assertRejected("https://mealie.example.com/a/./b")
-        assertRejected("https://mealie.example.com/a/../b")
-        assertRejected("https://mealie.example.com/a/%2e/b")
-        assertRejected("https://mealie.example.com/a/%2E%2E/b")
+    fun `se rechaza cualquier ruta`() {
+        // Decidido el 10-11-2026: Mealie no admite subpath, así que una URL con
+        // ruta guardaría un token que no sirve para nada.
+        assertUnsupportedPath("https://mealie.example.com/mealie")
+        assertUnsupportedPath("https://mealie.example.com/mealie/")
+        assertUnsupportedPath("https://mealie.example.com/cocina/postres")
+        // Dos barras tampoco son la raíz.
+        assertUnsupportedPath("https://mealie.example.com//")
+        // Un solo segmento escapado sigue siendo una ruta.
+        assertUnsupportedPath("https://mealie.example.com/caf%C3%A9/")
+        // Y las formas raras de ruta, que antes se normalizaban, también.
+        assertUnsupportedPath("https://mealie.example.com/a//b")
+        assertUnsupportedPath("https://mealie.example.com/a/./b")
+        assertUnsupportedPath("https://mealie.example.com/a/../b")
+        assertUnsupportedPath("https://mealie.example.com/a/%2e/b")
+        assertUnsupportedPath("https://mealie.example.com/%00")
+        assertUnsupportedPath("https://mealie.example.com/a%2fb")
     }
 
     @Test
-    fun `se rechazan los escapes de control y de barra`() {
-        assertRejected("https://mealie.example.com/%00")
-        assertRejected("https://mealie.example.com/%1f")
-        assertRejected("https://mealie.example.com/%7f")
-        assertRejected("https://mealie.example.com/a%2fb")
+    fun `el rechazo de la ruta explica el motivo y no repite la entrada`() {
+        val message = rejectionMessage("https://mealie.example.com/mealie-de-casa")
+        assertTrue(message.contains("raíz"))
+        assertFalse(message.contains("mealie-de-casa"))
+    }
+
+    @Test
+    fun `la consulta y el fragmento se rechazan antes que la ruta`() {
+        // Da igual el orden mientras haya un motivo claro, pero el mensaje de
+        // consulta y fragmento se conserva aunque además haya ruta.
+        val conConsulta = rejectionMessage("https://mealie.example.com/recetas?buscar=tortilla")
+        assertTrue(conConsulta.contains("consulta"))
+        val conFragmento = rejectionMessage("https://mealie.example.com/recetas#paso-2")
+        assertTrue(conFragmento.contains("fragmento"))
+    }
+
+    @Test
+    fun `la ruta no tapa el aviso de host no local`() {
+        // Un http hacia fuera de casa se rechaza por «no es local» aunque la URL
+        // lleve ruta: es el aviso que de verdad impide guardar.
+        assertNotLocalRejection("http://mealie.example.com/mealie")
     }
 
     // ---------------------------------------------------------------- formas malformadas
@@ -573,7 +566,7 @@ class ServerUrlTest {
         val validas = listOf(
             "https://mealie.example.com",
             "https://mealie.example.com/",
-            "https://MEALIE.Example.COM/mealie/",
+            "https://MEALIE.Example.COM/",
             "https://mealie.example.com:8443/",
             "https://mealie.example.com./",
             "https://[2001:db8::1]/",
@@ -629,6 +622,21 @@ class ServerUrlTest {
             return
         }
         throw AssertionError("Se esperaba que «$entrada» se rechazara")
+    }
+
+    /** Rechazo con el motivo propio de una URL con ruta. */
+    private fun assertUnsupportedPath(entrada: String, allowLocalHttp: Boolean = false) {
+        try {
+            ServerUrl.normalize(entrada, allowLocalHttp)
+        } catch (esperada: UnsupportedPathException) {
+            assertFalse(esperada.message.isNullOrBlank())
+            return
+        } catch (otra: IllegalArgumentException) {
+            throw AssertionError(
+                "«$entrada» se ha rechazado por otro motivo (${otra::class.java.simpleName}): ${otra.message}",
+            )
+        }
+        throw AssertionError("Se esperaba que «$entrada» se rechazara por la ruta")
     }
 
     /** Igual que [assertRejected], pero con la opción de red local activada. */

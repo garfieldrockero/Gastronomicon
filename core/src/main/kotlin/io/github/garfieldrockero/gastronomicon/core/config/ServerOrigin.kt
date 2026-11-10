@@ -7,10 +7,10 @@ import java.net.URI
  * Origen de un servidor: esquema + host + puerto, con el puerto siempre
  * explícito (443 en https y 80 en http cuando la URL no lo escribe).
  *
- * Es la unidad que decide adónde puede viajar el token: la ruta (subcarpeta
- * tras un proxy) no cuenta, pero esquema, host o puerto distintos son otro
- * servidor. El host va en minúsculas y, en IPv6, entre corchetes, tal como lo
- * deja [ServerUrl.normalize].
+ * Es la unidad que decide adónde puede viajar el token: esquema, host o puerto
+ * distintos son otro servidor. La ruta no forma parte del origen porque una URL
+ * con ruta no es válida para esta app (Mealie no admite subruta). El host va en
+ * minúsculas y, en IPv6, entre corchetes, tal como lo deja [ServerUrl.normalize].
  */
 class ServerOrigin private constructor(
     val scheme: String,
@@ -26,9 +26,12 @@ class ServerOrigin private constructor(
 
     companion object {
         /**
-         * Origen de [url] (con o sin puerto, con o sin ruta), o null si no es
-         * una URL válida. Admite http porque aquí solo se compara; quien
-         * conecte vuelve a aplicar su política de red local.
+         * Origen de [url] (con o sin puerto), o null si no es una URL válida.
+         * Admite http porque aquí solo se compara; quien conecte vuelve a
+         * aplicar su política de red local.
+         *
+         * Una URL con ruta da null: [ServerUrl.normalize] ya la rechaza, así
+         * que no hay sesión que pueda tener subruta.
          */
         fun of(url: String): ServerOrigin? {
             val canonical = try {

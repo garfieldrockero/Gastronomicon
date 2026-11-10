@@ -2,6 +2,7 @@ package io.github.garfieldrockero.gastronomicon.core.config
 
 import io.github.garfieldrockero.gastronomicon.core.NotLocalAddressException
 import io.github.garfieldrockero.gastronomicon.core.ServerUrl
+import io.github.garfieldrockero.gastronomicon.core.UnsupportedPathException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -97,10 +98,6 @@ class ServerAddressTest {
             "https://mealie.example.com:8443",
             ServerAddress.build("https://mealie.example.com:8443/", ServerAddress.DEFAULT_HTTPS_PORT),
         )
-        assertEquals(
-            "https://servidor.example.com:8443/mealie",
-            ServerAddress.build("servidor.example.com:8443/mealie", 443),
-        )
         assertEquals("https://[2001:db8::1]:8443", ServerAddress.build("[2001:db8::1]:8443", 443))
     }
 
@@ -111,26 +108,6 @@ class ServerAddressTest {
         assertEquals(
             "https://mealie.example.com:8443",
             ServerAddress.build("mealie.example.com:", 8443),
-        )
-    }
-
-    @Test
-    fun `el puerto se inserta antes de la subruta`() {
-        assertEquals(
-            "https://servidor.example.com:8443/mealie",
-            ServerAddress.build("servidor.example.com/mealie", 8443),
-        )
-        assertEquals(
-            "https://servidor.example.com:8443/mealie",
-            ServerAddress.build("https://servidor.example.com/mealie/", 8443),
-        )
-    }
-
-    @Test
-    fun `la subruta sin esquema se conserva`() {
-        assertEquals(
-            "https://servidor.example.com/mealie",
-            ServerAddress.build("servidor.example.com/mealie/", null),
         )
     }
 
@@ -165,6 +142,18 @@ class ServerAddressTest {
     }
 
     @Test
+    fun `una subruta en el campo servidor se rechaza con su motivo`() {
+        // Decidido el 10-11-2026: Mealie no admite subpath, así que una
+        // subcarpeta tras el dominio no lleva a su API. El motivo lo pone
+        // ServerUrl y aquí se comprueba que llega tal cual, sin convertirse en
+        // «no es local» ni en un error de puerto.
+        assertUnsupportedPath("servidor.example.com/mealie", 8443)
+        assertUnsupportedPath("https://servidor.example.com/mealie/", 8443)
+        assertUnsupportedPath("servidor.example.com/mealie/", null)
+        assertUnsupportedPath("servidor.example.com:8443/mealie", 443)
+    }
+
+    @Test
     fun `dos puertos distintos en los dos campos se rechazan`() {
         assertRejected("https://mealie.example.com:8443", 9000)
         assertRejected("mealie.example.com:8443", 9000)
@@ -190,10 +179,6 @@ class ServerAddressTest {
     fun `sin esquema y con la opción se usa http`() {
         assertEquals("http://192.168.1.50:9000", ServerAddress.build("192.168.1.50", 9000, allowLocalHttp = true))
         assertEquals("http://[fd00::5]:9000", ServerAddress.build("[fd00::5]", 9000, allowLocalHttp = true))
-        assertEquals(
-            "http://192.168.1.50:9000/mealie",
-            ServerAddress.build("192.168.1.50/mealie/", 9000, allowLocalHttp = true),
-        )
     }
 
     @Test
@@ -213,10 +198,6 @@ class ServerAddressTest {
         assertEquals(
             "https://192.168.1.50",
             ServerAddress.build("https://192.168.1.50", 9000, allowLocalHttp = true),
-        )
-        assertEquals(
-            "https://mealie.example.com/mealie",
-            ServerAddress.build("HTTPS://mealie.example.com/mealie/", 9000, allowLocalHttp = true),
         )
         // El 443 sigue cediendo en https aunque la opción esté activada.
         assertEquals(
@@ -343,7 +324,6 @@ class ServerAddressTest {
         val cases = listOf(
             "192.168.1.50" to 9000,
             "192.168.1.50" to 80,
-            "192.168.1.50/mealie/" to null,
             "https://192.168.1.50" to 9000,
             "[fd00::5]" to 9000,
         )
@@ -387,8 +367,7 @@ class ServerAddressTest {
         val cases = listOf(
             "mealie.example.com" to null,
             "mealie.example.com" to 8443,
-            "https://MEALIE.example.com/mealie/" to null,
-            "servidor.example.com/mealie" to 8443,
+            "https://MEALIE.example.com/" to null,
             "[2001:db8::1]" to 8443,
         )
         for ((input, port) in cases) {
@@ -427,6 +406,19 @@ class ServerAddressTest {
             return
         }
         throw AssertionError("Se esperaba que «$server» se rechazara")
+    }
+
+    /** Rechazo por subruta: el motivo lo pone `ServerUrl`, no esta capa. */
+    private fun assertUnsupportedPath(server: String, port: Int?) {
+        try {
+            ServerAddress.build(server, port)
+        } catch (expected: UnsupportedPathException) {
+            assertFalse(expected.message.isNullOrBlank())
+            return
+        } catch (other: IllegalArgumentException) {
+            throw AssertionError("«$server» se ha rechazado por otro motivo: ${other.message}")
+        }
+        throw AssertionError("Se esperaba que «$server» se rechazara por la subruta")
     }
 
     /** Mensaje del rechazo, o cadena vacía si la entrada se ha aceptado. */

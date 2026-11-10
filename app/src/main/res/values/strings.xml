@@ -36,6 +36,10 @@
     <string name="setup_error_server_not_responding">Tu Mealie no responde. Comprueba que el servidor está encendido y que la dirección y el puerto son correctos.</string>
     <string name="setup_error_server">El servidor ha respondido con un problema. Vuelve a intentarlo en un rato.</string>
     <string name="setup_error_invalid_address">Esa dirección no lleva a tu Mealie. Revisa el servidor y el puerto.</string>
+    <!-- El servidor y el puerto no llevan carpeta detrás: Mealie tiene que estar
+         en la raíz del dominio. El núcleo lo cuenta como dirección no válida
+         (`ConnectionProblem.InvalidAddress`), pero este texto dice qué sobra. -->
+    <string name="setup_error_unsupported_path">Esa dirección lleva una carpeta al final. Mealie va en la raíz del dominio: escribe solo el servidor y el puerto.</string>
     <string name="setup_error_not_local_address">Sin HTTPS solo puedes usar la IP de tu servidor en casa, como 192.168.1.50. Si tu Mealie tiene dominio, desactiva «Conectar sin HTTPS».</string>
     <string name="setup_error_local_http_needs_home_network">Sin HTTPS solo se conecta desde la wifi de casa o con una VPN a ella. Conéctate a una de las dos y vuelve a intentarlo.</string>
     <string name="setup_error_secure_connection">No se ha podido comprobar que la conexión sea segura. Si estás en una wifi pública, prueba con datos móviles.</string>
@@ -154,6 +158,9 @@
     <string name="detail_ingredients_empty">Esta receta no tiene ingredientes anotados.</string>
     <string name="detail_steps_empty">Esta receta no tiene pasos anotados.</string>
     <string name="detail_step_number">Paso %1$d</string>
+    <!-- El saneador tira las imágenes y los vídeos de los pasos (seguridad): se
+         dice en el paso para que el hueco no parezca un fallo de la app. -->
+    <string name="detail_step_media_omitted">Este paso tenía imágenes o vídeo que la app no muestra.</string>
     <string name="detail_html_truncated">Este texto es muy largo y se ha acortado.</string>
     <string name="detail_source_text">Receta original en %1$s</string>
     <string name="detail_source_open">Abrir en el navegador</string>

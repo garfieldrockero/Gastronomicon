@@ -53,11 +53,10 @@ class ServerAddressSplitTest {
     }
 
     @Test
-    fun `la subruta se queda en el servidor`() {
-        assertEquals(
-            SplitAddress("https", "example.com/mealie", 8443),
-            split("https://example.com:8443/mealie"),
-        )
+    fun `una url con subruta no se puede partir`() {
+        // Mealie no admite subpath: si hubiera una URL guardada así (de una
+        // versión anterior), no se ofrece editarla, se vuelve a configurar.
+        assertNull(ServerAddress.split("https://example.com:8443/mealie"))
     }
 
     @Test
@@ -70,14 +69,12 @@ class ServerAddressSplitTest {
         val urls = listOf(
             "https://mealie.example.com",
             "https://mealie.example.com:8443",
-            "https://example.com:8443/mealie",
-            "https://example.com/a/b",
             "https://[2001:db8::1]:8443",
             "https://[2001:db8::1]",
             "http://192.168.1.50",
             "http://192.168.1.50:9000",
             "http://192.168.1.50:443",
-            "http://10.0.0.2:8080/mealie",
+            "http://10.0.0.2:8080",
             "http://[fd00::1]:9000",
             "http://[fd00::1]",
             "https://a.example.com:1",
@@ -95,6 +92,8 @@ class ServerAddressSplitTest {
             "https://user:pass@x.example.com", "https://x.example.com?a=1", "https://x.example.com#f",
             "https://x.example.com:0", "https://x.example.com:65536", "https://x.example.com:abc",
             "https://x .example.com", "javascript:alert(1)",
+            // Una ruta no es una URL de servidor válida (Mealie no admite subpath).
+            "https://x.example.com/mealie", "https://x.example.com//",
             // http hacia fuera de la red local
             "http://example.com", "http://8.8.8.8", "http://nas.local",
         )
@@ -112,10 +111,13 @@ class ServerAddressSplitTest {
     }
 
     @Test
-    fun `la ruta y las mayusculas no cambian el origen`() {
-        assertEquals(ServerOrigin.of("https://a.example.com/x"), ServerOrigin.of("HTTPS://A.Example.com/"))
+    fun `la url con ruta no tiene origen`() {
+        // ServerUrl rechaza la ruta, así que no hay origen que comparar: falla
+        // cerrado y SaveSessionPolicy pedirá el token o probar la conexión.
+        assertNull(ServerOrigin.of("https://a.example.com/x"))
+        assertEquals(ServerOrigin.of("https://a.example.com"), ServerOrigin.of("HTTPS://A.Example.com/"))
         assertEquals(
-            ServerOrigin.of("https://a.example.com/x")!!.hashCode(),
+            ServerOrigin.of("https://a.example.com")!!.hashCode(),
             ServerOrigin.of("https://A.example.com")!!.hashCode(),
         )
     }
@@ -133,7 +135,8 @@ class ServerAddressSplitTest {
     @Test
     fun `origen ipv6 y url invalida`() {
         assertNotNull(ServerOrigin.of("http://[fd00::1]:9000"))
-        assertEquals(ServerOrigin.of("http://[fd00::1]:9000"), ServerOrigin.of("http://[FD00::1]:9000/x"))
+        assertEquals(ServerOrigin.of("http://[fd00::1]:9000"), ServerOrigin.of("http://[FD00::1]:9000"))
+        assertNull(ServerOrigin.of("http://[fd00::1]:9000/x"))
         assertNull(ServerOrigin.of("nada"))
         assertNull(ServerOrigin.of("https://u:p@a.example.com"))
     }

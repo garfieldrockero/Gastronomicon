@@ -441,9 +441,23 @@ private fun StatusMessage(status: SettingsStatus, canSave: Boolean) {
         SettingsStatus.Success -> stringResource(R.string.setup_result_success)
         SettingsStatus.Saved -> stringResource(R.string.settings_saved)
         SettingsStatus.StorageError -> stringResource(R.string.settings_error_storage)
-        is SettingsStatus.Error -> stringResource(errorTextRes(status.problem))
-        is SettingsStatus.SaveFailed ->
-            stringResource(R.string.save_failed_format, stringResource(errorTextRes(status.problem)))
+        is SettingsStatus.Error -> stringResource(
+            if (status.unsupportedPath) {
+                R.string.setup_error_unsupported_path
+            } else {
+                errorTextRes(status.problem)
+            },
+        )
+        is SettingsStatus.SaveFailed -> stringResource(
+            R.string.save_failed_format,
+            stringResource(
+                if (status.unsupportedPath) {
+                    R.string.setup_error_unsupported_path
+                } else {
+                    errorTextRes(status.problem)
+                },
+            ),
+        )
         // En reposo con los botones apagados se dice qué falta.
         SettingsStatus.Idle ->
             if (canSave) "" else stringResource(R.string.setup_hint_fill_fields)
@@ -678,6 +692,21 @@ private fun SettingsScreenPreviewNoNetwork() {
 private fun SettingsScreenPreviewUnauthorized() {
     ExampleSettingsScreen(
         ExampleState.copy(status = SettingsStatus.Error(ConnectionProblem.Unauthorized)),
+    )
+}
+
+// Dirección con carpeta: el aviso propio dice que Mealie va en la raíz.
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun SettingsScreenPreviewUnsupportedPath() {
+    ExampleSettingsScreen(
+        ExampleState.copy(
+            server = "mealie.example.com/mealie",
+            status = SettingsStatus.Error(
+                problem = ConnectionProblem.InvalidAddress,
+                unsupportedPath = true,
+            ),
+        ),
     )
 }
 

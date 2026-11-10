@@ -15,13 +15,33 @@
 
     <string name="import_ai_section">Con la IA de tu Mealie</string>
     <string name="import_ai_intro">Pega un enlace (un vídeo o una página) o el texto de la receta, y añade fotos si las tienes. La receta la prepara la IA que tenga configurada tu Mealie.</string>
-    <string name="import_ai_notice">El contenido y las fotos los envía tu app a tu Mealie, y tu Mealie los manda a su proveedor de IA.</string>
-    <string name="import_ai_notice_cost">Puede tardar unos minutos y gasta la cuota de IA de tu servidor.</string>
+    <!-- Sin imágenes en la IA no se ofrece añadir fotos: la introducción no las
+         promete (revisión de UX del 10-11-2026, B1). -->
+    <string name="import_ai_intro_no_photos">Pega un enlace (un vídeo o una página) o el texto de la receta. La receta la prepara la IA que tenga configurada tu Mealie.</string>
+    <!-- Aviso fijo de la sección, no un texto oculto: es lo que se lee con el dedo
+         ya en el botón. Dos párrafos, un tema cada uno (revisión de UX del
+         10-11-2026, M1): (a) plazo, cuota y qué hacer si se corta —reintentar a
+         ciegas dejaría dos recetas—; (b) a dónde va el contenido, fotos incluidas.
+         Lo que tarda un vídeo se dice en el campo del enlace, que es donde se pega. -->
+    <string name="import_ai_notice_waits">Puede tardar unos minutos y gasta la cuota de IA de tu servidor. Si se corta, mira tus recetas antes de reintentar.</string>
+    <string name="import_ai_notice">El contenido que escribas y las fotos que añadas los envía tu app a tu Mealie, y tu Mealie los manda a la IA de su servidor.</string>
     <string name="import_ai_checking">Comprobando si tu Mealie tiene la IA configurada…</string>
     <string name="import_ai_unavailable">Tu Mealie no tiene IA configurada. Puedes importar la receta por dirección o con un archivo o un texto.</string>
 
+    <!-- Capacidades por separado (decisión del 10-11-2026): tu Mealie puede tener
+         IA de texto y no de imagen ni de audio. Sin imágenes se ofrecen las fotos
+         apagadas, con su motivo; sin audio se avisa de los vídeos, pero el enlace
+         se sigue admitiendo (la app no distingue un vídeo de una página).
+         Sin jerga de administración: quien cocina no sabe qué es un «proveedor»
+         (revisión de UX del 10-11-2026, M8). -->
+    <string name="import_ai_photos_unavailable">La IA de tu Mealie no puede leer fotos, así que no se pueden añadir. Puedes pegar el texto o un enlace.</string>
+    <string name="import_ai_link_audio_unavailable">La IA de tu Mealie no puede entender vídeos: los enlaces de vídeo pueden no funcionar. Un enlace de una página web sí.</string>
+
     <string name="import_ai_link_label">Enlace (opcional)</string>
-    <string name="import_ai_link_supporting">Tiene que empezar por https:// y ser público. Si es un vídeo, pega su enlace.</string>
+    <string name="import_ai_link_supporting">Tiene que empezar por https:// y ser público. Si es un vídeo, pega su enlace: los vídeos pueden tardar.</string>
+    <!-- Sin audio no se recomienda el vídeo: sería recomendar y desaconsejar en dos
+         líneas seguidas. El vídeo solo se nombra en el aviso de debajo. -->
+    <string name="import_ai_link_supporting_no_audio">Tiene que empezar por https:// y ser público.</string>
     <string name="import_ai_link_invalid">Ese enlace no vale. Tiene que empezar por https:// y ser público.</string>
     <string name="import_ai_text_label">Texto de la receta (opcional)</string>
     <string name="import_ai_text_supporting">Una transcripción o la descripción, hasta %1$d MiB.</string>
@@ -40,12 +60,17 @@
 
     <string name="import_ai_action">Importar con IA</string>
     <string name="import_ai_action_hint">Escribe un enlace, pega el texto o añade una foto.</string>
+    <!-- Sin imágenes, la ayuda del botón no pide una foto que el botón de al lado
+         niega (revisión de UX del 10-11-2026, B1). -->
+    <string name="import_ai_action_hint_no_photos">Escribe un enlace o pega el texto.</string>
     <string name="import_ai_running">La IA de tu Mealie está preparando la receta…</string>
     <string name="import_ai_running_hint">La IA puede tardar unos minutos. Puedes cancelar, pero tu Mealie podría terminar de crearla igualmente.</string>
     <string name="import_ai_failed_title">No se ha podido importar con la IA</string>
-    <string name="import_ai_rejected">Tu Mealie no ha aceptado la importación con IA. Puede que no tenga ningún proveedor configurado o que no haya podido leer el enlace.</string>
+    <string name="import_ai_rejected">Tu Mealie no ha aceptado la importación con IA. Puede que su IA no esté configurada o que no haya podido leer el enlace.</string>
 
     <string name="import_ai_problem_empty">Añade al menos un texto, un enlace o una foto.</string>
+    <!-- Sin imágenes, pedir una foto sería pedir algo imposible (B1). -->
+    <string name="import_ai_problem_empty_no_photos">Añade al menos un texto o un enlace.</string>
     <string name="import_ai_problem_text_too_large">El texto pasa de %1$d MiB. Pega menos o quita una parte.</string>
     <string name="import_ai_problem_text_not_text">El texto lleva caracteres que no se pueden enviar. Vuelve a copiarlo.</string>
     <string name="import_ai_problem_too_many_photos">Como mucho %1$d fotos. Quita alguna antes de importar.</string>

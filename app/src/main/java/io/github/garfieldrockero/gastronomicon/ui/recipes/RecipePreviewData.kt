@@ -136,6 +136,27 @@ internal object RecipePreviewData {
 
     val detail: RecipeDetailView = RecipeDetailView.from(recipe)
 
+    /**
+     * La receta de ejemplo con un paso que traía una imagen o un vídeo: el saneador
+     * los tira por seguridad y marca el paso ([SanitizedHtml.omittedMedia]) para
+     * que el detalle pueda decirlo. Sirve para previsualizar ese aviso.
+     */
+    val recipeWithOmittedMedia: Recipe = recipe.copy(
+        steps = recipe.steps.mapIndexed { index, step ->
+            if (index == 1) {
+                step.copy(
+                    text = SanitizedHtml(
+                        blocks = step.text.blocks,
+                        truncated = step.text.truncated,
+                        omittedMedia = true,
+                    ),
+                )
+            } else {
+                step
+            }
+        },
+    )
+
     /** Borrador de ejemplo con ids válidos: nada de servidores, URL ni tokens reales. */
     val draft: RecipeDraft = RecipeDraft(
         name = "Arroz con verduras",

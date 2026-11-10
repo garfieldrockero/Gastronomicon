@@ -11,7 +11,7 @@ import org.junit.Test
 class SessionTest {
 
     private val secret = "SECRETO-reconocible-123"
-    private val url = "https://cocina-secreta.example.org/mealie"
+    private val url = "https://cocina-secreta.example.org"
     private val session = Session(url, ApiToken(secret))
 
     @Test
@@ -20,7 +20,6 @@ class SessionTest {
         assertFalse(text.contains(secret))
         assertFalse(text.contains("cocina-secreta"))
         assertFalse(text.contains("example.org"))
-        assertFalse(text.contains("/mealie"))
         assertFalse(text.contains(url))
     }
 
@@ -74,6 +73,17 @@ class SessionTest {
             } catch (e: IllegalArgumentException) {
                 assertFalse(e.message.orEmpty().contains("pass"))
             }
+        }
+    }
+
+    @Test
+    fun `rechaza una URL con subruta sin repetirla`() {
+        // Mealie no admite subpath: una sesión guardada así ya no vale.
+        try {
+            Session("https://cocina-secreta.example.org/mealie", ApiToken(secret))
+            fail("Una URL con ruta no debería admitirse")
+        } catch (e: IllegalArgumentException) {
+            assertFalse(e.message.orEmpty().contains("mealie"))
         }
     }
 

@@ -297,8 +297,16 @@ class MealieClientAiTest {
 
     @Test
     fun `la IA se pregunta al grupo de la cuenta, que no exige ser administrador`() {
-        mealie.fixed("GET", GROUPS_SELF, 200, group("""{"aiEnabled":true}"""))
-        assertEquals(ApiResult.Success(true), mealie.client().aiAvailable())
+        mealie.fixed(
+            "GET",
+            GROUPS_SELF,
+            200,
+            group("""{"aiEnabled":true,"imageProviderEnabled":true,"audioProviderEnabled":false}"""),
+        )
+        assertEquals(
+            ApiResult.Success(AiCapabilities(available = true, imageAvailable = true, audioAvailable = false)),
+            mealie.client().aiAvailable(),
+        )
         val request = mealie.seen.single()
         assertEquals("GET", request.method)
         assertEquals(GROUPS_SELF, request.path)
@@ -306,9 +314,87 @@ class MealieClientAiTest {
     }
 
     @Test
+    fun `las tres capacidades se leen por separado`() {
+        // Nombres de AIProviderSettingsOut en el openapi de Mealie 3.29.0.
+        val cases = mapOf(
+            """{"aiEnabled":true,"imageProviderEnabled":false,"audioProviderEnabled":true}""" to
+                AiCapabilities(true, imageAvailable = false, audioAvailable = true),
+            """{"aiEnabled":true,"imageProviderEnabled":false,"audioProviderEnabled":false}""" to
+                AiCapabilities(true, imageAvailable = false, audioAvailable = false),
+            """{"aiEnabled":true,"imageProviderEnabled":true,"audioProviderEnabled":true}""" to
+                AiCapabilities(true, imageAvailable = true, audioAvailable = true),
+        )
+        for ((settings, expected) in cases) {
+            mealie.fixed("GET", GROUPS_SELF, 200, group(settings))
+            assertEquals(settings, ApiResult.Success(expected), mealie.client().aiAvailable())
+        }
+    }
+
+    @Test
     fun `sin IA configurada la respuesta es un no`() {
         mealie.fixed("GET", GROUPS_SELF, 200, group("""{"aiEnabled":false}"""))
-        assertEquals(ApiResult.Success(false), mealie.client().aiAvailable())
+        assertEquals(
+            ApiResult.Success(AiCapabilities(available = false, imageAvailable = false, audioAvailable = false)),
+            mealie.client().aiAvailable(),
+        )
+    }
+
+    @Test
+    fun `un proveedor que queda de antes no enciende nada con la IA apagada`() {
+        // Sin IA general no se manda nada a ningún sitio, aunque el grupo
+        // conserve un proveedor de imagen o audio configurado.
+        mealie.fixed(
+            "GET",
+            GROUPS_SELF,
+            200,
+            group("""{"aiEnabled":false,"imageProviderEnabled":true,"audioProviderEnabled":true}"""),
+        )
+        assertEquals(
+            ApiResult.Success(AiCapabilities(available = false, imageAvailable = false, audioAvailable = false)),
+            mealie.client().aiAvailable(),
+        )
+    }
+
+    @Test
+    fun `un proveedor sin dato cuenta como no disponible`() {
+        // Un servidor de solo texto, o uno anterior a estos campos: se apagan
+        // las fotos y el vídeo, pero la IA de texto se sigue ofreciendo.
+        mealie.fixed("GET", GROUPS_SELF, 200, group("""{"aiEnabled":true}"""))
+        assertEquals(ApiResult.Success(AiCapabilities(true, false, false)), mealie.client().aiAvailable())
+
+        // Un null explícito es lo mismo que no venir.
+        mealie.fixed(
+            "GET",
+            GROUPS_SELF,
+            200,
+            group("""{"aiEnabled":true,"imageProviderEnabled":null,"audioProviderEnabled":null}"""),
+        )
+        assertEquals(ApiResult.Success(AiCapabilities(true, false, false)), mealie.client().aiAvailable())
+
+        // Y solo uno de los dos: el otro no se contagia.
+        mealie.fixed(
+            "GET",
+            GROUPS_SELF,
+            200,
+            group("""{"aiEnabled":true,"imageProviderEnabled":true}"""),
+        )
+        assertEquals(ApiResult.Success(AiCapabilities(true, true, false)), mealie.client().aiAvailable())
+    }
+
+    @Test
+    fun `un campo con un tipo raro no inventa capacidades`() {
+        // «si» no es un booleano: la respuesta entera se descarta y se falla
+        // cerrado en vez de adivinar qué quería decir el servidor.
+        mealie.fixed(
+            "GET",
+            GROUPS_SELF,
+            200,
+            group("""{"aiEnabled":true,"imageProviderEnabled":"si","audioProviderEnabled":true}"""),
+        )
+        assertEquals(
+            ApiResult.Failure(ConnectionProblem.Unknown),
+            mealie.client().aiAvailable(),
+        )
     }
 
     @Test
@@ -320,6 +406,8 @@ class MealieClientAiTest {
             """{"name":"Casa","id":"$uuid","slug":"casa","aiProviderSettings":null}""",
             """{"name":"Casa","id":"$uuid","slug":"casa","aiProviderSettings":{}}""",
             """{"name":"Casa","id":"$uuid","slug":"casa","aiProviderSettings":{"providers":[]}}""",
+            // Los proveedores sin `aiEnabled` tampoco dicen si hay IA.
+            group("""{"imageProviderEnabled":true,"audioProviderEnabled":true}"""),
             "no es json",
         )
         for (body in bodies) {

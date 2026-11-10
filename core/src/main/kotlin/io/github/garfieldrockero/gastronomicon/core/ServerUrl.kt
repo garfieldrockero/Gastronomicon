@@ -10,9 +10,10 @@ import java.util.Locale
  *
  * Esa URL es la base de todas las peticiones de la app y todas llevan el token
  * de API en la cabecera, así que aquí se fija la política de seguridad de la
- * dirección: HTTPS por defecto, sin usuario, contraseña, consulta o fragmento,
- * y con una forma canónica (esquema y host en minúsculas, sin barra ni punto
- * finales y sin el puerto por defecto del esquema: 443 en https, 80 en http).
+ * dirección: HTTPS por defecto, sin usuario, contraseña, consulta, fragmento ni
+ * ruta (Mealie no admite subruta), y con una forma canónica (esquema y host en
+ * minúsculas, sin barra ni punto finales y sin el puerto por defecto del
+ * esquema: 443 en https, 80 en http).
  *
  * HTTP en claro solo pasa con allowLocalHttp y hacia una IP literal privada
  * (ver [LocalNetwork]). La configuración de red de Android permite HTTP en
@@ -39,7 +40,9 @@ object ServerUrl {
      * Un http con la opción hacia un host que no es local lanza
      * [NotLocalAddressException], que es una [IllegalArgumentException] más:
      * va aparte para que la interfaz pueda explicar ese caso concreto (ver
-     * `addressProblemOf`) sin mirar el texto del mensaje.
+     * `addressProblemOf`) sin mirar el texto del mensaje. Una ruta (una
+     * subcarpeta tras el puerto) lanza [UnsupportedPathException], por el mismo
+     * motivo.
      */
     fun normalize(input: String, allowLocalHttp: Boolean = false): String {
         val trimmed = input.trim()
@@ -117,9 +120,7 @@ object ServerUrl {
         }
 
         // Se reconstruye en lugar de recortar la cadena de entrada para garantizar
-        // que el resultado vuelve a parsear bien. La ruta se toma cruda
-        // (rawPath) porque «path» descodificaría los escapes y podría inventar
-        // caracteres que no estaban en lo que escribió la persona.
+        // que el resultado vuelve a parsear bien.
         val cleanHost = host.removePrefix("[").removeSuffix("]").lowercase(Locale.ROOT)
         val hostWithoutDot = cleanHost.removeSuffix(".")
         if (
@@ -148,8 +149,21 @@ object ServerUrl {
                     "Para cualquier otro servidor usa «https://».",
             )
         }
+        // Mealie no se puede publicar bajo una subruta (su interfaz y su API
+        // cuelgan de la raíz), así que una URL con ruta acabaría en un 404
+        // después de guardar el token. Va después de «no es local» para que un
+        // http hacia fuera de casa reciba ese aviso, que es el que impide
+        // guardar de todas formas. Solo valen la raíz sin barra y la barra
+        // final suelta.
+        val rawPath = uri.rawPath ?: ""
+        if (rawPath.isNotEmpty() && rawPath != "/") {
+            throw UnsupportedPathException(
+                "La URL no puede llevar ruta: Mealie tiene que estar en la raíz del " +
+                    "servidor, por ejemplo «https://mealie.example.com». " +
+                    "Deja solo el dominio y el puerto.",
+            )
+        }
 
-        val path = normalizePath(uri.rawPath ?: "")
         val defaultPort = if (scheme == HTTPS) DEFAULT_HTTPS_PORT else DEFAULT_HTTP_PORT
         val port = when {
             // El puerto por defecto del esquema no se escribe en la forma
@@ -160,7 +174,9 @@ object ServerUrl {
             )
             else -> ":${uri.port}"
         }
-        val output = "$scheme://$displayHost$port$path"
+        // Sin ruta: se rechazó más arriba (UnsupportedPathException), así que la
+        // forma canónica es siempre esquema, host y puerto.
+        val output = "$scheme://$displayHost$port"
         // La salida debe ser ASCII imprimible: así no hay caracteres que puedan
         // cambiar de aspecto ni escapes ambiguos en lo que se muestra.
         if (output.any { it.code !in 0x21..0x7E }) {
@@ -231,42 +247,19 @@ object ServerUrl {
             throw IllegalArgumentException("La dirección IPv6 no es válida.")
         }
     }
-
-    /**
-     * Normaliza la ruta: sin barra final, sin segmentos vacíos internos y sin
-     * segmentos «.» o «..» (también escapados). Solo ASCII imprimible.
-     */
-    private fun normalizePath(raw: String): String {
-        val withoutTrailingSlashes = raw.trimEnd('/')
-        if (withoutTrailingSlashes.isEmpty()) return ""
-        if (withoutTrailingSlashes.any { it.code !in 0x21..0x7E }) {
-            throw IllegalArgumentException(
-                "La ruta de la URL solo admite ASCII; escribe los caracteres especiales con percent-encoding.",
-            )
-        }
-        val body = withoutTrailingSlashes.removePrefix("/")
-        val segments = body.split('/')
-        for (segment in segments) {
-            if (segment.isEmpty()) {
-                throw IllegalArgumentException("La ruta de la URL no puede tener segmentos vacíos.")
-            }
-            if (segment == "." || segment == "..") {
-                throw IllegalArgumentException("La ruta de la URL no puede llevar «.» ni «..».")
-            }
-            if (segment.contains("%2e", ignoreCase = true) || segment.contains("%2f", ignoreCase = true)) {
-                throw IllegalArgumentException("La ruta de la URL no puede llevar «.» ni «/» escapados.")
-            }
-        }
-        // Escapes de control o de barra: se rechazan antes de que lleguen a la red.
-        Regex("%([0-9A-Fa-f]{2})").findAll(withoutTrailingSlashes).forEach { match ->
-            val value = match.groupValues[1].toInt(16)
-            if (value <= 0x1F || value == 0x7F || value == 0x2F) {
-                throw IllegalArgumentException("La ruta de la URL lleva un escape no admitido.")
-            }
-        }
-        return "/" + segments.joinToString("/")
-    }
 }
+
+/**
+ * Rechazo de una URL con ruta (una subcarpeta: `https://host/mealie`).
+ *
+ * Mealie no admite subruta: su interfaz y su API cuelgan de la raíz, así que
+ * una URL con ruta guardaría un token que después no sirve para nada. Se
+ * distingue por tipo (no por el texto del mensaje) para que la interfaz pueda
+ * explicarlo; es una [IllegalArgumentException] para que todo lo que ya captura
+ * esa excepción siga funcionando igual. El mensaje es fijo y no repite la
+ * entrada.
+ */
+class UnsupportedPathException(message: String) : IllegalArgumentException(message)
 
 /**
  * Rechazo de un http con la opción de red local activada porque el host no es

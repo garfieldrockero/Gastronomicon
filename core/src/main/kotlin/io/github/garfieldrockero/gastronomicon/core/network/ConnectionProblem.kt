@@ -76,8 +76,8 @@ enum class ConnectionProblem {
 fun NetworkError.toConnectionProblem(): ConnectionProblem = when (this) {
     is NetworkError.HttpError -> when (statusCode) {
         401, 403 -> ConnectionProblem.Unauthorized
-        // Un 404 al probar la conexión casi siempre es Mealie en otra subruta
-        // (o no es Mealie): el servidor contesta, pero la API no está ahí.
+        // Un 404 al probar la conexión casi siempre es que no es Mealie (o es otra
+        // aplicación del mismo puerto): el servidor contesta, pero la API no está ahí.
         404 -> ConnectionProblem.InvalidAddress
         in 500..599 -> ConnectionProblem.ServerError
         else -> ConnectionProblem.Unknown
@@ -104,6 +104,10 @@ fun NetworkError.toConnectionProblem(): ConnectionProblem = when (this) {
  * por su cuenta: [NotLocalAddressException] es [ConnectionProblem.NotLocalAddress]
  * y cualquier otro rechazo es [ConnectionProblem.InvalidAddress]. Se decide por
  * el tipo, nunca por el texto del mensaje.
+ *
+ * `UnsupportedPathException` (una URL con ruta) también cae en
+ * [ConnectionProblem.InvalidAddress]: su mensaje ya explica el caso concreto y
+ * no hace falta un motivo más en la pantalla.
  */
 fun addressProblemOf(error: IllegalArgumentException): ConnectionProblem =
     if (error is NotLocalAddressException) {

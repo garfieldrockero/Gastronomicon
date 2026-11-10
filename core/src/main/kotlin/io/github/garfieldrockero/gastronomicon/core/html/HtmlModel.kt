@@ -39,10 +39,18 @@ sealed interface HtmlBlock {
  *
  * [truncated] avisa de que el contenido se ha recortado (entrada demasiado
  * grande o anidado demasiado profundo) para que la interfaz pueda indicarlo.
+ *
+ * [omittedMedia] avisa de que el HTML traía imágenes o vídeo (`img`, `iframe`,
+ * `video`, `audio`…) que el saneador ha tirado, para que la interfaz pueda
+ * decirlo en vez de dejar un hueco sin explicación. No cambia qué se descarta:
+ * es información de lo que ya se descartaba. Al pasar por la caché offline se
+ * pierde (allí solo se guarda el texto y las listas), así que una copia sin red
+ * no puede mostrar ese aviso.
  */
 data class SanitizedHtml(
     val blocks: List<HtmlBlock>,
     val truncated: Boolean = false,
+    val omittedMedia: Boolean = false,
 ) {
 
     /**

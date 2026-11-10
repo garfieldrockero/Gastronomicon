@@ -97,11 +97,23 @@ sealed interface SetupStatus {
      * lo decide el núcleo y la pantalla solo le pone el mensaje de
      * `strings.xml`, así que nunca se cuela una excepción, la respuesta cruda
      * del servidor ni nada de lo que escribió la persona.
+     *
+     * [unsupportedPath] es el caso concreto de una dirección con carpeta
+     * (`https://host/mealie`): el núcleo lo cuenta como
+     * [ConnectionProblem.InvalidAddress], pero el mensaje genérico («revisa el
+     * servidor y el puerto») no explica qué sobra. La pantalla usa entonces el
+     * texto propio de la subruta.
      */
-    data class Error(val problem: ConnectionProblem) : SetupStatus
+    data class Error(
+        val problem: ConnectionProblem,
+        val unsupportedPath: Boolean = false,
+    ) : SetupStatus
 
     /** «Guardar» no ha guardado: [problem] es el motivo, distinto del aviso de «Probar». */
-    data class SaveFailed(val problem: ConnectionProblem) : SetupStatus
+    data class SaveFailed(
+        val problem: ConnectionProblem,
+        val unsupportedPath: Boolean = false,
+    ) : SetupStatus
 
     /** El almacén seguro del móvil ha fallado al guardar. */
     data object StorageError : SetupStatus
@@ -318,9 +330,23 @@ private fun StatusMessage(status: SetupStatus, canSave: Boolean) {
         SetupStatus.Testing -> stringResource(R.string.setup_status_testing)
         SetupStatus.Saving -> stringResource(R.string.setup_status_saving)
         SetupStatus.Success -> stringResource(R.string.setup_result_success)
-        is SetupStatus.Error -> stringResource(errorTextRes(status.problem))
-        is SetupStatus.SaveFailed ->
-            stringResource(R.string.save_failed_format, stringResource(errorTextRes(status.problem)))
+        is SetupStatus.Error -> stringResource(
+            if (status.unsupportedPath) {
+                R.string.setup_error_unsupported_path
+            } else {
+                errorTextRes(status.problem)
+            },
+        )
+        is SetupStatus.SaveFailed -> stringResource(
+            R.string.save_failed_format,
+            stringResource(
+                if (status.unsupportedPath) {
+                    R.string.setup_error_unsupported_path
+                } else {
+                    errorTextRes(status.problem)
+                },
+            ),
+        )
         SetupStatus.StorageError -> stringResource(R.string.settings_error_storage)
         // En reposo con «Guardar» apagado se dice qué falta; si ya se puede
         // guardar, no hay nada que avisar.
@@ -407,6 +433,23 @@ private fun SetupScreenPreviewInvalidAddress() {
     GastronomiconTheme {
         ExampleSetupScreen(
             ExampleState.copy(status = SetupStatus.Error(ConnectionProblem.InvalidAddress))
+        )
+    }
+}
+
+// Una carpeta al final de la dirección: el aviso propio dice qué sobra.
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun SetupScreenPreviewUnsupportedPath() {
+    GastronomiconTheme {
+        ExampleSetupScreen(
+            ExampleState.copy(
+                server = "mealie.example.com/mealie",
+                status = SetupStatus.Error(
+                    problem = ConnectionProblem.InvalidAddress,
+                    unsupportedPath = true,
+                ),
+            )
         )
     }
 }

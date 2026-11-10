@@ -142,8 +142,8 @@ internal class RecipeDto(
 
 /**
  * `GroupSummary` de `GET /api/groups/self`, reducido a lo que la app pregunta:
- * si el grupo tiene IA configurada. Lo demás (nombre, preferencias, proveedores
- * con sus claves) no se declara, así que ni se lee.
+ * si el grupo tiene IA configurada y con qué proveedores. Lo demás (nombre,
+ * preferencias, proveedores con sus claves) no se declara, así que ni se lee.
  */
 @Serializable
 internal class GroupSummaryDto(
@@ -151,14 +151,23 @@ internal class GroupSummaryDto(
 )
 
 /**
- * `AIProviderSettingsOut`, solo con `aiEnabled`.
+ * `AIProviderSettingsOut` de `GET /api/groups/self`, solo con las tres banderas
+ * que la app pregunta: IA general, proveedor de imagen y proveedor de audio.
+ * Los identificadores de los proveedores y sus `providers` no se declaran, así
+ * que ni se leen.
  *
- * Es anulable a propósito: `coerceInputValues` convertiría un `null` en el
- * valor por defecto de un `Boolean` no anulable, y aquí un «no viene» tiene que
- * poder distinguirse de un `false` para no esconder una función que el servidor
- * sí tiene.
+ * Los nombres son los del contrato de Mealie v3.29.0
+ * (`docs/openapi.json` → `AIProviderSettingsOut`): `aiEnabled`,
+ * `imageProviderEnabled` y `audioProviderEnabled`, las tres `readOnly`.
+ *
+ * Los tres son anulables a propósito: `coerceInputValues` convertiría un `null`
+ * en el valor por defecto de un `Boolean` no anulable, y aquí un «no viene»
+ * tiene que poder distinguirse de un `false`: con `aiEnabled` se decide si la
+ * función se ofrece (ver `MealieClient.aiAvailable`).
  */
 @Serializable
 internal class AiProviderSettingsDto(
     val aiEnabled: Boolean? = null,
+    val imageProviderEnabled: Boolean? = null,
+    val audioProviderEnabled: Boolean? = null,
 )

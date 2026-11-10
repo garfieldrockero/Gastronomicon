@@ -10,6 +10,11 @@ package io.github.garfieldrockero.gastronomicon.core.html
  * el contenido de script, style, iframe, object, embed, svg, math, form y
  * similares. Los atributos no se leen jamás.
  *
+ * Además de lo que se descarta, la salida dice si había imágenes o vídeo
+ * ([SanitizedHtml.omittedMedia]): el criterio de qué se tira no cambia, solo se
+ * anota para que la interfaz pueda avisar de que ese paso tenía algo que la app
+ * no pinta.
+ *
  * Es seguro ante entrada hostil porque la salida no puede contener nada
  * ejecutable: solo cadenas ya limpias y banderas de estilo. Los límites de
  * tamaño y de profundidad solo protegen la memoria y el tiempo.
@@ -42,18 +47,40 @@ object HtmlSanitizer {
 
         val structured = TreeBuilder(structured = true)
         HtmlTokenizer.tokenize(input, structured)
-        if (!structured.overflowed) return SanitizedHtml(structured.finish(), truncated)
+        if (!structured.overflowed) {
+            return SanitizedHtml(
+                blocks = structured.finish(),
+                truncated = truncated,
+                omittedMedia = structured.omittedMedia,
+            )
+        }
 
-        // Anidado excesivo: se falla cerrado a texto plano truncado.
+        // Anidado excesivo: se falla cerrado a texto plano truncado. La marca de
+        // imágenes o vídeo se mantiene: el primer recorrido ya vio esas etiquetas
+        // y lo que se enseña sale del segundo, así que se suma lo de los dos.
         val plain = TreeBuilder(structured = false)
         HtmlTokenizer.tokenize(input, plain)
-        return SanitizedHtml(plain.finish(), truncated = true)
+        return SanitizedHtml(
+            blocks = plain.finish(),
+            truncated = true,
+            omittedMedia = structured.omittedMedia || plain.omittedMedia,
+        )
     }
 
     /** Elementos cuyo contenido (y no solo la etiqueta) se descarta. */
     private val SKIP_CONTENT = setOf(
         "object", "applet", "svg", "math", "form", "template", "select", "button",
         "head", "video", "audio", "canvas",
+    )
+
+    /**
+     * Etiquetas que aportan una imagen, un vídeo o su reproductor. Ninguna está
+     * en la lista blanca: todas se descartan igual que antes; esta lista solo
+     * sirve para encender [SanitizedHtml.omittedMedia]. `iframe` va incluido
+     * porque Mealie mete así los vídeos de YouTube en un paso.
+     */
+    private val MEDIA_TAGS = setOf(
+        "img", "picture", "source", "video", "audio", "iframe", "embed", "object", "svg",
     )
 
     private class ListFrame(val ordered: Boolean) {
@@ -67,6 +94,10 @@ object HtmlSanitizer {
         private var done = false
         override val finished: Boolean get() = done
         var overflowed = false
+            private set
+
+        /** Se ha descartado alguna imagen o vídeo; se publica en [SanitizedHtml.omittedMedia]. */
+        var omittedMedia = false
             private set
 
         private val blocks = ArrayList<HtmlBlock>()
@@ -97,6 +128,10 @@ object HtmlSanitizer {
         }
 
         override fun onStartTag(name: String, selfClosing: Boolean) {
+            // Antes de cualquier descarte: importa que había una imagen o un
+            // vídeo aunque estuviera dentro de un contenedor que se tira entero
+            // (un <form>, por ejemplo), porque la persona ve el hueco igual.
+            if (name in MEDIA_TAGS) omittedMedia = true
             skipName?.let {
                 if (name == it) skipDepth++
                 return

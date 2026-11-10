@@ -4,25 +4,45 @@ import io.github.garfieldrockero.gastronomicon.core.config.ApiToken
 import io.github.garfieldrockero.gastronomicon.core.config.ServerOrigin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.fail
 import org.junit.Test
 
 class SaveSessionPolicyTest {
 
-    private val saved = "https://mealie.example.com:8443/app"
+    private val saved = "https://mealie.example.com:8443"
 
     private fun decide(new: String, empty: Boolean, savedUrl: String? = saved) =
         SaveSessionPolicy.decide(savedUrl, new, empty)
 
     @Test
     fun `mismo origen y token vacio conserva el guardado sin probar`() {
-        assertEquals(SaveDecision.KeepSavedToken, decide("https://mealie.example.com:8443/app", true))
-        // La ruta no cuenta, ni las mayúsculas, ni el puerto por defecto explícito.
-        assertEquals(SaveDecision.KeepSavedToken, decide("HTTPS://Mealie.Example.com:8443/otra", true))
+        assertEquals(SaveDecision.KeepSavedToken, decide("https://mealie.example.com:8443", true))
+        // Ni las mayúsculas ni la barra final ni el puerto por defecto explícito
+        // cuentan (la ruta ya no puede existir: ServerUrl la rechaza).
+        assertEquals(SaveDecision.KeepSavedToken, decide("HTTPS://Mealie.Example.com:8443/", true))
         assertEquals(
             SaveDecision.KeepSavedToken,
             decide("https://a.example.com", true, "https://a.example.com:443"),
         )
+    }
+
+    @Test
+    fun `una sesion guardada con subruta no conserva el token`() {
+        // Forma guardada por una versión anterior: ahora no es una URL válida,
+        // así que se trata como «sin sesión» y hace falta escribir el token.
+        assertEquals(
+            SaveDecision.TokenRequired,
+            decide("https://mealie.example.com:8443", true, "https://mealie.example.com:8443/app"),
+        )
+    }
+
+    @Test
+    fun `una url nueva con ruta no vale`() {
+        // La interfaz enseña el motivo de ServerUrl; la política no la acepta.
+        assertThrows(IllegalArgumentException::class.java) {
+            decide("https://mealie.example.com:8443/app", true)
+        }
     }
 
     @Test

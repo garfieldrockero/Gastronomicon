@@ -64,11 +64,24 @@ sealed interface SettingsStatus {
     /** El almacén seguro del móvil ha fallado al leer, guardar o borrar. */
     data object StorageError : SettingsStatus
 
-    /** «Guardar» no ha guardado: [problem] es el motivo, distinto del aviso de «Probar». */
-    data class SaveFailed(val problem: ConnectionProblem) : SettingsStatus
+    /**
+     * «Guardar» no ha guardado: [problem] es el motivo, distinto del aviso de «Probar».
+     *
+     * [unsupportedPath] marca la dirección con carpeta (`https://host/mealie`): el
+     * núcleo la cuenta como [ConnectionProblem.InvalidAddress], pero el texto
+     * genérico no dice qué sobra. Se distingue por el tipo de la excepción del
+     * núcleo, nunca por su mensaje.
+     */
+    data class SaveFailed(
+        val problem: ConnectionProblem,
+        val unsupportedPath: Boolean = false,
+    ) : SettingsStatus
 
     /** Motivo cerrado decidido por el núcleo; la pantalla solo le pone texto. */
-    data class Error(val problem: ConnectionProblem) : SettingsStatus
+    data class Error(
+        val problem: ConnectionProblem,
+        val unsupportedPath: Boolean = false,
+    ) : SettingsStatus
 }
 
 /** Marcha del borrado de la sesión, separada de la de guardar para que cada aviso salga junto a su botón. */

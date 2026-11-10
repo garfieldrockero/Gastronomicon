@@ -902,6 +902,17 @@ private fun StepsBlock(view: RecipeDetailView) {
                     html = step.body,
                     style = MaterialTheme.typography.bodyLarge.merge(StepText),
                 )
+                // El saneador tira las imágenes y los vídeos de los pasos (seguridad):
+                // se dice en el paso para que el hueco no parezca un fallo de la app.
+                // Una línea discreta, no un aviso de error.
+                if (step.body.omittedMedia) {
+                    Text(
+                        text = stringResource(R.string.detail_step_media_omitted),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontStyle = FontStyle.Italic,
+                    )
+                }
             }
         }
     }
@@ -1016,6 +1027,19 @@ private fun RecipeDetailLoadedDarkPreview() {
 @Composable
 private fun RecipeDetailLoadedLargeTextPreview() {
     GastronomiconTheme { DetailPreview(RecipeDetailState.Ready(RecipePreviewData.detail)) }
+}
+
+// Un paso que traía una imagen y el saneador la tiró: el detalle lo dice en el paso.
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeDetailOmittedMediaPreview() {
+    GastronomiconTheme {
+        DetailPreview(
+            RecipeDetailState.Ready(
+                RecipeDetailView.from(RecipePreviewData.recipeWithOmittedMedia),
+            ),
+        )
+    }
 }
 
 @Preview(showBackground = true)

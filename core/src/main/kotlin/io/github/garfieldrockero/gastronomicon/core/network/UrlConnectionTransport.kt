@@ -26,9 +26,10 @@ import javax.net.ssl.SSLException
  *   cabecera «Authorization» puesta a mano a donde hiciera falta (otro host u
  *   otro esquema incluidos). Aquí solo se sigue si el destino tiene el mismo
  *   esquema, host, puerto y, además, queda dentro de la ruta de la URL base
- *   (con la base en la raíz, cualquier ruta del mismo origen): Mealie puede
- *   desplegarse en una subruta como «/mealie» y no hay razón para que el token
- *   visite el resto del dominio. Si no se cumple, se rechaza antes de abrir la
+ *   (con la base en la raíz, cualquier ruta del mismo origen). ServerUrl ya no
+ *   admite una URL con ruta, así que la contención por ruta es defensa en
+ *   profundidad: si alguna vez se construye el transporte con una base en
+ *   subruta, el token no visita el resto del dominio. Si no se cumple, se rechaza antes de abrir la
  *   segunda conexión y al destino no le llega nada.
  * - Un 301 o un 302 sobre una escritura (POST, PUT, DELETE) no se sigue: casi
  *   todos los clientes lo convierten en GET sin cuerpo, y una escritura que se
@@ -146,8 +147,8 @@ class UrlConnectionTransport internal constructor(
         // reiniciara en cada salto, una cadena de redirecciones lentas dejaría
         // la app esperando sin fin.
         val deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(totalTimeoutMs)
-        // Concatenar (y no «resolve») conserva la subruta de la base, que es
-        // como se despliega Mealie cuando no está en la raíz del dominio.
+        // Concatenar (y no «resolve») conserva la ruta de la base (hoy siempre
+        // vacía: ServerUrl no admite subruta, pero el transporte no lo supone).
         var target = try {
             URI(baseUri.toString().trimEnd('/') + request.path +
                 (request.query?.let { "?$it" } ?: ""))
@@ -401,9 +402,9 @@ class UrlConnectionTransport internal constructor(
         // Credenciales embebidas en la redirección: no se enviarían, pero
         // mejor ni siquiera abrir esa conexión.
         if (location.userInfo != null) throw NetworkError.RedirectRejected
-        // Además del origen, el destino tiene que quedarse en la ruta base: si
-        // Mealie vive en «/mealie», el token no tiene por qué visitar el resto
-        // del dominio (otra aplicación, un panel de administración…).
+        // Además del origen, el destino tiene que quedarse en la ruta base: con
+        // una base en subruta (que ServerUrl ya no genera) el token no tiene por
+        // qué visitar el resto del dominio (otra aplicación, un panel…).
         if (!isWithinBase(redirectSegments(location.rawPath.orEmpty()))) {
             throw NetworkError.RedirectRejected
         }

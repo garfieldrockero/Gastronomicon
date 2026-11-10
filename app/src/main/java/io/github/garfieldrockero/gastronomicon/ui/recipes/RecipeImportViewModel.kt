@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import io.github.garfieldrockero.gastronomicon.core.client.AiCapabilities
 import io.github.garfieldrockero.gastronomicon.core.client.AiImage
 import io.github.garfieldrockero.gastronomicon.core.client.ApiResult
 import io.github.garfieldrockero.gastronomicon.core.client.InputProblem
@@ -46,7 +47,8 @@ enum class ImportSource {
 
 /**
  * ¿Ofrece este servidor la importación con IA? Lo dice el núcleo al abrir la
- * pantalla ([MealieClient.aiAvailable]).
+ * pantalla ([MealieClient.aiAvailable] devuelve las [AiCapabilities]: IA general,
+ * proveedor de imagen y proveedor de audio).
  *
  * Solo [NotConfigured] apaga la sección: cuando no se sabe, se ofrece igual y el
  * error del servidor se enseña al intentarlo. Esconder una función que el
@@ -167,6 +169,17 @@ data class RecipeImportUiState(
     // ------------------------------------------------------- IA del servidor
     /** Lo que ha dicho el servidor sobre su IA al abrir la pantalla. */
     val aiAvailability: AiAvailability = AiAvailability.Checking,
+
+    /**
+     * Qué puede hacer la IA del servidor, ya decidido en el núcleo
+     * ([AiCapabilities]): IA general, proveedor de **imagen** para las fotos y
+     * proveedor de **audio** para los enlaces de vídeo.
+     *
+     * `null` es «no se sabe» (red, 401, respuesta rara) o «la sección está
+     * apagada»: en los dos casos no se esconde ni se apaga nada, porque la app no
+     * puede adivinar lo que el servidor no ha dicho.
+     */
+    val aiCapabilities: AiCapabilities? = null,
     /** Enlace pegado para que lo lea la IA del servidor. */
     val aiLink: String = "",
     /** Texto pegado (transcripción, descripción) para la IA del servidor. */
@@ -212,6 +225,21 @@ data class RecipeImportUiState(
      * que la persona no podría mandar ni recuperar de otra forma.
      */
     val aiFormVisible: Boolean get() = !aiUnavailable || hasAiContent
+
+    /**
+     * Se pueden ofrecer fotos: el servidor tiene proveedor de imagen **o no se
+     * sabe**. Solo se apaga la zona de fotos con un «no» claro del servidor
+     * ([AiCapabilities.imageAvailable] en `false`): sin IA general no hay
+     * formulario, así que no hace falta mirar nada más.
+     */
+    val aiPhotosAvailable: Boolean get() = aiCapabilities?.imageAvailable != false
+
+    /**
+     * El servidor ha dicho que no tiene proveedor de **audio**: los enlaces de
+     * vídeo pueden no funcionar. No se bloquea el campo del enlace: la app no
+     * puede distinguir un vídeo de una página web, y el servidor contestará.
+     */
+    val aiAudioUnavailable: Boolean get() = aiCapabilities?.audioAvailable == false
 
     /** Lo que pesan entre todas las fotos preparadas. Solo se compara: no se manda. */
     val aiPhotosBytes: Long get() = aiPhotos.sumOf { it.bytes.toLong() }
@@ -664,37 +692,57 @@ class RecipeImportViewModel(
         }
     }
 
-    /** ¿Tiene el servidor IA configurada? Si no se sabe, se ofrece igualmente. */
+    /** ¿Tiene el servidor IA configurada y para qué? Si no se sabe, se ofrece igualmente. */
     private fun checkAiAvailability() {
         val gen = generation
         aiCheckJob?.cancel()
         aiCheckJob = viewModelScope.launch {
-            val availability = withContext(ioDispatcher) { askAiAvailability() }
+            val check = withContext(ioDispatcher) { askAiAvailability() }
             if (gen != generation) return@launch
             val latest = _state.value
             if (!latest.visible) return@launch
-            _state.value = latest.copy(aiAvailability = availability)
+            _state.value = latest.copy(
+                aiAvailability = check.availability,
+                aiCapabilities = check.capabilities,
+            )
         }
     }
 
-    private fun askAiAvailability(): AiAvailability {
+    private fun askAiAvailability(): AiCheck {
         val client = try {
             access.newClient()
         } catch (error: CancellationException) {
             throw error
         } catch (ignored: NetworkError) {
             // Sin sesión, sin red o con el almacén sin responder: no se sabe.
-            return AiAvailability.Unknown
+            return AiCheck(AiAvailability.Unknown)
         } catch (ignored: Exception) {
-            return AiAvailability.Unknown
+            return AiCheck(AiAvailability.Unknown)
         }
         return when (val result = client.aiAvailable()) {
-            // Solo un «no» claro apaga la sección; ver el KDoc de aiAvailable.
+            // Solo un «no» claro apaga la sección; las capacidades ya vienen
+            // decididas del núcleo (ver el KDoc de AiCapabilities).
             is ApiResult.Success ->
-                if (result.value) AiAvailability.Available else AiAvailability.NotConfigured
-            else -> AiAvailability.Unknown
+                if (result.value.available) {
+                    AiCheck(AiAvailability.Available, result.value)
+                } else {
+                    // IA apagada: no hay formulario, así que no hacen falta las
+                    // capacidades y se quedan en «no se sabe».
+                    AiCheck(AiAvailability.NotConfigured)
+                }
+            else -> AiCheck(AiAvailability.Unknown)
         }
     }
+
+    /**
+     * Lo que ha contestado el servidor sobre su IA: el sí/no que decide si se
+     * ofrece la sección y, cuando lo ha dicho, sus capacidades. Va aparte porque
+     * «no hay IA» y «no se sabe» no traen capacidades que enseñar.
+     */
+    private class AiCheck(
+        val availability: AiAvailability,
+        val capabilities: AiCapabilities? = null,
+    )
 
     /** Vuelca un motivo local de la sección de IA, si la pantalla sigue abierta. */
     private fun setAiProblem(problem: AiProblem) {

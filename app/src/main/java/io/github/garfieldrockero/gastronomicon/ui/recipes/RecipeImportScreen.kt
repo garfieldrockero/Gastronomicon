@@ -64,11 +64,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.garfieldrockero.gastronomicon.R
+import io.github.garfieldrockero.gastronomicon.core.client.AiCapabilities
 import io.github.garfieldrockero.gastronomicon.core.client.ValidationDetail
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.core.recipes.DraftField
@@ -629,6 +631,10 @@ private fun DataImportSection(
  * - Las fotos salen de la galería o de la cámara del sistema (sin permisos, ver
  *   `rememberPhotoPicker`), se recodifican sin EXIF en el ViewModel y aquí solo se
  *   pinta una miniatura pequeña con su «Quitar foto N».
+ * - Las capacidades son tres (`AiCapabilities`, del núcleo): sin proveedor de
+ *   **imagen** la zona de fotos se apaga con su motivo; sin proveedor de **audio**
+ *   se avisa junto al enlace de que los vídeos pueden no funcionar, pero el enlace
+ *   se sigue admitiendo porque la app no distingue un vídeo de una página web.
  * - Si el servidor ha dicho que no tiene IA y no hay nada escrito, la sección se
  *   queda en título y aviso, remitiendo a las otras dos vías. Si el «no hay IA»
  *   llega tarde, con contenido ya dentro, se avisa pero se deja intentarlo: el
@@ -676,40 +682,24 @@ private fun AiImportSection(
         keyboard?.hide()
         onImportAi()
     }
-    val canAddPhoto = !busy && formVisible && !state.aiPhotosFull
+    // Sin imágenes en la IA del servidor no se ofrecen fotos: mandarlas gasta una
+    // petición a la IA para recibir un error. Solo se apaga con un «no» claro del
+    // servidor (`RecipeImportUiState.aiPhotosAvailable`), y se dice por qué.
+    val photosAvailable = state.aiPhotosAvailable
+    val photosUnavailableText = stringResource(R.string.import_ai_photos_unavailable)
+    val canAddPhoto = !busy && formVisible && photosAvailable && !state.aiPhotosFull
     // Sin nada que mandar el botón está apagado y una línea dice por qué.
     val canImport = !busy && formVisible && state.hasAiContent
 
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.medium)) {
         SectionTitle(stringResource(R.string.import_ai_section))
         Text(
-            text = stringResource(R.string.import_ai_intro),
+            text = stringResource(
+                if (photosAvailable) R.string.import_ai_intro else R.string.import_ai_intro_no_photos,
+            ),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-
-        // Coste y privacidad, en dos líneas y sin adornos: a dónde va el contenido. Solo cuando
-        // hay formulario: con «no hay IA» se contradiría con el aviso de debajo.
-        if (formVisible) Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            shape = MaterialTheme.shapes.medium,
-        ) {
-            Column(
-                modifier = Modifier.padding(Spacing.medium),
-                verticalArrangement = Arrangement.spacedBy(Spacing.extraSmall),
-            ) {
-                Text(
-                    text = stringResource(R.string.import_ai_notice),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = stringResource(R.string.import_ai_notice_cost),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
 
         when (state.aiAvailability) {
             // Barra arriba y texto debajo, no en una fila: el texto largo se comía el
@@ -746,6 +736,32 @@ private fun AiImportSection(
             AiAvailability.Available, AiAvailability.Unknown -> Unit
         }
 
+        // Fijo y visible (no un «tooltip»): lo que hay que saber antes de mandar
+        // nada. Va DESPUÉS del aviso de disponibilidad, para no contradecirlo si el
+        // «no hay IA» llega tarde (entonces ni se pinta: hablar de lo que hace la IA
+        // de tu servidor cuando no la tiene solo confunde). Dos párrafos, un tema
+        // cada uno, para que se lean enteros a texto grande.
+        if (formVisible && !state.aiUnavailable) Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(
+                modifier = Modifier.padding(Spacing.medium),
+                verticalArrangement = Arrangement.spacedBy(Spacing.small),
+            ) {
+                Text(
+                    text = stringResource(R.string.import_ai_notice_waits),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = stringResource(R.string.import_ai_notice),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
         // Sin IA y sin nada escrito no hay formulario: solo el título y el aviso, que
         // ya remite a las otras dos vías. Con contenido dentro sí se pinta, aunque el
         // «no hay IA» haya llegado tarde (ver `RecipeImportUiState.aiFormVisible`).
@@ -753,6 +769,27 @@ private fun AiImportSection(
 
         val invalidLink = state.aiLinkInvalid
         val invalidLinkText = stringResource(R.string.import_ai_link_invalid)
+        // Sin audio no se recomienda el vídeo en la ayuda: sería recomendar y
+        // desaconsejar en dos líneas seguidas. El motivo va dentro del propio campo
+        // (`supportingText`), para que TalkBack lo lea con él y a texto grande no
+        // parezca la etiqueta del campo siguiente.
+        val linkHelp = stringResource(
+            if (invalidLink) {
+                R.string.import_ai_link_invalid
+            } else if (state.aiAudioUnavailable) {
+                R.string.import_ai_link_supporting_no_audio
+            } else {
+                R.string.import_ai_link_supporting
+            },
+        )
+        // Aviso, no bloqueo: la app no puede saber si un https es un vídeo o una
+        // página, y el servidor contestará. Se dice para que un «no funciona» no
+        // parezca un fallo del móvil.
+        val audioNotice = if (state.aiAudioUnavailable) {
+            stringResource(R.string.import_ai_link_audio_unavailable)
+        } else {
+            null
+        }
         OutlinedTextField(
             value = state.aiLink,
             onValueChange = onAiLinkChange,
@@ -763,11 +800,15 @@ private fun AiImportSection(
             label = { Text(stringResource(R.string.import_ai_link_label)) },
             isError = invalidLink,
             supportingText = {
-                Text(
-                    stringResource(
-                        if (invalidLink) R.string.import_ai_link_invalid else R.string.import_ai_link_supporting,
-                    ),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.extraSmall)) {
+                    Text(linkHelp)
+                    if (audioNotice != null) {
+                        Text(
+                            text = audioNotice,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(
@@ -800,51 +841,72 @@ private fun AiImportSection(
             enabled = canAddPhoto,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = Sizes.MinTouchTarget),
+                .heightIn(min = Sizes.MinTouchTarget)
+                // El motivo también para quien no ve la línea de debajo: TalkBack
+                // dice «Añadir fotos, desactivado, <motivo>» de una vez.
+                .semantics {
+                    if (!photosAvailable) stateDescription = photosUnavailableText
+                },
         ) {
             Icon(painter = painterResource(R.drawable.ic_photo), contentDescription = null)
             Spacer(Modifier.width(Spacing.small))
             Text(stringResource(R.string.import_ai_photos))
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        // El botón sigue ahí, apagado, para que se vea que la opción existe y por
+        // qué no se puede: con una IA que no lee fotos, mandarlas gasta una petición
+        // para recibir un error.
+        if (!photosAvailable) {
+            Text(
+                text = photosUnavailableText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // Contador y ayuda, solo cuando tienen sentido: sin fotos posibles y sin
+        // ninguna ya preparada, «0 de 5 fotos» sobraba. Las preparadas se siguen
+        // enseñando siempre, para poder quitarlas.
+        if (photosAvailable || state.aiPhotos.isNotEmpty() || state.aiPreparingPhoto) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.import_ai_photos_count,
+                        state.aiPhotos.size,
+                        state.maxAiPhotos,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.aiPreparingPhoto) {
+                    LinearProgressIndicator(modifier = Modifier.width(AiThumbWidth))
+                }
+            }
+
+            if (state.aiPreparingPhoto) {
+                Text(
+                    text = stringResource(R.string.import_ai_photo_preparing),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Text(
                 text = stringResource(
-                    R.string.import_ai_photos_count,
-                    state.aiPhotos.size,
+                    R.string.import_ai_photos_hint,
                     state.maxAiPhotos,
+                    state.maxAiPhotoMiB,
                 ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            if (state.aiPreparingPhoto) {
-                LinearProgressIndicator(modifier = Modifier.width(AiThumbWidth))
-            }
-        }
-
-        if (state.aiPreparingPhoto) {
-            Text(
-                text = stringResource(R.string.import_ai_photo_preparing),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-
-        Text(
-            text = stringResource(
-                R.string.import_ai_photos_hint,
-                state.maxAiPhotos,
-                state.maxAiPhotoMiB,
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
 
         if (state.aiPhotos.isNotEmpty()) {
             Row(
@@ -903,10 +965,17 @@ private fun AiImportSection(
                 Text(stringResource(R.string.import_ai_action))
             }
             // El mismo patrón que «Guardar» en la primera pantalla: si está apagado,
-            // se dice por qué, en reposo y sin ocupar sitio cuando ya se puede.
+            // se dice por qué, en reposo y sin ocupar sitio cuando ya se puede. Sin
+            // fotos posibles, la ayuda no pide una foto (B1 de la revisión de UX).
             if (!state.hasAiContent) {
                 Text(
-                    text = stringResource(R.string.import_ai_action_hint),
+                    text = stringResource(
+                        if (photosAvailable) {
+                            R.string.import_ai_action_hint
+                        } else {
+                            R.string.import_ai_action_hint_no_photos
+                        },
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1137,7 +1206,15 @@ private fun dataProblemTextRes(problem: ImportDataProblem): Int = when (problem)
  */
 @Composable
 private fun aiProblemText(problem: AiProblem, state: RecipeImportUiState): String = when (problem) {
-    AiProblem.Empty -> stringResource(R.string.import_ai_problem_empty)
+    // Sin imágenes, pedir una foto sería pedir algo imposible (B1 de la revisión
+    // de UX del 10-11-2026).
+    AiProblem.Empty -> stringResource(
+        if (state.aiPhotosAvailable) {
+            R.string.import_ai_problem_empty
+        } else {
+            R.string.import_ai_problem_empty_no_photos
+        },
+    )
     AiProblem.TextTooLarge ->
         stringResource(R.string.import_ai_problem_text_too_large, state.maxAiTextMiB)
     AiProblem.TextNotText -> stringResource(R.string.import_ai_problem_text_not_text)
@@ -1174,6 +1251,7 @@ private fun previewState() = RecipeImportUiState(
     // Con IA disponible: es lo que verá casi todo el mundo y deja ver la sección
     // entera en las previews de siempre.
     aiAvailability = AiAvailability.Available,
+    aiCapabilities = AiCapabilities(available = true, imageAvailable = true, audioAvailable = true),
 )
 
 /** Tres fotos de mentira: un color plano, sin fichero, sin EXIF y sin datos de nadie. */
@@ -1477,3 +1555,60 @@ private fun RecipeImportAiRejectedPreview() {
     }
 }
 
+// Sin proveedor de imagen en el servidor: las fotos se apagan y se dice por qué,
+// a texto grande para ver que el aviso cabe y se lee entero.
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeImportAiNoImagePreview() {
+    GastronomiconTheme {
+        ImportPreview(
+            previewState().copy(
+                aiCapabilities = AiCapabilities(
+                    available = true,
+                    imageAvailable = false,
+                    audioAvailable = true,
+                ),
+                aiText = "Sofríe el pollo y añade el arroz.",
+            ),
+        )
+    }
+}
+
+/**
+ * El estado inicial sin imágenes y sin audio: ni la introducción ni la ayuda del
+ * botón piden una foto que el botón de al lado niega (B1), y la ayuda del enlace no
+ * recomienda el vídeo que el aviso de debajo desaconseja (M2).
+ */
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeImportAiNoImageNoAudioEmptyPreview() {
+    GastronomiconTheme {
+        ImportPreview(
+            previewState().copy(
+                aiCapabilities = AiCapabilities(
+                    available = true,
+                    imageAvailable = false,
+                    audioAvailable = false,
+                ),
+            ),
+        )
+    }
+}
+
+// Sin proveedor de audio: el enlace se sigue admitiendo y solo se avisa de los vídeos.
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun RecipeImportAiNoAudioPreview() {
+    GastronomiconTheme {
+        ImportPreview(
+            previewState().copy(
+                aiCapabilities = AiCapabilities(
+                    available = true,
+                    imageAvailable = true,
+                    audioAvailable = false,
+                ),
+                aiLink = "https://video.example.com/paella",
+            ),
+        )
+    }
+}

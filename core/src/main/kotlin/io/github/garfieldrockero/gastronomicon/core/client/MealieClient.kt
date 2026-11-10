@@ -187,30 +187,39 @@ class MealieClient(
     }
 
     /**
-     * ¿Tiene este servidor la IA configurada? La interfaz lo usa para ofrecer o
-     * esconder «importar con IA»: si la IA la pone y la paga el servidor, sin
-     * proveedor configurado la opción solo llevaría a un error.
+     * Qué puede hacer la IA de este servidor: general, fotos y vídeo. La
+     * interfaz lo usa para ofrecer o apagar cada entrada de «importar con IA»:
+     * si la IA la pone y la paga el servidor, sin proveedor configurado la
+     * opción solo llevaría a un error (y con fotos, además, a gastar una
+     * llamada de pago).
      *
      * **Fuente**: `GET /api/groups/self` (grupo «Groups: Self Service»: «Returns the Group
      * Data for the Current User»), que devuelve un `GroupSummary` con
-     * `aiProviderSettings.aiEnabled`. Se usa ese y no
+     * `aiProviderSettings` (`AIProviderSettingsOut`): `aiEnabled`,
+     * `imageProviderEnabled` y `audioProviderEnabled`. Se usa ese y no
      * `GET /api/groups/ai-providers/settings` porque aquel es el par de configuración del
      * grupo (puede exigir ser administrador del grupo; el `openapi.json` no lo aclara) y
      * expone además los proveedores: la app no debe pedir ser administrador para pintar un
      * botón.
      *
-     * **Desconocido**: si `aiProviderSettings` viene `null` o no viene (un
-     * Mealie anterior a esta función, o una respuesta recortada) no se puede
-     * afirmar ni que sí ni que no, y devolver `false` escondería una función
-     * que el servidor sí tiene. En ese caso el resultado es
-     * [ApiResult.Failure] con [ConnectionProblem.Unknown]: la interfaz ofrece la
-     * opción igualmente y, si de verdad no hay IA, el servidor contestará su
-     * error al intentarlo.
+     * **Desconocido**: si `aiProviderSettings` viene `null`, no viene, o no
+     * trae `aiEnabled` (un Mealie anterior a esta función, o una respuesta
+     * recortada) no se puede afirmar ni que sí ni que no, y devolver
+     * `available = false` escondería una función que el servidor sí tiene. En
+     * ese caso el resultado es [ApiResult.Failure] con
+     * [ConnectionProblem.Unknown]: la interfaz ofrece la opción igualmente y, si
+     * de verdad no hay IA, el servidor contestará su error al intentarlo.
+     *
+     * **Proveedor sin dato**: si vienen `aiEnabled` pero falta
+     * `imageProviderEnabled` o `audioProviderEnabled`, esa capacidad concreta
+     * cuenta como no disponible (ver [AiCapabilities]): se apaga esa entrada,
+     * no la IA entera. Un servidor de solo texto se comporta así con las fotos y
+     * con los enlaces de vídeo.
      *
      * No lanza por red: todo desenlace es un [ApiResult]. Ni el resultado ni sus
      * mensajes llevan token, URL ni cuerpo de la respuesta.
      */
-    fun aiAvailable(): ApiResult<Boolean> {
+    fun aiAvailable(): ApiResult<AiCapabilities> {
         val response = try {
             // Con el transporte de respuesta pequeña: un GroupSummary son unos
             // cientos de bytes y no hay razón para leer 2 MiB.
@@ -223,9 +232,19 @@ class MealieClient(
         } catch (error: NetworkError) {
             return ApiErrors.map(error)
         }
-        val enabled = dto.aiProviderSettings?.aiEnabled
+        val settings = dto.aiProviderSettings
             ?: return ApiResult.Failure(ConnectionProblem.Unknown)
-        return ApiResult.Success(enabled)
+        val enabled = settings.aiEnabled
+            ?: return ApiResult.Failure(ConnectionProblem.Unknown)
+        // Sin IA general no hay nada que ofrecer aunque el grupo conserve un
+        // proveedor de imagen o audio de una configuración anterior.
+        return ApiResult.Success(
+            AiCapabilities(
+                available = enabled,
+                imageAvailable = enabled && settings.imageProviderEnabled == true,
+                audioAvailable = enabled && settings.audioProviderEnabled == true,
+            ),
+        )
     }
 
     /**

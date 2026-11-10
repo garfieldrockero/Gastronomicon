@@ -553,4 +553,85 @@ class HtmlSanitizerTest {
         val out = plain(hostile)
         assertEquals("a\n\nbc", out)
     }
+
+    // --- Imágenes y vídeo descartados ---
+
+    @Test
+    fun `sin imagenes ni video no se marca nada`() {
+        assertFalse(HtmlSanitizer.sanitize("<p>Hola <b>mundo</b></p><ul><li>uno</li></ul>").omittedMedia)
+        // Un enlace tampoco es una imagen: queda como texto y no enciende el aviso.
+        assertFalse(HtmlSanitizer.sanitize("<a href=\"https://ejemplo.org\">enlace</a>").omittedMedia)
+        assertFalse(HtmlSanitizer.sanitize(null).omittedMedia)
+        assertFalse(SanitizedHtml.EMPTY.omittedMedia)
+    }
+
+    @Test
+    fun `una imagen descartada se anota`() {
+        val result = HtmlSanitizer.sanitize("<p>Paso</p><img src=\"https://ejemplo.org/foto.jpg\" alt=\"x\">")
+        assertTrue(result.omittedMedia)
+        // Lo que se descarta no cambia: la imagen no deja texto ni atributos.
+        assertEquals("Paso", result.toPlainText())
+    }
+
+    @Test
+    fun `un iframe de video se anota`() {
+        val result = HtmlSanitizer.sanitize(
+            "<p>Mira</p><iframe src=\"https://www.youtube.com/embed/abc\"></iframe>",
+        )
+        assertTrue(result.omittedMedia)
+        assertEquals("Mira", result.toPlainText())
+    }
+
+    @Test
+    fun `las demas etiquetas de imagen y video tambien se anotan`() {
+        val inputs = listOf(
+            "<video src=\"v.mp4\"></video>",
+            "<audio src=\"a.mp3\"></audio>",
+            "<picture><source srcset=\"x.jpg\"></picture>",
+            "<embed src=\"x.swf\">",
+            "<object data=\"x.swf\"></object>",
+            "<svg><circle r=\"1\"/></svg>",
+            "<IMG SRC=\"x.png\">",
+        )
+        for (input in inputs) {
+            assertTrue(input, HtmlSanitizer.sanitize(input).omittedMedia)
+        }
+    }
+
+    @Test
+    fun `una imagen dentro de un contenedor que se tira entero tambien se anota`() {
+        // El <form> se descarta con todo su contenido; la imagen sigue siendo
+        // algo que la persona no va a ver.
+        assertTrue(HtmlSanitizer.sanitize("<form><img src=\"x.png\"></form>").omittedMedia)
+    }
+
+    @Test
+    fun `un img escrito dentro de un script no es una imagen`() {
+        // El contenido de script es texto crudo: no hay etiqueta que anotar.
+        assertFalse(
+            HtmlSanitizer.sanitize("<script>var s = \"<img src=x>\";</script>").omittedMedia,
+        )
+        // Ni un texto escapado que se vea como etiqueta.
+        assertFalse(HtmlSanitizer.sanitize("&lt;img src=x&gt;").omittedMedia)
+    }
+
+    @Test
+    fun `lo que se queda fuera del recorte no se anota`() {
+        // La imagen está más allá del tope de entrada: no se ha leído.
+        val input = "a".repeat(HtmlSanitizer.MAX_INPUT_LENGTH) + "<img src=\"x.png\">"
+        val result = HtmlSanitizer.sanitize(input)
+        assertTrue(result.truncated)
+        assertFalse(result.omittedMedia)
+    }
+
+    @Test
+    fun `el aviso sobrevive a la caida a texto plano por anidado excesivo`() {
+        // El primer recorrido se corta al desbordar el anidado, así que la
+        // imagen solo la ve el segundo: la marca se suma de los dos.
+        val input = "<div>".repeat(HtmlSanitizer.MAX_DEPTH + 2) + "<img src=\"x.png\">texto"
+        val result = HtmlSanitizer.sanitize(input)
+        assertTrue(result.truncated)
+        assertTrue(result.omittedMedia)
+        assertEquals("texto", result.toPlainText())
+    }
 }

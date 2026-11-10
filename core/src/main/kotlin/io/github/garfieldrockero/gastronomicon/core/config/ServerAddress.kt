@@ -50,7 +50,9 @@ object ServerAddress {
      * interfaz.
      *
      * [server] admite dominio, IPv4 o IPv6 entre corchetes, con o sin
-     * esquema, con o sin barra final y con subruta. Sin esquema se usa
+     * esquema y con o sin barra final. **No admite ruta**: Mealie no se puede
+     * publicar bajo una subruta, así que [ServerUrl.normalize] la rechaza con
+     * `UnsupportedPathException`. Sin esquema se usa
      * «http://» si [allowLocalHttp] es true y «https://» si es false; un
      * esquema explícito se respeta y pasa por [ServerUrl.normalize] con el
      * mismo [allowLocalHttp], que es quien decide si se admite. [port] es el
@@ -138,11 +140,11 @@ object ServerAddress {
      * «Puerto» de la primera pantalla, con el puerto siempre explícito (443 en
      * https y 80 en http si la URL no lo lleva). Devuelve null si la URL no es
      * válida (la política es la de [ServerUrl], con http admitido porque aquí
-     * solo se lee algo ya guardado).
+     * solo se lee algo ya guardado), y una URL con ruta ya no es válida.
      *
-     * [SplitAddress.server] no lleva esquema; sí la subruta si la hay, y el
-     * host IPv6 va entre corchetes. El esquema se devuelve aparte para que la
-     * interfaz sepa si la sesión era http (ver [SplitAddress.toUrl]).
+     * [SplitAddress.server] no lleva esquema; el host IPv6 va entre corchetes.
+     * El esquema se devuelve aparte para que la interfaz sepa si la sesión era
+     * http (ver [SplitAddress.toUrl]).
      */
     fun split(url: String): SplitAddress? {
         val canonical = try {
@@ -158,13 +160,15 @@ object ServerAddress {
         val scheme = uri.scheme ?: return null
         val host = uri.host ?: return null
         val port = if (uri.port != -1) uri.port else if (scheme == "https") DEFAULT_HTTPS_PORT else DEFAULT_HTTP_PORT
-        return SplitAddress(scheme = scheme, server = host + (uri.rawPath ?: ""), port = port)
+        return SplitAddress(scheme = scheme, server = host, port = port)
     }
 
     /**
      * Añade el puerto del campo «puerto» justo después del servidor y antes de
-     * la barra. Se hace sobre la cadena y no recomponiendo la URI porque la
-     * subruta hay que conservarla tal cual la escribió la persona.
+     * lo que venga detrás. Se hace sobre la cadena y no recomponiendo la URI
+     * porque así una ruta o una consulta escritas por la persona siguen
+     * llegando a [ServerUrl.normalize], que es quien las rechaza con su
+     * mensaje.
      */
     private fun insertPort(base: String, port: Int): String {
         val schemeEnd = base.indexOf("://")
@@ -185,7 +189,7 @@ object ServerAddress {
  * URL guardada partida en los dos campos de la pantalla.
  *
  * @property scheme «http» o «https».
- * @property server host (IPv6 entre corchetes) más la subruta si la hay, sin esquema ni puerto.
+ * @property server host, sin esquema ni puerto (IPv6 entre corchetes). Nunca lleva ruta: `ServerUrl` la rechaza.
  * @property port siempre explícito, 1..65535.
  */
 data class SplitAddress(val scheme: String, val server: String, val port: Int) {

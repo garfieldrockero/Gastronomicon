@@ -3,6 +3,7 @@ package io.github.garfieldrockero.gastronomicon.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import io.github.garfieldrockero.gastronomicon.core.UnsupportedPathException
 import io.github.garfieldrockero.gastronomicon.core.config.ApiToken
 import io.github.garfieldrockero.gastronomicon.core.config.ServerAddress
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
@@ -280,6 +281,11 @@ class SettingsViewModel(
     private suspend fun test(s: SettingsUiState): SettingsStatus {
         val url = try {
             buildUrl(s)
+        } catch (e: UnsupportedPathException) {
+            // Una carpeta al final de la dirección («host/mealie»): el núcleo lo
+            // cuenta como dirección no válida, pero el aviso genérico no dice qué
+            // sobra. Se distingue por el tipo de la excepción, nunca por su texto.
+            return SettingsStatus.Error(ConnectionProblem.InvalidAddress, unsupportedPath = true)
         } catch (e: IllegalArgumentException) {
             return SettingsStatus.Error(addressProblemOf(e))
         }
@@ -300,6 +306,10 @@ class SettingsViewModel(
     private suspend fun save(s: SettingsUiState): SaveOutcome {
         val url = try {
             buildUrl(s)
+        } catch (e: UnsupportedPathException) {
+            return SaveOutcome.Failed(
+                SettingsStatus.SaveFailed(ConnectionProblem.InvalidAddress, unsupportedPath = true),
+            )
         } catch (e: IllegalArgumentException) {
             return failed(addressProblemOf(e))
         }

@@ -1,5 +1,6 @@
 package io.github.garfieldrockero.gastronomicon.ui.recipes
 
+import io.github.garfieldrockero.gastronomicon.core.client.AiCapabilities
 import io.github.garfieldrockero.gastronomicon.core.client.MealieClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -104,5 +105,37 @@ class RecipeImportUiStateTest {
         val empty = late.copy(aiText = "")
         assertFalse(empty.aiFormVisible)
         assertFalse(canImportAi(empty))
+    }
+
+    @Test
+    fun onlyAClearNoFromTheServerTurnsPhotosOff() {
+        val unknown = RecipeImportUiState(visible = true, aiAvailability = AiAvailability.Available)
+
+        // Sin capacidades (no se sabe, o la sección está apagada) se ofrece lo de
+        // siempre: la interfaz no adivina lo que el servidor no ha dicho.
+        assertTrue(unknown.aiPhotosAvailable)
+        assertFalse(unknown.aiAudioUnavailable)
+
+        // Con IA de texto y sin proveedor de imagen: fotos fuera, vídeos dentro.
+        val noImage = unknown.copy(
+            aiCapabilities = AiCapabilities(
+                available = true,
+                imageAvailable = false,
+                audioAvailable = true,
+            ),
+        )
+        assertFalse(noImage.aiPhotosAvailable)
+        assertFalse(noImage.aiAudioUnavailable)
+
+        // Sin proveedor de audio: las fotos siguen y los vídeos se avisan.
+        val noAudio = unknown.copy(
+            aiCapabilities = AiCapabilities(
+                available = true,
+                imageAvailable = true,
+                audioAvailable = false,
+            ),
+        )
+        assertTrue(noAudio.aiPhotosAvailable)
+        assertTrue(noAudio.aiAudioUnavailable)
     }
 }
