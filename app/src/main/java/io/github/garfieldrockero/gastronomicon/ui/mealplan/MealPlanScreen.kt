@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.garfieldrockero.gastronomicon.R
@@ -104,6 +105,9 @@ class MealPlanActions(
 
 /**
  * Planificador de comidas: una semana de lunes a domingo, un día por tarjeta.
+ * Dentro de cada día, las comidas van agrupadas por tipo (desayuno, comida,
+ * aperitivo, cena y un cajón «Otras»): el agrupado y el orden los pone
+ * `MealPlanDayView.sections` en el núcleo, aquí solo se pintan.
  * Sin lógica: pinta el estado del núcleo ([MealPlanUiState]) y avisa de lo que
  * hace la persona. Cambiar de semana y «Añadir comida» van abajo, al alcance
  * del pulgar.
@@ -496,13 +500,28 @@ private fun DayCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            day.meals.forEach { meal ->
-                MealItem(
-                    meal = meal,
-                    busy = busy,
-                    onEdit = { onEdit(meal) },
-                    onDelete = { onDelete(meal) },
+            // Las comidas del día van agrupadas por tipo: la cabecera de la sección dice
+            // «Desayuno» una vez y cada comida de una sección principal no lo repite. En
+            // «Otras» no hay un tipo común, así que allí cada comida conserva el suyo.
+            // El agrupado y el orden los decide el núcleo (`day.sections`).
+            day.sections.forEachIndexed { index, section ->
+                MealSectionHeader(
+                    title = section.title,
+                    isToday = day.isToday,
+                    // Aire entre secciones: la primera ya va separada del nombre del día
+                    // por el hueco de la columna.
+                    modifier = Modifier.padding(top = if (index == 0) 0.dp else Spacing.medium),
                 )
+                section.meals.forEach { meal ->
+                    MealItem(
+                        meal = meal,
+                        busy = busy,
+                        // La cabecera ya ha dicho el tipo; solo «Otras» lo repite dentro.
+                        showTypeLabel = section.isOther,
+                        onEdit = { onEdit(meal) },
+                        onDelete = { onDelete(meal) },
+                    )
+                }
             }
             val addDescription = stringResource(R.string.plan_add_to_day_description, day.dayLabel)
             TextButton(
@@ -523,6 +542,41 @@ private fun DayCard(
     }
 }
 
+/**
+ * Cabecera de una sección de comidas dentro de la tarjeta de un día: «Desayuno»,
+ * «Comida», «Otras»…
+ *
+ * El tipo se lee una vez aquí y no en cada comida, que es lo que hace legible la
+ * tarjeta: sin esto, tres comidas seguidas repiten tres etiquetas iguales de tamaño
+ * y color. Va en el color de acento y en `titleSmall` (un escalón por debajo del
+ * nombre del día, que es `titleLarge`) y marcada como encabezado para que TalkBack
+ * pueda saltar de sección en sección.
+ *
+ * En la tarjeta de hoy el fondo es `primaryContainer`, y el acento encima se queda
+ * en 4,27:1 en oscuro (por debajo de AA para texto pequeño): allí el encabezado usa
+ * el color de contenido de la tarjeta, que da 6,85:1 en oscuro y 12,5:1 en claro.
+ */
+@Composable
+private fun MealSectionHeader(
+    title: String,
+    isToday: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        color = if (isToday) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { heading() },
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MealItem(
@@ -531,6 +585,11 @@ private fun MealItem(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Si la comida enseña su tipo («Desayuno») encima del título. False cuando la
+     * cabecera de la sección ya lo ha dicho, para no leerlo dos veces.
+     */
+    showTypeLabel: Boolean = true,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -544,11 +603,13 @@ private fun MealItem(
             modifier = Modifier.padding(Spacing.medium),
             verticalArrangement = Arrangement.spacedBy(Spacing.extraSmall),
         ) {
-            Text(
-                text = meal.mealType.label,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            if (showTypeLabel) {
+                Text(
+                    text = meal.mealType.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Text(
                 text = meal.title,
                 style = MaterialTheme.typography.titleMedium,
@@ -1016,4 +1077,108 @@ private fun MealPlanShoppingMaybeAddedLargeTextPreview() {
             MealPlanActions(onOpenShopping = {}),
         )
     }
+}
+
+// ------------------------------------------- secciones de comida (16f)
+
+/**
+ * Una tarjeta de día sola, sobre el fondo de la app y con el mismo margen que en la
+ * lista: así se mira de cerca lo que cambia con las secciones (cabecera, orden y
+ * etiquetas repetidas) sin siete tarjetas de por medio.
+ */
+@Composable
+private fun DayCardPreview(day: MealPlanDayView) {
+    GastronomiconTheme {
+        Surface(
+            modifier = Modifier.padding(Spacing.medium),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            DayCard(day = day, busy = false, onAdd = {}, onEdit = {}, onDelete = {})
+        }
+    }
+}
+
+// Desayuno, Comida, Aperitivo y Cena: cuatro cabeceras y ninguna comida repitiendo su tipo.
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun MealPlanDaySectionsPreview() {
+    DayCardPreview(MealPlanPreviewData.dayView(MealPlanPreviewData.sectionsWeek()))
+}
+
+// Un día que no es hoy: fondo normal y cabecera en el acento de la app. En oscuro es
+// donde el acento sobre `surfaceContainer` hay que mirarlo.
+@Preview(showBackground = true, widthDp = 360, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun MealPlanDaySectionsNotTodayDarkPreview() {
+    // El miércoles tiene las cuatro secciones, pero el «hoy» de la semana es el sábado.
+    val state = MealPlanPreviewData.sectionsWeek(today = MealPlanPreviewData.TODAY.plusDays(3))
+    DayCardPreview(MealPlanPreviewData.dayView(state))
+}
+
+// La misma tarjeta en oscuro y a 2×: cuatro cabeceras y seis comidas es el caso que más
+// crece y el que puede dejar el botón «Añadir» lejos del pulgar.
+@Preview(
+    showBackground = true,
+    widthDp = 360,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+    fontScale = 2f,
+)
+@Composable
+private fun MealPlanDaySectionsDarkLargeTextPreview() {
+    DayCardPreview(MealPlanPreviewData.dayView(MealPlanPreviewData.sectionsWeek()))
+}
+
+// Con «Otras» al final: allí cada comida sí lleva su etiqueta (Guarnición, Bebida…).
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun MealPlanDayOthersPreview() {
+    DayCardPreview(MealPlanPreviewData.dayView(MealPlanPreviewData.othersWeek()))
+}
+
+@Preview(
+    showBackground = true,
+    widthDp = 360,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+    fontScale = 2f,
+)
+@Composable
+private fun MealPlanDayOthersDarkLargeTextPreview() {
+    DayCardPreview(MealPlanPreviewData.dayView(MealPlanPreviewData.othersWeek()))
+}
+
+// Día sin nada: «Sin comidas» y el botón de añadir, sin cabeceras ni huecos raros.
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun MealPlanDayEmptyPreview() {
+    DayCardPreview(MealPlanPreviewData.emptyDay())
+}
+
+@Preview(
+    showBackground = true,
+    widthDp = 360,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+    fontScale = 2f,
+)
+@Composable
+private fun MealPlanDayEmptyDarkLargeTextPreview() {
+    DayCardPreview(MealPlanPreviewData.emptyDay())
+}
+
+// La semana entera, para ver cómo respira el conjunto con las secciones dentro.
+@Preview(showBackground = true, widthDp = 360, heightDp = 780)
+@Composable
+private fun MealPlanSectionsWeekPreview() {
+    GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.sectionsWeek(), MealPlanActions()) }
+}
+
+@Preview(
+    showBackground = true,
+    widthDp = 360,
+    heightDp = 780,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+    fontScale = 2f,
+)
+@Composable
+private fun MealPlanOthersWeekDarkLargeTextPreview() {
+    GastronomiconTheme { MealPlanScreen(MealPlanPreviewData.othersWeek(), MealPlanActions()) }
 }

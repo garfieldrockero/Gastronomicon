@@ -280,4 +280,143 @@ class MealPlanWeekViewTest {
         assertEquals(LocalDate.of(2028, 2, 29), leap.days[1].date)
         assertTrue(leap.days[1].isToday)
     }
+
+    // --- Secciones de un día -------------------------------------------------
+
+    private fun sectionsOf(vararg meals: PlannedMeal): List<MealPlanSectionView> =
+        MealPlanWeekView.of(monday, meals.toList(), today).days[0].sections
+
+    @Test
+    fun `un dia sin comidas no tiene secciones`() {
+        val day = MealPlanWeekView.of(monday, emptyList(), today).days[0]
+
+        assertTrue(day.meals.isEmpty())
+        assertTrue(day.sections.isEmpty())
+    }
+
+    @Test
+    fun `un solo tipo de comida deja una sola seccion`() {
+        val sections = sectionsOf(
+            meal(id = 2, date = monday, type = MealType.LUNCH),
+            meal(id = 1, date = monday, type = MealType.LUNCH),
+        )
+
+        val section = sections.single()
+        assertEquals("Comida", section.title)
+        assertFalse(section.isOther)
+        assertEquals(listOf(1L, 2L), section.meals.map { it.id })
+    }
+
+    @Test
+    fun `las cuatro secciones principales van en orden de reloj aunque lleguen desordenadas`() {
+        val sections = sectionsOf(
+            meal(id = 4, date = monday, type = MealType.DINNER),
+            meal(id = 3, date = monday, type = MealType.SNACK),
+            meal(id = 2, date = monday, type = MealType.LUNCH),
+            meal(id = 1, date = monday, type = MealType.BREAKFAST),
+        )
+
+        assertEquals(listOf("Desayuno", "Comida", "Aperitivo", "Cena"), sections.map { it.title })
+        assertEquals(listOf(false, false, false, false), sections.map { it.isOther })
+        assertEquals(listOf(1L, 2L, 3L, 4L), sections.map { it.meals.single().id })
+    }
+
+    @Test
+    fun `guarnicion postre y desconocida van juntas en una sola seccion Otras`() {
+        val sections = sectionsOf(
+            meal(id = 10, date = monday, type = MealType.UNKNOWN),
+            meal(id = 9, date = monday, type = MealType.DESSERT),
+            meal(id = 7, date = monday, type = MealType.SIDE),
+            meal(id = 1, date = monday, type = MealType.LUNCH),
+        )
+
+        assertEquals(listOf("Comida", MealPlanWeekView.OTHER_SECTION_LABEL), sections.map { it.title })
+        assertFalse(sections[0].isOther)
+
+        val other = sections[1]
+        assertTrue(other.isOther)
+        // Por tipo (guarnición, postre, desconocida) y dentro del tipo por id.
+        assertEquals(listOf(7L, 9L, 10L), other.meals.map { it.id })
+        assertEquals(
+            listOf(MealType.SIDE, MealType.DESSERT, MealType.UNKNOWN),
+            other.meals.map { it.mealType },
+        )
+        // El día sigue teniendo las cuatro comidas: `meals` no se toca.
+        assertEquals(4, sections.sumOf { it.meals.size })
+    }
+
+    @Test
+    fun `un dia solo con comidas de Otras no inventa secciones principales`() {
+        val sections = sectionsOf(
+            meal(id = 5, date = monday, type = MealType.DRINK),
+            meal(id = 2, date = monday, type = MealType.SIDE),
+        )
+
+        val section = sections.single()
+        assertEquals(MealPlanWeekView.OTHER_SECTION_LABEL, section.title)
+        assertTrue(section.isOther)
+        assertEquals(listOf(2L, 5L), section.meals.map { it.id })
+    }
+
+    @Test
+    fun `dentro de una seccion manda el id y no el orden de llegada`() {
+        val sections = sectionsOf(
+            meal(id = 30, date = monday, type = MealType.SIDE),
+            meal(id = 10, date = monday, type = MealType.SIDE),
+            meal(id = 20, date = monday, type = MealType.SIDE),
+            meal(id = 300, date = monday, type = MealType.BREAKFAST),
+            meal(id = 100, date = monday, type = MealType.BREAKFAST),
+        )
+
+        assertEquals(listOf("Desayuno", MealPlanWeekView.OTHER_SECTION_LABEL), sections.map { it.title })
+        assertEquals(listOf(100L, 300L), sections[0].meals.map { it.id })
+        assertEquals(listOf(10L, 20L, 30L), sections[1].meals.map { it.id })
+    }
+
+    @Test
+    fun `el tope de comidas por dia no rompe el agrupado`() {
+        val breakfasts = (1L..30L).map { meal(id = it, date = monday, type = MealType.BREAKFAST) }
+        val dinners = (31L..60L).map { meal(id = it, date = monday, type = MealType.DINNER) }
+
+        val day = MealPlanWeekView.of(monday, breakfasts + dinners, today).days[0]
+
+        assertEquals(50, day.meals.size)
+        assertEquals(listOf("Desayuno", "Cena"), day.sections.map { it.title })
+        assertEquals(listOf(30, 20), day.sections.map { it.meals.size })
+        assertEquals(day.meals.size, day.sections.sumOf { it.meals.size })
+        assertEquals((1L..30L).toList(), day.sections[0].meals.map { it.id })
+        assertEquals((31L..50L).toList(), day.sections[1].meals.map { it.id })
+    }
+
+    @Test
+    fun `el texto de las secciones no lleva lo que vino del servidor`() {
+        val sections = sectionsOf(
+            meal(
+                id = 1,
+                date = monday,
+                type = MealType.LUNCH,
+                title = "Título secreto",
+                note = "Nota privada",
+                recipeId = MealPlanFixtures.RECIPE,
+                recipeName = "Receta confidencial",
+            ),
+            meal(id = 2, date = monday, type = MealType.DESSERT, title = "Postre secreto"),
+        )
+
+        for (section in sections) {
+            val text = section.toString()
+            assertFalse(text.contains("Título secreto"))
+            assertFalse(text.contains("Nota privada"))
+            assertFalse(text.contains("Receta confidencial"))
+            assertFalse(text.contains("Postre secreto"))
+        }
+        assertEquals(
+            "MealPlanSectionView(title=Comida, isOther=false, meals=1)",
+            sections[0].toString(),
+        )
+        assertEquals(
+            "MealPlanSectionView(title=Otras, isOther=true, meals=1)",
+            sections[1].toString(),
+        )
+    }
 }

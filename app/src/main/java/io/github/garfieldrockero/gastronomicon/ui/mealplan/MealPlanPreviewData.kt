@@ -1,6 +1,7 @@
 package io.github.garfieldrockero.gastronomicon.ui.mealplan
 
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanActionFailure
+import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanDayView
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanInputProblem
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanOperation
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanPhase
@@ -116,6 +117,58 @@ internal object MealPlanPreviewData {
     fun emptyWeek(): MealPlanUiState = uiState(
         MealPlanState(weekStart = WEEK_START, today = TODAY, week = week(WEEK_START, emptyList())),
     )
+
+    // ------------------------------------------- secciones de comida (16f)
+
+    /**
+     * Comidas del día de hoy repartidas en las cuatro secciones principales
+     * (Desayuno, Comida, Aperitivo y Cena), más un día suelto para que la semana no
+     * parezca de una sola tarjeta.
+     */
+    private val sectionMeals = listOf(
+        meal(11, TODAY, MealType.BREAKFAST, title = "Tostadas con tomate y aceite"),
+        meal(12, TODAY, MealType.LUNCH, recipeId = RECIPE_RICE, recipeName = "Arroz con verduras", scale = 2.0),
+        meal(13, TODAY, MealType.SNACK, title = "Fruta de media tarde"),
+        meal(14, TODAY, MealType.DINNER, title = "Sobras de las lentejas", note = "Con un poco de pan"),
+        meal(15, TODAY.plusDays(1), MealType.LUNCH, recipeId = RECIPE_LENTILS, recipeName = "Lentejas de la abuela"),
+    )
+
+    /** Semana con el día de hoy en las cuatro secciones principales. */
+    fun sectionsWeek(today: LocalDate = TODAY): MealPlanUiState = uiState(
+        MealPlanState(
+            weekStart = WEEK_START,
+            today = today,
+            week = week(WEEK_START, sectionMeals, today),
+        ),
+    )
+
+    /**
+     * La misma semana y, además, guarnición, bebida, postre y un tipo que la app no
+     * conoce: los cuatro caen en la sección «Otras», cada uno con su etiqueta.
+     */
+    fun othersWeek(): MealPlanUiState {
+        val list = sectionMeals + listOf(
+            meal(16, TODAY, MealType.SIDE, title = "Ensalada verde"),
+            meal(17, TODAY, MealType.DRINK, title = "Agua con limón"),
+            meal(18, TODAY, MealType.DESSERT, title = "Yogur con miel"),
+            meal(19, TODAY, MealType.UNKNOWN, title = "Lo que quedaba en la nevera"),
+        )
+        return uiState(
+            MealPlanState(weekStart = WEEK_START, today = TODAY, week = week(WEEK_START, list)),
+        )
+    }
+
+    /** El día de hoy de una semana sin comidas: la tarjeta enseña «Sin comidas». */
+    fun emptyDay(): MealPlanDayView = dayView(emptyWeek())
+
+    /**
+     * Un día ya montado por el núcleo, para las previews de una sola tarjeta. No se
+     * construye a mano: sale de la misma vista que pinta la pantalla.
+     */
+    fun dayView(state: MealPlanUiState, date: LocalDate = TODAY): MealPlanDayView =
+        requireNotNull(state.plan.week?.days?.firstOrNull { it.date == date }) {
+            "La preview no tiene ese día"
+        }
 
     fun loading(): MealPlanUiState = uiState(
         MealPlanState(weekStart = WEEK_START, today = TODAY, phase = MealPlanPhase.Loading),

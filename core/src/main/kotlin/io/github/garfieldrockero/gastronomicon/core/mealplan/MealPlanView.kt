@@ -5,6 +5,15 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 
 /**
+ * Secciones principales de un día, en orden de reloj. No es el orden de
+ * declaración de [MealType]: allí la cena va antes que la guarnición y el
+ * aperitivo porque ese orden se usa para ordenar las comidas sueltas, y aquí
+ * manda cómo se lee una comida del día (desayuno, comida, aperitivo, cena).
+ */
+private val MAIN_SECTION_ORDER: List<MealType> =
+    listOf(MealType.BREAKFAST, MealType.LUNCH, MealType.SNACK, MealType.DINNER)
+
+/**
  * Una comida tal como se pinta. El título ya está compuesto (nombre de la
  * receta saneado o texto libre) y nunca queda vacío: si no hay nada, dice
  * explícitamente que la entrada está sin título, y si apuntaba a una receta
@@ -100,6 +109,26 @@ data class MealPlanMealView(
     }
 }
 
+/**
+ * Sección de comidas de un día: el desayuno, la comida, el aperitivo, la cena
+ * o el cajón «Otras».
+ *
+ * [title] es un texto fijo de la app ([MealType.label] o «Otras»), nunca un
+ * dato del servidor; por eso se puede registrar en un log sin riesgo.
+ * [isOther] distingue el cajón de guarniciones, bebidas, postres y tipos
+ * desconocidos, que la interfaz pinta distinto (cada comida lleva su etiqueta
+ * de tipo). El agrupado se calcula aquí: la pantalla solo recorre la lista.
+ */
+data class MealPlanSectionView(
+    val title: String,
+    val isOther: Boolean,
+    val meals: List<MealPlanMealView>,
+) {
+    // Sin las comidas: sus títulos son datos del servidor y una vista puede acabar en un log.
+    override fun toString(): String =
+        "MealPlanSectionView(title=$title, isOther=$isOther, meals=${meals.size})"
+}
+
 /** Un día de la semana con sus comidas ya ordenadas y un hueco explícito si no hay ninguna. */
 data class MealPlanDayView(
     val date: LocalDate,
@@ -110,6 +139,45 @@ data class MealPlanDayView(
     val meals: List<MealPlanMealView>,
 ) {
     val isEmpty: Boolean get() = meals.isEmpty()
+
+    /**
+     * Las mismas [meals] agrupadas por sección, en orden de reloj y sin
+     * secciones vacías: desayuno, comida, aperitivo y cena, y después una sola
+     * «Otras» con guarnición, bebida, postre y tipos desconocidos (en el orden
+     * de declaración de [MealType]).
+     *
+     * Dentro de cada sección manda el `id`, así que el orden no depende de que
+     * quien construya la vista haya ordenado antes [meals]. Un día sin comidas
+     * no tiene secciones (lista vacía), y el tope de comidas por día ya lo puso
+     * `MealPlanWeekView.of`.
+     */
+    val sections: List<MealPlanSectionView>
+        get() {
+            if (meals.isEmpty()) return emptyList()
+
+            val byType = meals.groupBy { it.mealType }
+            val result = ArrayList<MealPlanSectionView>(MAIN_SECTION_ORDER.size + 1)
+            for (type in MAIN_SECTION_ORDER) {
+                val ofType = byType[type] ?: continue
+                result += MealPlanSectionView(
+                    title = type.label,
+                    isOther = false,
+                    meals = ofType.sortedBy { it.id },
+                )
+            }
+
+            val others = meals
+                .filter { it.mealType !in MAIN_SECTION_ORDER }
+                .sortedWith(compareBy<MealPlanMealView> { it.mealType.ordinal }.thenBy { it.id })
+            if (others.isNotEmpty()) {
+                result += MealPlanSectionView(
+                    title = MealPlanWeekView.OTHER_SECTION_LABEL,
+                    isOther = true,
+                    meals = others,
+                )
+            }
+            return result
+        }
 
     /** «Sin comidas» cuando el día está vacío; null cuando hay algo que enseñar. */
     val emptyLabel: String?
@@ -168,6 +236,9 @@ data class MealPlanWeekView(
 
         /** Texto cuando la entrada apunta a una receta que el servidor ya no devuelve. */
         const val MISSING_RECIPE_LABEL = "Receta no disponible"
+
+        /** Título del cajón de guarniciones, bebidas, postres y tipos desconocidos. */
+        const val OTHER_SECTION_LABEL = "Otras"
 
         private const val MAX_MEALS_PER_DAY = 50
 
