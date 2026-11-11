@@ -96,12 +96,14 @@ import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingPhase
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingProblem
 import io.github.garfieldrockero.gastronomicon.core.shopping.ShoppingText
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconSnackbarHost
 import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.NoticeCard
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
 import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
+import io.github.garfieldrockero.gastronomicon.ui.components.SnackbarNotice
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
 import io.github.garfieldrockero.gastronomicon.ui.components.problemTextRes
@@ -128,7 +130,8 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnable
  * Estados: buscando listas, sin ninguna lista, cargando la lista, fallo (con
  * acción), sin cobertura, sesión caducada (lleva a Ajustes), lista vacía y lista
  * con contenido. Un fallo al escribir no tapa la lista: sale como aviso encima
- * con su acción.
+ * con su acción. Lo que ya está hecho y no deja nada pendiente (vaciar lo
+ * marcado, quitar una cosa) se confirma en un aviso corto abajo, sin acción.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -148,6 +151,7 @@ fun ShoppingScreen(
     onDismissCreateList: () -> Unit,
     onCreateList: (String) -> Unit,
     onDismissCreateNotice: () -> Unit,
+    onNoticeShown: () -> Unit,
     modifier: Modifier = Modifier,
     // Con la barra de pestañas debajo, quien la pinta quita el inset inferior (ya lo
     // consume la barra). Suelto, el valor por defecto es el de siempre.
@@ -166,6 +170,26 @@ fun ShoppingScreen(
         list.loadedOnce && list.view.listName.isNotEmpty() -> list.view.listName
         openList != null -> openList.displayName
         else -> stringResource(R.string.shopping_title)
+    }
+
+    // Confirmación al terminar (fase 16h): el aviso común, que TalkBack anuncia y que se
+    // va solo. La clave es el contador `noticeId` y no el tipo, para que dos acciones
+    // seguidas se anuncien las dos y para que un giro del móvil no repita la misma. El
+    // texto se resuelve aquí: el ViewModel no conoce ni los recursos ni el contexto.
+    // Errores, 401, sin cobertura y «puede que se haya creado» no llegan aquí: siguen en
+    // su tarjeta, con su acción, y no desaparecen solos.
+    val snackbarNotice = state.notice?.let { notice ->
+        SnackbarNotice(
+            id = state.noticeId,
+            message = when (notice) {
+                is ShoppingNotice.Cleared -> pluralStringResource(
+                    R.plurals.shopping_cleared_notice,
+                    notice.count,
+                    notice.count,
+                )
+                ShoppingNotice.ItemDeleted -> stringResource(R.string.shopping_item_deleted_notice)
+            },
+        )
     }
 
     Scaffold(
@@ -215,6 +239,15 @@ fun ShoppingScreen(
                     focus = addFocus,
                 )
             }
+        },
+        snackbarHost = {
+            // Un host por Scaffold (fase 16h): así el aviso se coloca por encima de la
+            // barra de añadir y sube con el teclado, sin medir nada a mano. Sin acción:
+            // esta fase no tiene «Deshacer» y el aviso no puede quedarse indefinido.
+            GastronomiconSnackbarHost(
+                notice = snackbarNotice,
+                onShown = onNoticeShown,
+            )
         },
     ) { innerPadding ->
         Column(
@@ -1405,6 +1438,7 @@ private fun ShoppingPreview(state: ShoppingUiState) {
         onDismissCreateList = {},
         onCreateList = {},
         onDismissCreateNotice = {},
+        onNoticeShown = {},
     )
 }
 

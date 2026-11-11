@@ -613,10 +613,33 @@ private fun ListChoiceRow(
 // ------------------------------------------------------------------- el aviso
 
 /**
+ * Texto del aviso de éxito: los ingredientes ya están en la lista. Vive aquí, en
+ * un solo sitio, porque lo leen la tarjeta y el aviso corto (`Snackbar`) del
+ * detalle de una receta, y tienen que decir exactamente lo mismo.
+ *
+ * El recuento de recetas lo da el núcleo ([AddToShoppingOutcome.Added.recipes]) y
+ * el nombre de la lista ya viene saneado.
+ */
+@Composable
+internal fun addToShoppingAddedText(added: AddToShoppingOutcome.Added): String =
+    pluralStringResource(
+        R.plurals.extras_compra_added,
+        added.recipes,
+        added.recipes,
+        added.listName,
+    )
+
+/**
  * Aviso de después de añadir, encima del contenido y sin taparlo: región viva
  * para que TalkBack lo lea al aparecer, el resultado en una línea y la acción
  * que lleva a la lista. Con «puede que ya se hayan añadido» no se ofrece
  * repetir: solo mirar la compra.
+ *
+ * Fase 16h: el **éxito** (`Added`) del detalle de una receta ya no pasa por aquí:
+ * lo confirma un aviso corto (`Snackbar`, `ui/components/GastronomiconSnackbar.kt`)
+ * con «Ver la compra», que se va solo. Esta tarjeta sigue siendo la de la **duda**
+ * ([AddToShoppingOutcome.MaybeAdded]), que no puede desaparecer sin que la persona
+ * la lea, y la que usa el planificador con sus dos desenlaces.
  */
 @Composable
 internal fun AddToShoppingNoticeCard(
@@ -649,12 +672,7 @@ internal fun AddToShoppingNoticeCard(
         ) {
             Text(
                 text = if (added != null) {
-                    pluralStringResource(
-                        R.plurals.extras_compra_added,
-                        added.recipes,
-                        added.recipes,
-                        added.listName,
-                    )
+                    addToShoppingAddedText(added)
                 } else {
                     stringResource(R.string.extras_compra_maybe_added)
                 },

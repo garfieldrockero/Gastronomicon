@@ -41,16 +41,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -73,10 +68,12 @@ import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanProblem
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanState
 import io.github.garfieldrockero.gastronomicon.core.mealplan.MealPlanWeekView
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconSnackbarHost
 import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
+import io.github.garfieldrockero.gastronomicon.ui.components.SnackbarNotice
 import io.github.garfieldrockero.gastronomicon.ui.components.problemTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.problemTitleRes
 import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingNoticeCard
@@ -138,42 +135,37 @@ fun MealPlanScreen(
 ) {
     val plan = state.plan
     val week = plan.week
-    val snackbar = remember { SnackbarHostState() }
 
-    // Confirmación al terminar: Snackbar (TalkBack lo anuncia) que se da por visto al cerrarse.
-    // La clave es el contador, no el tipo: dos comidas añadidas seguidas se anuncian las dos.
-    val addedText = stringResource(R.string.plan_notice_added)
-    val editedText = stringResource(R.string.plan_notice_edited)
-    val movedOtherWeekText = stringResource(R.string.plan_notice_moved_other_week)
-    val deletedText = stringResource(R.string.plan_notice_deleted)
-    val missingText = stringResource(R.string.plan_action_entry_missing)
-    val reloadLabel = stringResource(R.string.plan_action_reload)
-    val viewWeekLabel = stringResource(R.string.plan_notice_view_week)
-    LaunchedEffect(state.noticeId) {
-        val notice = state.notice ?: return@LaunchedEffect
-        val missing = notice == MealPlanNotice.EntryMissing
-        // El aviso de otra semana lleva a verla, si se sabe a cuál fue.
-        val otherWeek = notice == MealPlanNotice.MovedOtherWeek && state.noticeDate != null
-        val result = snackbar.showSnackbar(
+    // Confirmación al terminar: el aviso común (TalkBack lo anuncia y se va solo) se da por
+    // visto al cerrarse. La clave es el contador `noticeId`, no el tipo: dos comidas añadidas
+    // seguidas se anuncian las dos. El texto se resuelve aquí, así el ViewModel no conoce
+    // ni los recursos ni el contexto. Lo que es un error o una duda no pasa por aquí: sigue
+    // en su tarjeta, con su acción, y no desaparece solo.
+    val noticeMissing = state.notice == MealPlanNotice.EntryMissing
+    // El aviso de otra semana lleva a verla, si se sabe a cuál fue.
+    val noticeOtherWeek = state.notice == MealPlanNotice.MovedOtherWeek && state.noticeDate != null
+    val snackbarNotice = state.notice?.let { notice ->
+        SnackbarNotice(
+            id = state.noticeId,
             message = when (notice) {
-                MealPlanNotice.Added -> addedText
-                MealPlanNotice.Edited -> editedText
-                MealPlanNotice.MovedOtherWeek -> movedOtherWeekText
-                MealPlanNotice.Deleted -> deletedText
-                MealPlanNotice.EntryMissing -> missingText
+                MealPlanNotice.Added -> stringResource(R.string.plan_notice_added)
+                MealPlanNotice.Edited -> stringResource(R.string.plan_notice_edited)
+                MealPlanNotice.MovedOtherWeek -> stringResource(R.string.plan_notice_moved_other_week)
+                MealPlanNotice.Deleted -> stringResource(R.string.plan_notice_deleted)
+                MealPlanNotice.EntryMissing -> stringResource(R.string.plan_action_entry_missing)
             },
             actionLabel = when {
-                missing -> reloadLabel
-                otherWeek -> viewWeekLabel
+                noticeMissing -> stringResource(R.string.plan_action_reload)
+                noticeOtherWeek -> stringResource(R.string.plan_notice_view_week)
                 else -> null
             },
-            // Con acción hay que dar tiempo a pulsarla.
-            duration = if (missing || otherWeek) SnackbarDuration.Long else SnackbarDuration.Short,
         )
-        actions.onNoticeShown()
-        if (result == SnackbarResult.ActionPerformed) {
-            if (otherWeek) actions.onShowNoticeWeek() else actions.onRefresh()
-        }
+    }
+    // Lo que hace la acción del aviso: recargar la semana o ir a la semana donde se guardó.
+    val onSnackbarAction: () -> Unit = when {
+        noticeMissing -> actions.onRefresh
+        noticeOtherWeek -> actions.onShowNoticeWeek
+        else -> {}
     }
 
     Scaffold(
@@ -212,7 +204,15 @@ fun MealPlanScreen(
                 )
             }
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = {
+            // Un host por Scaffold: así el aviso se coloca por encima de la barra de la
+            // semana y del botón «Añadir», y sube con el teclado.
+            GastronomiconSnackbarHost(
+                notice = snackbarNotice,
+                onShown = actions.onNoticeShown,
+                onAction = onSnackbarAction,
+            )
+        },
         floatingActionButton = {
             // Con la semana vacía ya hay un «Añadir la primera comida»: dos atajos
             // al mismo sitio sobran y el flotante tapa el texto.

@@ -45,6 +45,7 @@ fun ShoppingRoute(
         onDismissCreateList = viewModel::onDismissCreateList,
         onCreateList = viewModel::onCreateList,
         onDismissCreateNotice = viewModel::onDismissCreateNotice,
+        onNoticeShown = viewModel::onNoticeShown,
         modifier = modifier,
         contentWindowInsets = contentWindowInsets,
     )

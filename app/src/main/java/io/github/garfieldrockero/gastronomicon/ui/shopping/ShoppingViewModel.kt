@@ -30,6 +30,27 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * Confirmación de una acción ya terminada y sin nada pendiente (fase 16h): es lo
+ * único que va al aviso corto de abajo.
+ *
+ * Los errores, la sesión caducada (401), la falta de cobertura, el «puede que la
+ * lista se haya creado» y los avisos de seguridad **no** pasan por aquí: se
+ * quedan en su tarjeta, con su acción, y no desaparecen solos. Tampoco hay
+ * «Deshacer»: el núcleo no tiene cola de escrituras, así que esto solo confirma.
+ *
+ * Cuántas cosas se quitaron lo dice el estado de **antes** del borrado, que es el
+ * único que lo sabe: después de borrar ya serían cero.
+ */
+sealed interface ShoppingNotice {
+
+    /** Se quitaron [count] cosas que estaban marcadas («2 cosas quitadas»). */
+    data class Cleared(val count: Int) : ShoppingNotice
+
+    /** Se quitó una cosa desde su diálogo de edición. */
+    data object ItemDeleted : ShoppingNotice
+}
+
+/**
  * Lo que pinta la pantalla: la lista abierta, la página de listas del selector,
  * el diálogo de crear y el texto del campo de añadir.
  *
@@ -55,6 +76,18 @@ data class ShoppingUiState(
     val maybeCreated: Boolean = false,
     /** Texto del campo de añadir; se conserva si añadir falla. */
     val draft: String = "",
+    /**
+     * Confirmación a la vista: la pinta la pantalla como aviso corto y la consume
+     * al terminar ([ShoppingViewModel.onNoticeShown]). Mientras no se consuma
+     * sigue ahí (un giro del móvil no la pierde).
+     */
+    val notice: ShoppingNotice? = null,
+    /**
+     * Contador del aviso: **cambia** con cada aviso nuevo, para que dos acciones
+     * seguidas se anuncien las dos y para que volver a componer no repita la
+     * misma. Nunca un booleano de «hecho», que se re-dispararía en cada giro.
+     */
+    val noticeId: Long = 0L,
 )
 
 /**
@@ -109,6 +142,10 @@ class ShoppingViewModel(
     private var createDialog = false
     private var createProblem: ShoppingListPickerProblem? = null
     private var maybeCreated = false
+    // Aviso corto a la vista y su contador. El contador no se reinicia al consumir el
+    // aviso: si se incrementara al consumirlo, volvería a salir en bucle.
+    private var notice: ShoppingNotice? = null
+    private var noticeId = 0L
 
     /** Aviso que la persona ya ha cerrado; ver [visibleList]. */
     private var dismissedProblem: ShoppingProblem? = null
@@ -198,6 +235,8 @@ class ShoppingViewModel(
         createProblem = createProblem,
         maybeCreated = maybeCreated,
         draft = draft,
+        notice = notice,
+        noticeId = noticeId,
     )
 
     /**
@@ -367,9 +406,72 @@ class ShoppingViewModel(
     fun onEditNote(itemId: String, note: String, quantity: Double) =
         launchOperation { it.editNote(itemId, note, quantity) }
 
-    fun onDelete(itemId: String) = launchOperation { it.delete(itemId) }
+    /**
+     * Quita una cosa desde su diálogo. Si de verdad se fue, se confirma con un
+     * aviso corto («Cosa quitada de la lista»); si falla, el aviso de error sigue
+     * en su tarjeta y no se confirma nada.
+     *
+     * Se mira el estado resultante y no solo que no haya fallo: el núcleo no
+     * empieza si hay otra escritura en vuelo, y entonces devuelve el estado tal
+     * cual sin problema; confirmar ahí sería mentir.
+     */
+    fun onDelete(itemId: String) {
+        val openListId = controller.state.listId
+        val present = controller.state.items.any { it.id == itemId }
+        launchOperation(
+            onDone = { result ->
+                if (present &&
+                    result.problem == null &&
+                    result.listId == openListId &&
+                    result.items.none { it.id == itemId }
+                ) {
+                    emitNotice(ShoppingNotice.ItemDeleted)
+                }
+            },
+        ) { it.delete(itemId) }
+    }
 
-    fun onDeleteChecked() = launchOperation { it.deleteChecked() }
+    /**
+     * Vacía lo marcado. El recuento que se confirma es el de **antes** del
+     * borrado ([ShoppingNotice.Cleared]): el de después ya sería cero. Si el
+     * borrado falla (o no llega a empezar), el fallo tiene su tarjeta y no se
+     * confirma nada.
+     */
+    fun onDeleteChecked() {
+        val current = controller.state
+        val openListId = current.listId
+        val batch = current.items.asSequence()
+            .filter { it.checked }
+            .mapTo(HashSet()) { it.id }
+        if (batch.isEmpty()) return
+        launchOperation(
+            onDone = { result ->
+                if (result.problem == null &&
+                    result.listId == openListId &&
+                    result.items.none { it.id in batch }
+                ) {
+                    emitNotice(ShoppingNotice.Cleared(batch.size))
+                }
+            },
+        ) { it.deleteChecked() }
+    }
+
+    /**
+     * El aviso corto ya se ha visto: se consume (queda en `null`) y el contador
+     * **no** cambia. Se llama al terminar el aviso, no al empezarlo: si la pantalla
+     * se va a medias, al volver se ve otra vez en vez de perderse.
+     */
+    fun onNoticeShown() {
+        if (notice == null) return
+        notice = null
+        publish()
+    }
+
+    /** Un aviso nuevo: el contador cambia aunque diga lo mismo que el anterior. */
+    private fun emitNotice(value: ShoppingNotice) {
+        notice = value
+        noticeId++
+    }
 
     /** Cancela lo que corra y empieza de cero: cambio de sesión, borrado o primera configuración. */
     fun reset() {
@@ -385,6 +487,7 @@ class ShoppingViewModel(
         createDialog = false
         createProblem = null
         maybeCreated = false
+        notice = null
         controller = newController()
         picker = newPicker()
         publish()

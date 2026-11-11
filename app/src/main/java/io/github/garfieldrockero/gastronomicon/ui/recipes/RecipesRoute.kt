@@ -15,12 +15,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.garfieldrockero.gastronomicon.R
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeDetailState
 import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
 import io.github.garfieldrockero.gastronomicon.platform.ImageRecoder
 import io.github.garfieldrockero.gastronomicon.platform.ImportFileReader
 import io.github.garfieldrockero.gastronomicon.platform.openInBrowser
+import io.github.garfieldrockero.gastronomicon.ui.components.SnackbarNotice
 import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
 import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
 
@@ -67,6 +70,7 @@ fun RecipesRoute(
     val detailState by detailViewModel.state.collectAsStateWithLifecycle()
     val offlineCopy by detailViewModel.offlineCopy.collectAsStateWithLifecycle()
     val deleteState by detailViewModel.deleteState.collectAsStateWithLifecycle()
+    val deleteNotice by detailViewModel.notice.collectAsStateWithLifecycle()
     val shoppingState by detailViewModel.shopping.collectAsStateWithLifecycle()
     val editorState by editorViewModel.state.collectAsStateWithLifecycle()
     val importState by importViewModel.state.collectAsStateWithLifecycle()
@@ -107,6 +111,16 @@ fun RecipesRoute(
             listViewModel.onRefresh()
             detailViewModel.close()
         }
+    }
+
+    // «Receta borrada» (fase 16h): un aviso de un solo uso que se pinta en la **lista**, que
+    // es donde se queda la persona (el detalle se acaba de cerrar). El texto se resuelve
+    // aquí porque el ViewModel no conoce los recursos; la clave es el id del ViewModel, que
+    // cambia con cada aviso, para que no se pierda ni se repita al girar el móvil. Es una
+    // confirmación: los errores y la copia sin conexión siguen en su tarjeta.
+    val deletedNoticeText = stringResource(R.string.recipes_deleted_notice)
+    val listNotice = deleteNotice.notice?.let {
+        SnackbarNotice(id = deleteNotice.noticeId, message = deletedNoticeText)
     }
 
     // Foto subida desde el formulario: hay que olvidar la copia que hubiera en memoria
@@ -287,6 +301,8 @@ fun RecipesRoute(
                         onOpenSettings = onOpenSettings,
                         onCreateRecipe = editorViewModel::openCreate,
                         onImportRecipe = importViewModel::open,
+                        notice = listNotice,
+                        onNoticeShown = detailViewModel::onNoticeShown,
                         contentWindowInsets = listContentWindowInsets,
                     )
                 } else if (detailState !is RecipeDetailState.Closed) {

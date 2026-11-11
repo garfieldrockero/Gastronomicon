@@ -51,6 +51,28 @@ data class RecipeDeleteUiState(
     val deleted: Boolean = false,
 )
 
+/** Lo que se confirma con un aviso de un solo uso al volver a la lista. */
+enum class RecipeNotice {
+    /** La receta abierta se borró: la lista se recarga y su fila ya no está. */
+    Deleted,
+}
+
+/**
+ * Aviso de un solo uso de la receta que se acaba de cerrar. Vive **fuera** de
+ * [RecipeDeleteUiState] a propósito: `close()` vacía el borrado (el detalle ya no
+ * existe) y el aviso tiene que llegar igualmente a la lista, que es donde se pinta.
+ *
+ * [noticeId] es un contador que **cambia** con cada aviso; la pantalla lo usa como
+ * clave para no perderlo ni repetirlo al girar el móvil ni al recomponer. Un booleano
+ * (`deleted = true`) volvería a dispararse en cada giro, y como aviso se oiría
+ * repetido. `onNoticeShown()` **consume** el aviso: deja [notice] en `null` y mantiene
+ * el id.
+ */
+data class RecipeNoticeUi(
+    val notice: RecipeNotice? = null,
+    val noticeId: Long = 0L,
+)
+
 /**
  * Una copia guardada de la receta, mientras no hay conexión: la receta tal como
  * se guardó (con las raciones que se elijan ahora), la fecha de la copia ya en
@@ -127,6 +149,17 @@ class RecipeDetailViewModel(
 
     private val _deleteState = MutableStateFlow(RecipeDeleteUiState())
     val deleteState: StateFlow<RecipeDeleteUiState> = _deleteState.asStateFlow()
+
+    private val _notice = MutableStateFlow(RecipeNoticeUi())
+
+    /**
+     * Aviso de un solo uso que se pinta al volver a la lista (ver [RecipeNoticeUi]).
+     * Hoy solo hay uno: «Receta borrada». Lo consume la lista cuando termina de verse.
+     */
+    val notice: StateFlow<RecipeNoticeUi> = _notice.asStateFlow()
+
+    /** Contador de avisos: cambia con cada uno; su valor concreto da igual. */
+    private var noticeSeq = 0L
 
     private val _offlineCopy = MutableStateFlow<OfflineCopyUi?>(null)
 
@@ -290,6 +323,8 @@ class RecipeDetailViewModel(
         resetShopping(keepNotice = false)
         openSlug = null
         _deleteState.value = RecipeDeleteUiState()
+        // Otra sesión: la lista se reinicia también, así que el aviso no tiene a quién contarse.
+        _notice.value = RecipeNoticeUi()
         _offlineCopy.value = null
         _state.value = controller.close()
     }
@@ -371,6 +406,13 @@ class RecipeDetailViewModel(
                 DeleteResult.Deleted -> {
                     _state.value = controller.close()
                     _deleteState.value = RecipeDeleteUiState(deleted = true)
+                    // Hasta ahora la receta desaparecía de la lista sin decir nada. El aviso
+                    // se pinta en la lista (el detalle se acaba de cerrar) y solo lo cierra
+                    // su propia pantalla: aquí no se espera a nadie.
+                    _notice.value = RecipeNoticeUi(
+                        notice = RecipeNotice.Deleted,
+                        noticeId = ++noticeSeq,
+                    )
                 }
                 is DeleteResult.Problem -> {
                     val problem = result.problem
@@ -391,6 +433,15 @@ class RecipeDetailViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Da por visto el aviso de la lista al terminar de verse (`GastronomiconSnackbarHost`).
+     * Se deja `notice` en `null` y se **mantiene** el id: si el contador subiera aquí, el
+     * aviso se reproduciría en bucle.
+     */
+    fun onNoticeShown() {
+        _notice.update { it.copy(notice = null) }
     }
 
     private fun delete(slug: String): DeleteResult {

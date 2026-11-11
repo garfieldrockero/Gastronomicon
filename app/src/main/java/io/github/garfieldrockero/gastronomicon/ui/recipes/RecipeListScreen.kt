@@ -87,12 +87,14 @@ import io.github.garfieldrockero.gastronomicon.core.recipes.ListPhase
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeListState
 import io.github.garfieldrockero.gastronomicon.core.recipes.RecipeSummaryRow
 import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconSnackbarHost
 import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.RecipePhoto
+import io.github.garfieldrockero.gastronomicon.ui.components.SnackbarNotice
 import io.github.garfieldrockero.gastronomicon.ui.components.StarRating
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
@@ -111,6 +113,12 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnable
  * Estados: cargando, fallo (con acción), sin cobertura, sesión caducada (lleva a
  * Ajustes), lista vacía, sin coincidencias y lista con más páginas que se piden al
  * llegar al final.
+ *
+ * [notice] es una **confirmación** de algo ya hecho (fase 16h: hoy, «Receta borrada»).
+ * Se pinta aquí, en el hueco del `Scaffold`, para que quede por encima del buscador y del
+ * botón «+», y se da por visto al terminar ([onNoticeShown]). Un aviso **no** sustituye a
+ * un estado: los errores, la sesión caducada, la falta de cobertura y la copia guardada
+ * siguen en su tarjeta, con su acción, y no se van solos.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -128,6 +136,10 @@ fun RecipeListScreen(
     onOpenSettings: () -> Unit,
     onCreateRecipe: () -> Unit,
     onImportRecipe: () -> Unit,
+    // Confirmación de un solo uso (ver el KDoc). Null = no hay nada que confirmar.
+    notice: SnackbarNotice? = null,
+    // Se llama al terminar de verse el aviso, para que no se repita en cada recomposición.
+    onNoticeShown: () -> Unit = {},
     modifier: Modifier = Modifier,
     // Con la barra de pestañas debajo, quien la pinta quita aquí el inset inferior
     // (ya lo consume la barra). Suelto, el valor por defecto es el de siempre.
@@ -197,6 +209,14 @@ fun RecipeListScreen(
                     contentDescription = stringResource(R.string.recipes_add),
                 )
             }
+        },
+        // Un host por `Scaffold` (fase 16h): así el aviso se coloca por encima del buscador
+        // y del «+» sin medir nada a mano, y sube con el teclado (`imePadding` del host).
+        snackbarHost = {
+            GastronomiconSnackbarHost(
+                notice = notice,
+                onShown = onNoticeShown,
+            )
         },
     ) { innerPadding ->
         Column(
@@ -943,7 +963,7 @@ private val loadedList = RecipeListState(
 private val loadedPhotoList = loadedList.copy(items = RecipePreviewData.summariesWithPhotos)
 
 @Composable
-private fun ListPreview(state: RecipeListUiState) {
+private fun ListPreview(state: RecipeListUiState, notice: SnackbarNotice? = null) {
     RecipeListScreen(
         state = state,
         imageLoader = null,
@@ -958,6 +978,8 @@ private fun ListPreview(state: RecipeListUiState) {
         onOpenSettings = {},
         onCreateRecipe = {},
         onImportRecipe = {},
+        notice = notice,
+        onNoticeShown = {},
     )
 }
 
@@ -993,6 +1015,37 @@ private fun RecipeListLoadedLargeTextPreview() {
 private fun RecipeListLoadedLargeTextDarkPreview() {
     GastronomiconTheme(mode = ThemeMode.DARK) {
         ListPreview(previewState(loadedPhotoList.copy(hasMore = false)))
+    }
+}
+
+// «Receta borrada» (16h) a 360 dp y 2×: el aviso no puede tapar el buscador (abajo) ni el
+// «+». Si en la vista previa el aviso sale vacío es porque `SnackbarHostState.showSnackbar`
+// suspende: la pieza del aviso se ve en las previews de `GastronomiconSnackbar.kt`.
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun RecipeListDeletedNoticePreview() {
+    GastronomiconTheme {
+        ListPreview(
+            previewState(loadedPhotoList.copy(hasMore = false)),
+            notice = SnackbarNotice(
+                id = 1L,
+                message = stringResource(R.string.recipes_deleted_notice),
+            ),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeListDeletedNoticeDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        ListPreview(
+            previewState(loadedPhotoList.copy(hasMore = false)),
+            notice = SnackbarNotice(
+                id = 2L,
+                message = stringResource(R.string.recipes_deleted_notice),
+            ),
+        )
     }
 }
 

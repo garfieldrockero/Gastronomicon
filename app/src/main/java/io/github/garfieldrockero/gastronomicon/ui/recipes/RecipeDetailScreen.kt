@@ -46,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -86,6 +87,7 @@ import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingOutcom
 import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingPreviewData
 import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingUi
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconSnackbarHost
 import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
@@ -93,8 +95,10 @@ import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.RecipePhoto
 import io.github.garfieldrockero.gastronomicon.ui.components.SanitizedHtmlContent
 import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
+import io.github.garfieldrockero.gastronomicon.ui.components.SnackbarNotice
 import io.github.garfieldrockero.gastronomicon.ui.components.StarRating
 import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
+import io.github.garfieldrockero.gastronomicon.ui.components.addToShoppingAddedText
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
@@ -140,6 +144,37 @@ private fun detailStateFade(animate: Boolean): ContentTransform =
         fadeOut(animationSpec = snap())
 
 /**
+ * Numera los avisos de «añadir a la compra» de esta pantalla.
+ *
+ * El aviso en sí vive en el ViewModel (`AddToShoppingUi.notice`) y lo consume el host
+ * al terminar; lo que la pantalla pone es un **id que cambia con cada aviso** y que no
+ * cambia al volver a componer. Así dos «añadido» seguidos se anuncian los dos, y el
+ * mismo no se repite en cada recomposición (la clave del `LaunchedEffect` del host es
+ * el id, nunca un booleano).
+ *
+ * Se compara por referencia, no por contenido: dos añadidos iguales —la misma lista y
+ * la misma receta— son dos avisos distintos aunque digan lo mismo.
+ *
+ * `remember`, no `rememberSaveable`: lo que hay que recordar al girar es el aviso, y
+ * eso ya está en el ViewModel; el número solo tiene que ser estable mientras la
+ * pantalla viva. Si el móvil gira a medio aviso, el que no se llegó a consumir se
+ * vuelve a pintar con el número que toque, que es lo que se quiere.
+ */
+private class ShoppingNoticeIds {
+    private var last: AddToShoppingOutcome.Added? = null
+    private var lastId: Long = 0L
+
+    /** El id de [added]: el mismo mientras sea el mismo aviso, nuevo cuando cambia. */
+    fun idFor(added: AddToShoppingOutcome.Added): Long {
+        if (added !== last) {
+            last = added
+            lastId += 1
+        }
+        return lastId
+    }
+}
+
+/**
  * Detalle de una receta. Sin lógica: las raciones, las cantidades y los textos
  * ya vienen del núcleo ([RecipeDetailView]); aquí solo se pintan y se avisa de lo
  * que toca la persona.
@@ -157,9 +192,10 @@ private fun detailStateFade(animate: Boolean): ContentTransform =
  * borrar. Las raciones se siguen pudiendo escalar.
  *
  * Fase 9, extra 1: en el menú, «Añadir a la lista de la compra», con un diálogo
- * que elige la lista y las raciones. Al terminar, un aviso con región viva dice
- * qué ha pasado y ofrece ver la compra; con un desenlace dudoso no se ofrece
- * repetir, solo mirar. Las listas, las recetas y el envío son del núcleo.
+ * que elige la lista y las raciones. Al terminar bien, el aviso es una confirmación
+ * corta en la franja inferior («Añadido…», con «Ver la compra») que se va sola; con
+ * un desenlace dudoso la tarjeta se queda a la vista, porque hay que mirar la lista
+ * antes de repetir. Las listas, las recetas y el envío son del núcleo.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -184,9 +220,39 @@ fun RecipeDetailScreen(
 ) {
     // Lo que se pinta: la copia guardada manda sobre lo que diga el estado del núcleo.
     val shownName = offline?.view?.name ?: (state as? RecipeDetailState.Ready)?.view?.name
+    // Aviso corto de «añadido a la compra» (fase 16h): solo el éxito, con «Ver la compra»
+    // si la navegación ya lleva a la pestaña. La duda (`MaybeAdded`) y los fallos no
+    // pasan por aquí: se quedan en su tarjeta, porque exigen mirar antes de repetir.
+    val noticeIds = remember { ShoppingNoticeIds() }
+    val addedNotice = shopping.notice as? AddToShoppingOutcome.Added
+    val openShopping = shoppingActions.onOpenShopping
+    val openShoppingLabel = if (openShopping != null) {
+        stringResource(R.string.extras_compra_notice_open)
+    } else {
+        null
+    }
+    val snackbarNotice = if (addedNotice != null) {
+        SnackbarNotice(
+            id = noticeIds.idFor(addedNotice),
+            message = addToShoppingAddedText(addedNotice),
+            actionLabel = openShoppingLabel,
+        )
+    } else {
+        null
+    }
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
+        // Un host por pantalla (decisión de la fase 16h): el `Scaffold` lo coloca por
+        // encima de lo que haya abajo y el componente se encarga del teclado y del 2×.
+        snackbarHost = {
+            GastronomiconSnackbarHost(
+                notice = snackbarNotice,
+                // Al terminar, el aviso se consume en el ViewModel (uno por id, nunca dos veces).
+                onShown = shoppingActions.onNoticeDismiss,
+                onAction = { openShopping?.invoke() },
+            )
+        },
         topBar = {
             GastronomiconTopBar(
                 title = {
@@ -286,11 +352,14 @@ fun RecipeDetailScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            // Aviso de «añadir a la compra»: fijo encima del contenido, sin taparlo.
+            // La duda de «añadir a la compra» («puede que ya se hayan añadido»), fija encima
+            // del contenido y sin taparlo: es lo único que no puede irse solo. El éxito ya
+            // no ocupa sitio aquí: lo confirma el aviso corto de la franja inferior.
             val shoppingNotice = shopping.notice
-            if (shoppingNotice != null) {
+            val doubtNotice = shoppingNotice?.takeIf { it is AddToShoppingOutcome.MaybeAdded }
+            if (doubtNotice != null) {
                 AddToShoppingNoticeCard(
-                    notice = shoppingNotice,
+                    notice = doubtNotice,
                     onLook = shoppingActions.onOpenShopping,
                     onDismiss = shoppingActions.onNoticeDismiss,
                     modifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small),
@@ -1272,6 +1341,10 @@ private fun RecipeDetailAddToShoppingPreview() {
     }
 }
 
+// El éxito de «añadir a la compra» ya es un aviso corto en la franja inferior (fase 16h):
+// se pinta en el `snackbarHost` del `Scaffold` y se va solo. En la vista previa puede no
+// salir, porque `showSnackbar` suspende; su aspecto está en las previews del componente
+// (`ui/components/GastronomiconSnackbar.kt`), que pinta el mismo aviso real.
 @Preview(showBackground = true, widthDp = 360, heightDp = 780, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun RecipeDetailShoppingAddedDarkPreview() {
@@ -1280,6 +1353,21 @@ private fun RecipeDetailShoppingAddedDarkPreview() {
             state = RecipeDetailState.Ready(RecipePreviewData.detail),
             shopping = AddToShoppingPreviewData.ui(
                 notice = AddToShoppingOutcome.Added("Compra de la semana", 1),
+            ),
+            shoppingActions = RecipeShoppingActions(onOpenShopping = {}),
+        )
+    }
+}
+
+// La duda sí ocupa sitio en la pantalla: se queda hasta que la persona la lea.
+@Preview(showBackground = true, widthDp = 360, heightDp = 780, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RecipeDetailShoppingMaybeAddedDarkPreview() {
+    GastronomiconTheme(mode = ThemeMode.DARK) {
+        DetailPreview(
+            state = RecipeDetailState.Ready(RecipePreviewData.detail),
+            shopping = AddToShoppingPreviewData.ui(
+                notice = AddToShoppingOutcome.MaybeAdded(ConnectionProblem.NoNetwork),
             ),
             shoppingActions = RecipeShoppingActions(onOpenShopping = {}),
         )

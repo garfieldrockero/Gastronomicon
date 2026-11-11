@@ -21,11 +21,16 @@ class RecipeShoppingActions(
     val onRetryLists: () -> Unit = {},
     val onConfirm: () -> Unit = {},
     val onDismiss: () -> Unit = {},
+    /**
+     * Da por visto el aviso de después de añadir. Con un desenlace dudoso cierra la
+     * tarjeta; con el éxito lo llama el aviso corto al terminar (fase 16h), y el
+     * ViewModel lo consume: no se repite ni al recomponer ni al girar.
+     */
     val onNoticeDismiss: () -> Unit = {},
     /**
-     * Lleva a la pestaña Compra («Ver la compra» y «Volver a mirar»). Null
-     * mientras la navegación no lo cablee: entonces el aviso no ofrece el botón,
-     * para no dejar un botón que no hace nada.
+     * Lleva a la pestaña Compra («Ver la compra» del aviso corto y «Volver a mirar»
+     * de la tarjeta). Null mientras la navegación no lo cablee: entonces el aviso no
+     * ofrece el botón, para no dejar un botón que no hace nada.
      */
     val onOpenShopping: (() -> Unit)? = null,
 )

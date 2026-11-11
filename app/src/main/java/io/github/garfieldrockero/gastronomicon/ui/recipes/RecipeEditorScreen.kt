@@ -95,13 +95,14 @@ import io.github.garfieldrockero.gastronomicon.platform.PhotoPickResult
 import io.github.garfieldrockero.gastronomicon.platform.PhotoSource
 import io.github.garfieldrockero.gastronomicon.platform.rememberPhotoPicker
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
+import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconSnackbarHost
 import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LoadingBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.MessageBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBanner
 import io.github.garfieldrockero.gastronomicon.ui.components.ProblemBlock
 import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
-import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
+import io.github.garfieldrockero.gastronomicon.ui.components.SnackbarNotice
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.fieldError
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
@@ -214,9 +215,42 @@ fun RecipeEditorScreen(
         mutableStateOf<PendingRemoval?>(null)
     }
 
+    val editing = state as? RecipeEditorState.Editing
+
+    // «Foto subida» (fase 16h): lo que ya está hecho y no deja nada pendiente se dice en
+    // un aviso corto abajo, no en una línea fija dentro de la sección. El id es el
+    // contador de subidas del estado —uno por foto, sube con cada subida buena y
+    // sobrevive al giro—, y el último aviso enseñado se recuerda aquí con
+    // `rememberSaveable`: así no se repite al recomponer ni al girar, y si el aviso se
+    // corta a medias se vuelve a ver entero. Los **fallos** de subida no pasan por aquí:
+    // siguen en su tarjeta, con «Reintentar».
+    var shownPhotoNoticeId by rememberSaveable { mutableStateOf(0L) }
+    val uploadedPhoto = editing?.photo
+    val photoNoticeId = when {
+        uploadedPhoto == null -> 0L
+        !uploadedPhoto.done -> 0L
+        else -> uploadedPhoto.uploadedCount.toLong()
+    }
+    val notice = if (photoNoticeId != 0L && photoNoticeId != shownPhotoNoticeId) {
+        SnackbarNotice(
+            id = photoNoticeId,
+            message = stringResource(R.string.editor_photo_done),
+        )
+    } else {
+        null
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
+        // Un host por `Scaffold`: el aviso se coloca solo por encima de la barra de
+        // guardar y del teclado, sin tapar el botón. Nada de Deshacer (fase 16h).
+        snackbarHost = {
+            GastronomiconSnackbarHost(
+                notice = notice,
+                onShown = { notice?.let { shownPhotoNoticeId = it.id } },
+            )
+        },
         topBar = {
             GastronomiconTopBar(
                 title = {
@@ -241,7 +275,6 @@ fun RecipeEditorScreen(
             )
         },
         bottomBar = {
-            val editing = state as? RecipeEditorState.Editing
             if (editing != null) {
                 SaveBar(state = editing, actions = actions)
             }
@@ -287,7 +320,6 @@ fun RecipeEditorScreen(
         }
     }
 
-    val editing = state as? RecipeEditorState.Editing
     if (editing != null && editing.showDiscardConfirm) {
         DiscardDialog(
             createdIncomplete = editing.createdIncomplete,
@@ -776,7 +808,10 @@ private fun TimeField(
 /**
  * Foto de la receta, solo en modo edición: una receta nueva se guarda antes de
  * tener foto. Los botones abren la galería o la cámara del sistema; la foto se
- * recodifica sin datos de ubicación y se sube sola, con progreso y aviso.
+ * recodifica sin datos de ubicación y se sube sola, con progreso. El «ya está»
+ * va en el aviso corto de la pantalla (Snackbar, fase 16h), no dentro de la
+ * sección: aquí solo quedan la vista previa, el progreso y los fallos, que se
+ * leen con calma y ofrecen repetir.
  *
  * Sin Uri, sin rutas y sin bytes en el estado: la vista previa ya es un
  * `Bitmap` pequeño y recodificado ([PhotoState.preview]).
@@ -889,18 +924,6 @@ private fun PhotoSection(state: RecipeEditorState.Editing, actions: RecipeEditor
                 problem = problem,
                 onRetry = actions.onRetryPhoto,
                 onOpenSettings = actions.onOpenSettings,
-            )
-        }
-
-        if (photo.done && problem == null) {
-            StatusText(
-                text = stringResource(R.string.editor_photo_done),
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = stringResource(R.string.editor_photo_done_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -2687,7 +2710,8 @@ private fun RecipeEditorNotFoundPreview() {
     }
 }
 
-// Foto: sin foto, elegida y ya subida, subiendo y con un error.
+// Foto: sin foto, elegida y ya subida (el «ya está» se dice en el aviso de abajo, no
+// dentro de la sección), subiendo y con un error.
 
 @Preview(showBackground = true)
 @Composable

@@ -292,7 +292,6 @@
     <string name="editor_photo_preparing">Preparando la foto…</string>
     <string name="editor_photo_uploading">Subiendo la foto…</string>
     <string name="editor_photo_done">Foto subida a tu Mealie.</string>
-    <string name="editor_photo_done_hint">Ya se ve en tu Mealie. Aquí solo se cambia si eliges otra.</string>
     <string name="editor_photo_wait">Espera a que termine la foto para guardar.</string>
     <string name="editor_photo_hint_create">Para añadir una foto, guarda primero la receta y pulsa «Editar» en ella.</string>
     <string name="editor_photo_problem_too_large">La foto es demasiado grande para subirla. Prueba con otra.</string>
@@ -368,4 +367,20 @@
     <string name="import_imported">Receta importada. Abriéndola…</string>
     <string name="import_failed_title">No se ha podido importar la receta</string>
     <string name="import_back">Volver a las recetas</string>
+
+    <!-- Confirmaciones breves (fase 16h). Solo lo que ya está hecho y no deja nada
+         pendiente: se enseña 4 s en la franja de abajo (10 s si lleva acción). Los
+         errores, las dudas («puede que se haya creado») y los avisos que exigen una
+         decisión no se escriben aquí: esos no desaparecen solos.
+         Las usa `ui/components/GastronomiconSnackbar.kt` y las rutas que pintan avisos. -->
+    <!-- Título de panel del aviso: TalkBack lo dice antes del texto, que llega por
+         sorpresa mientras la persona mira otra cosa. -->
+    <string name="a11y_notice">Aviso</string>
+    <string name="recipes_deleted_notice">Receta borrada</string>
+    <!-- Vaciar lo marcado y quitar una cosa son el mismo aviso con su recuento. -->
+    <plurals name="shopping_cleared_notice">
+        <item quantity="one">%d cosa quitada de la lista</item>
+        <item quantity="other">%d cosas quitadas de la lista</item>
+    </plurals>
+    <string name="shopping_item_deleted_notice">Cosa quitada de la lista</string>
 </resources>
