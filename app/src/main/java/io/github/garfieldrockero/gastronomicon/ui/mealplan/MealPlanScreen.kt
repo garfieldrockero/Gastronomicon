@@ -165,7 +165,8 @@ fun MealPlanScreen(
     val onSnackbarAction: () -> Unit = when {
         noticeMissing -> actions.onRefresh
         noticeOtherWeek -> actions.onShowNoticeWeek
-        else -> {}
+        // Sin acción: una lambda vacía (un `{}` suelto en un `when` sería un bloque, no una lambda).
+        else -> ({ })
     }
 
     Scaffold(
