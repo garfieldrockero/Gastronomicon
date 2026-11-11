@@ -204,9 +204,6 @@ fun SettingsScreen(
         ) {
             AnimatedContent(
                 targetState = serverBlock,
-                // Sin animación de tamaño: el formulario es mucho más alto que la fila
-                // de «Cargando» y un alto a medias dejaría la página saltando.
-                sizeTransform = null,
                 transitionSpec = {
                     serverBlockFade(animate = animations && targetState == ServerBlock.Ready)
                 },
@@ -278,8 +275,13 @@ private enum class ServerBlock { Loading, LoadFailed, Ready }
  * regiones vivas a la vez (la de «Cargando» y la del aviso).
  */
 private fun serverBlockFade(animate: Boolean): ContentTransform =
-    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
-        fadeOut(animationSpec = snap())
+    // Sin animación de tamaño (`sizeTransform = null`): el alto cambia en el acto y solo el
+    // contenido entra fundido; un alto a medias dejaría la página saltando.
+    ContentTransform(
+        targetContentEnter = fadeIn(animationSpec = motionTween(enabled = animate)),
+        initialContentExit = fadeOut(animationSpec = snap()),
+        sizeTransform = null,
+    )
 
 /**
  * Título y contenido de una sección de Ajustes. Existe para que las cinco

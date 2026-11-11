@@ -260,8 +260,13 @@ private enum class PlanBody { Loading, Problem, Ready }
  * esperando 120 ms para contarse.
  */
 private fun planBodyFade(animate: Boolean): ContentTransform =
-    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
-        fadeOut(animationSpec = snap())
+    // Sin animación de tamaño (`sizeTransform = null`): el alto cambia en el acto y solo el
+    // contenido entra fundido; un alto a medias dejaría la página saltando.
+    ContentTransform(
+        targetContentEnter = fadeIn(animationSpec = motionTween(enabled = animate)),
+        initialContentExit = fadeOut(animationSpec = snap()),
+        sizeTransform = null,
+    )
 
 @Composable
 private fun MealPlanBody(
@@ -285,7 +290,6 @@ private fun MealPlanBody(
         targetState = target,
         modifier = modifier,
         transitionSpec = { planBodyFade(animate = animations && targetState == PlanBody.Ready) },
-        sizeTransform = null,
         label = "plan-body",
     ) { body ->
         val week = plan.week

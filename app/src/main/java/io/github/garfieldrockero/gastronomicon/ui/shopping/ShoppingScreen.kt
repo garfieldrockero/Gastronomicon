@@ -337,7 +337,6 @@ private fun ShoppingBody(
                 transitionSpec = {
                     shoppingBodyFade(animate = animations && targetState == ShoppingScreenBody.Content)
                 },
-                sizeTransform = null,
                 label = "shopping-body",
             ) { target ->
                 // Lo que se va lee del estado actual: si ya no tiene datos, se apaga
@@ -464,8 +463,13 @@ private enum class ShoppingScreenBody { ListsProblem, ListsLoading, NoLists, Con
  * vivas a la vez) y un fallo o un 401 se leen al instante, sin esperar 120 ms.
  */
 private fun shoppingBodyFade(animate: Boolean): ContentTransform =
-    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
-        fadeOut(animationSpec = snap())
+    // Sin animación de tamaño (`sizeTransform = null`): el alto cambia en el acto y solo el
+    // contenido entra fundido; un alto a medias dejaría la página saltando.
+    ContentTransform(
+        targetContentEnter = fadeIn(animationSpec = motionTween(enabled = animate)),
+        initialContentExit = fadeOut(animationSpec = snap()),
+        sizeTransform = null,
+    )
 
 @Composable
 private fun ShoppingLines(
