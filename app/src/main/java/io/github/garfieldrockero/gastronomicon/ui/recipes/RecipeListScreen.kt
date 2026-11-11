@@ -2,6 +2,12 @@ package io.github.garfieldrockero.gastronomicon.ui.recipes
 
 import android.content.res.Configuration
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -91,9 +97,12 @@ import io.github.garfieldrockero.gastronomicon.ui.components.StarRating
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.isLargeText
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
+import io.github.garfieldrockero.gastronomicon.ui.theme.Motion
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
+import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
+import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
 
 /**
  * Lista de recetas. Sin lógica: pinta el estado del núcleo ([RecipeListUiState]) y
@@ -479,6 +488,42 @@ private fun OfflineScopeHint(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Qué bloque enseña la pantalla de recetas. Es la clave (estable) de la transición:
+ * no depende de los datos, así que recargar, filtrar o pedir otra página no recrea
+ * nodos ni regiones vivas; solo cambia cuando cambia lo que se ve de verdad.
+ */
+private enum class ListPane {
+    Loading,
+    Problem,
+    Empty,
+    EmptySearch,
+    NoMatch,
+    Rows,
+}
+
+/** El mismo orden de antes: de error a lista, el primero que encaje. */
+private fun listPane(list: RecipeListState): ListPane = when {
+    list.items.isEmpty() && list.problem != null && !list.isLoading -> ListPane.Problem
+    // También antes de la primera carga: la pantalla nunca se queda en blanco.
+    list.items.isEmpty() && (list.isLoading || !list.loadedOnce) -> ListPane.Loading
+    list.isEmpty && list.search != null -> ListPane.EmptySearch
+    list.isEmpty -> ListPane.Empty
+    // Hay recetas cargadas, pero el filtro de la persona las esconde todas.
+    list.visibleItems.isEmpty() -> ListPane.NoMatch
+    else -> ListPane.Rows
+}
+
+/**
+ * Transición entre dos bloques del mismo sitio. Solo se desvanece el bloque que
+ * **no** se anuncia por TalkBack (la lista con recetas); lo que se va se apaga en el
+ * acto (`snap`), de modo que nunca hay dos regiones vivas a la vez ni un error
+ * esperando 120 ms para contarse.
+ */
+private fun listStateFade(animate: Boolean): ContentTransform =
+    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
+        fadeOut(animationSpec = snap())
+
 @Composable
 private fun RecipeListContent(
     list: RecipeListState,
@@ -494,60 +539,74 @@ private fun RecipeListContent(
     onCreateRecipe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val problem = list.problem
-    when {
-        list.items.isEmpty() && problem != null && !list.isLoading -> ProblemBlock(
-            problem = problem,
-            defaultTitle = R.string.problem_title_default,
-            onRetry = onRetry,
-            onOpenSettings = onOpenSettings,
-            modifier = modifier,
-        )
+    val animationsEnabled = rememberAnimationsEnabled()
+    AnimatedContent(
+        targetState = listPane(list),
+        modifier = modifier,
+        transitionSpec = {
+            listStateFade(animate = animationsEnabled && (targetState == ListPane.Rows))
+        },
+        label = "lista-recetas",
+    ) { pane ->
+        val blockModifier = Modifier.fillMaxSize()
+        when (pane) {
+            ListPane.Problem -> {
+                val problem = list.problem
+                // Si ya no hay fallo (bloque que se está apagando), no se inventa uno.
+                if (problem != null) {
+                    ProblemBlock(
+                        problem = problem,
+                        defaultTitle = R.string.problem_title_default,
+                        onRetry = onRetry,
+                        onOpenSettings = onOpenSettings,
+                        modifier = blockModifier,
+                    )
+                }
+            }
 
-        // También antes de la primera carga: la pantalla nunca se queda en blanco.
-        list.items.isEmpty() && (list.isLoading || !list.loadedOnce) -> LoadingBlock(
-            text = stringResource(R.string.recipes_loading),
-            modifier = modifier,
-        )
+            ListPane.Loading -> LoadingBlock(
+                text = stringResource(R.string.recipes_loading),
+                modifier = blockModifier,
+            )
 
-        list.isEmpty && list.search != null -> MessageBlock(
-            title = stringResource(R.string.recipes_empty_search_title),
-            text = stringResource(R.string.recipes_empty_search_text),
-            primaryLabel = stringResource(R.string.recipes_search_all),
-            onPrimary = onClearSearch,
-            modifier = modifier,
-        )
+            ListPane.EmptySearch -> MessageBlock(
+                title = stringResource(R.string.recipes_empty_search_title),
+                text = stringResource(R.string.recipes_empty_search_text),
+                primaryLabel = stringResource(R.string.recipes_search_all),
+                onPrimary = onClearSearch,
+                modifier = blockModifier,
+            )
 
-        list.isEmpty -> MessageBlock(
-            title = stringResource(R.string.recipes_empty_title),
-            text = stringResource(R.string.recipes_empty_text),
-            primaryLabel = stringResource(R.string.recipes_empty_create),
-            onPrimary = onCreateRecipe,
-            secondaryLabel = stringResource(R.string.recipes_reload),
-            onSecondary = onRefresh,
-            modifier = modifier,
-        )
+            ListPane.Empty -> MessageBlock(
+                title = stringResource(R.string.recipes_empty_title),
+                text = stringResource(R.string.recipes_empty_text),
+                primaryLabel = stringResource(R.string.recipes_empty_create),
+                onPrimary = onCreateRecipe,
+                secondaryLabel = stringResource(R.string.recipes_reload),
+                onSecondary = onRefresh,
+                modifier = blockModifier,
+            )
 
-        // Hay recetas cargadas, pero el filtro de la persona las esconde todas.
-        list.visibleItems.isEmpty() -> MessageBlock(
-            title = stringResource(R.string.recipes_no_match_title),
-            text = stringResource(R.string.recipes_no_match_text),
-            primaryLabel = stringResource(R.string.recipes_no_match_action),
-            onPrimary = onSubmitSearch,
-            modifier = modifier,
-        )
+            ListPane.NoMatch -> MessageBlock(
+                title = stringResource(R.string.recipes_no_match_title),
+                text = stringResource(R.string.recipes_no_match_text),
+                primaryLabel = stringResource(R.string.recipes_no_match_action),
+                onPrimary = onSubmitSearch,
+                modifier = blockModifier,
+            )
 
-        else -> RecipeLazyList(
-            list = list,
-            imageLoader = imageLoader,
-            listState = listState,
-            onLoadMore = onLoadMore,
-            onSearchAll = onSubmitSearch,
-            onRetry = onRetry,
-            onOpenRecipe = onOpenRecipe,
-            onOpenSettings = onOpenSettings,
-            modifier = modifier,
-        )
+            ListPane.Rows -> RecipeLazyList(
+                list = list,
+                imageLoader = imageLoader,
+                listState = listState,
+                onLoadMore = onLoadMore,
+                onSearchAll = onSubmitSearch,
+                onRetry = onRetry,
+                onOpenRecipe = onOpenRecipe,
+                onOpenSettings = onOpenSettings,
+                modifier = blockModifier,
+            )
+        }
     }
 }
 
@@ -579,6 +638,7 @@ private fun RecipeLazyList(
 
     val photoPx = with(LocalDensity.current) { Sizes.RecipeRowPhoto.roundToPx() }
     val problem = list.problem
+    val animationsEnabled = rememberAnimationsEnabled()
 
     LazyColumn(
         state = listState,
@@ -592,12 +652,24 @@ private fun RecipeLazyList(
         ),
         verticalArrangement = Arrangement.spacedBy(Spacing.medium),
     ) {
+        val animateRows = animationsEnabled && list.localFilter.isEmpty()
         items(items = list.visibleRows, key = { it.slug }) { row ->
             RecipeRow(
                 row = row,
                 imageLoader = imageLoader,
                 photoPx = photoPx,
                 onClick = { onOpenRecipe(row.slug) },
+                // Una fila que llega (primera página, búsqueda o «cargar más») entra con un
+                // fundido corto, y al filtrar las que quedan se recolocan: se ve que la lista
+                // ha cambiado sin que ninguna se quede a medias. Con las animaciones del
+                // sistema quitadas, `snap`: todo en el acto.
+                // Mientras se escribe en el buscador el filtro cambia con cada tecla: ahí no se
+                // anima nada (las filas no se mueven debajo del campo que se está usando).
+                modifier = Modifier.animateItem(
+                    fadeInSpec = if (animateRows) motionTween(true, Motion.ShortMillis) else null,
+                    placementSpec = if (animateRows) motionTween(true, Motion.MediumMillis) else null,
+                    fadeOutSpec = if (animateRows) motionTween(true, Motion.ShortMillis) else null,
+                ),
             )
         }
         if (list.phase == ListPhase.LoadingMore) {
@@ -630,6 +702,7 @@ private fun RecipeRow(
     imageLoader: ImageLoader?,
     photoPx: Int,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val recipe = row.summary
     // Con texto grande la foto se achica para dejarle sitio al nombre.
@@ -637,7 +710,7 @@ private fun RecipeRow(
     val photoSize = if (largeText) Sizes.RecipeRowPhotoLargeText else Sizes.RecipeRowPhoto
     Card(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .heightIn(min = photoSize + Spacing.small * 2),
         // El tono solo no basta (1,06:1 con el fondo): el límite de la tarjeta lo marca un

@@ -1,6 +1,11 @@
 package io.github.garfieldrockero.gastronomicon.ui.recipes
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyListState
@@ -16,6 +21,8 @@ import io.github.garfieldrockero.gastronomicon.platform.ImageLoader
 import io.github.garfieldrockero.gastronomicon.platform.ImageRecoder
 import io.github.garfieldrockero.gastronomicon.platform.ImportFileReader
 import io.github.garfieldrockero.gastronomicon.platform.openInBrowser
+import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
+import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
 
 /**
  * Último «volver arriba» ([RecipeListUiState.topRequest]) que ya se aplicó a la lista. Vive
@@ -234,69 +241,91 @@ fun RecipesRoute(
             modifier = modifier,
         )
 
-        detailState is RecipeDetailState.Closed -> {
-            // «Volver arriba» solo con la lista en pantalla (con ella fuera, el LazyListState no
-            // tiene diseño al que desplazar). Si hubo peticiones mientras no se veía, se aplica
-            // al volver; se anota como hecha al terminar, así una interrupción la repite.
-            LaunchedEffect(listState.topRequest) {
-                if (listState.topRequest != topMemo.handled) {
-                    scroll.scrollToItem(0)
-                    topMemo.handled = listState.topRequest
+        else -> {
+            // Al abrir una receta, la lista se apaga y el detalle aparece con un desvanecido
+            // de 120 ms (decisión de la persona), sin deslizamiento largo ni elemento
+            // compartido. Al cerrar no hay fundido: el estado ya es `Closed` y el detalle no
+            // tendría receta que desvanecer; volver a la lista es instantáneo, sin un
+            // «Abriendo la receta…» de un tirón. Con las animaciones del sistema quitadas,
+            // todo en el acto (`snap`).
+            val animationsEnabled = rememberAnimationsEnabled()
+            AnimatedContent(
+                targetState = detailState is RecipeDetailState.Closed,
+                modifier = modifier,
+                transitionSpec = {
+                    // `false` es el detalle (se está abriendo).
+                    if (animationsEnabled && !targetState) {
+                        fadeIn(animationSpec = motionTween(enabled = animationsEnabled)) togetherWith
+                            fadeOut(animationSpec = motionTween(enabled = animationsEnabled))
+                    } else {
+                        fadeIn(animationSpec = snap()) togetherWith fadeOut(animationSpec = snap())
+                    }
+                },
+                label = "receta",
+            ) { showingList ->
+                if (showingList) {
+                    // «Volver arriba» solo con la lista en pantalla (con ella fuera, el LazyListState no
+                    // tiene diseño al que desplazar). Si hubo peticiones mientras no se veía, se aplica
+                    // al volver; se anota como hecha al terminar, así una interrupción la repite.
+                    LaunchedEffect(listState.topRequest) {
+                        if (listState.topRequest != topMemo.handled) {
+                            scroll.scrollToItem(0)
+                            topMemo.handled = listState.topRequest
+                        }
+                    }
+                    RecipeListScreen(
+                        state = listState,
+                        imageLoader = imageLoader,
+                        listState = scroll,
+                        onQueryChange = listViewModel::onQueryChange,
+                        onSubmitSearch = listViewModel::onSubmitSearch,
+                        onClearSearch = listViewModel::onClearSearch,
+                        onRefresh = listViewModel::onRefresh,
+                        onLoadMore = listViewModel::onLoadMore,
+                        onRetry = listViewModel::onRetry,
+                        onOpenRecipe = detailViewModel::open,
+                        onOpenSettings = onOpenSettings,
+                        onCreateRecipe = editorViewModel::openCreate,
+                        onImportRecipe = importViewModel::open,
+                        contentWindowInsets = listContentWindowInsets,
+                    )
+                } else if (detailState !is RecipeDetailState.Closed) {
+                    // Al cerrar, la rama que sale ya no tiene receta: no se compone una
+                    // pantalla de «Abriendo la receta…» para un fotograma.
+                    BackHandler { detailViewModel.close() }
+                    RecipeDetailScreen(
+                        state = detailState,
+                        deleteState = deleteState,
+                        offline = offlineCopy,
+                        imageLoader = imageLoader,
+                        onBack = detailViewModel::close,
+                        onRetry = detailViewModel::retry,
+                        onMoreServings = detailViewModel::onMoreServings,
+                        onFewerServings = detailViewModel::onFewerServings,
+                        // Solo con un toque explícito, y al navegador del sistema.
+                        onOpenSource = { link -> openInBrowser(context, link) },
+                        onOpenSettings = onOpenSettings,
+                        onEdit = {
+                            val ready = detailState as? RecipeDetailState.Ready
+                            if (ready != null) editorViewModel.openEdit(ready.view.slug)
+                        },
+                        onDeleteClick = detailViewModel::onDeleteClick,
+                        onDeleteDismiss = detailViewModel::onDeleteDismiss,
+                        onDeleteConfirm = detailViewModel::onDeleteConfirm,
+                        shopping = shoppingState,
+                        shoppingActions = RecipeShoppingActions(
+                            onOpenClick = detailViewModel::onAddToShoppingClick,
+                            onSelectList = detailViewModel::onAddToShoppingListSelected,
+                            onScaleChange = detailViewModel::onAddToShoppingScaleChange,
+                            onRetryLists = detailViewModel::onAddToShoppingRetryLists,
+                            onConfirm = detailViewModel::onAddToShoppingConfirm,
+                            onDismiss = detailViewModel::onAddToShoppingDismiss,
+                            onNoticeDismiss = detailViewModel::onAddToShoppingNoticeDismiss,
+                            onOpenShopping = onOpenShoppingTab,
+                        ),
+                    )
                 }
             }
-            RecipeListScreen(
-                state = listState,
-                imageLoader = imageLoader,
-                listState = scroll,
-                onQueryChange = listViewModel::onQueryChange,
-                onSubmitSearch = listViewModel::onSubmitSearch,
-                onClearSearch = listViewModel::onClearSearch,
-                onRefresh = listViewModel::onRefresh,
-                onLoadMore = listViewModel::onLoadMore,
-                onRetry = listViewModel::onRetry,
-                onOpenRecipe = detailViewModel::open,
-                onOpenSettings = onOpenSettings,
-                onCreateRecipe = editorViewModel::openCreate,
-                onImportRecipe = importViewModel::open,
-                modifier = modifier,
-                contentWindowInsets = listContentWindowInsets,
-            )
-        }
-
-        else -> {
-            BackHandler { detailViewModel.close() }
-            RecipeDetailScreen(
-                state = detailState,
-                deleteState = deleteState,
-                offline = offlineCopy,
-                imageLoader = imageLoader,
-                onBack = detailViewModel::close,
-                onRetry = detailViewModel::retry,
-                onMoreServings = detailViewModel::onMoreServings,
-                onFewerServings = detailViewModel::onFewerServings,
-                // Solo con un toque explícito, y al navegador del sistema.
-                onOpenSource = { link -> openInBrowser(context, link) },
-                onOpenSettings = onOpenSettings,
-                onEdit = {
-                    val ready = detailState as? RecipeDetailState.Ready
-                    if (ready != null) editorViewModel.openEdit(ready.view.slug)
-                },
-                onDeleteClick = detailViewModel::onDeleteClick,
-                onDeleteDismiss = detailViewModel::onDeleteDismiss,
-                onDeleteConfirm = detailViewModel::onDeleteConfirm,
-                shopping = shoppingState,
-                shoppingActions = RecipeShoppingActions(
-                    onOpenClick = detailViewModel::onAddToShoppingClick,
-                    onSelectList = detailViewModel::onAddToShoppingListSelected,
-                    onScaleChange = detailViewModel::onAddToShoppingScaleChange,
-                    onRetryLists = detailViewModel::onAddToShoppingRetryLists,
-                    onConfirm = detailViewModel::onAddToShoppingConfirm,
-                    onDismiss = detailViewModel::onAddToShoppingDismiss,
-                    onNoticeDismiss = detailViewModel::onAddToShoppingNoticeDismiss,
-                    onOpenShopping = onOpenShoppingTab,
-                ),
-                modifier = modifier,
-            )
         }
     }
 }

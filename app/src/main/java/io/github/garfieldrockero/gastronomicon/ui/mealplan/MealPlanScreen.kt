@@ -2,6 +2,13 @@ package io.github.garfieldrockero.gastronomicon.ui.mealplan
 
 import android.content.res.Configuration
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -76,8 +83,11 @@ import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingNotice
 import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingOutcome
 import io.github.garfieldrockero.gastronomicon.ui.components.AddToShoppingUi
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
+import io.github.garfieldrockero.gastronomicon.ui.theme.Motion
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
+import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
+import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
 import java.time.LocalDate
 
 /** Todo lo que la pantalla puede pedir; el [MealPlanViewModel] lo reparte al núcleo. */
@@ -236,6 +246,23 @@ fun MealPlanScreen(
 
 // ------------------------------------------------------------------ contenido
 
+/**
+ * Qué ocupa el cuerpo de la pantalla. Son tres estados excluyentes y de cardinalidad
+ * fija: es la clave que se le da al cambio de bloque, no los datos (que cambian en
+ * cada recomposición y dispararían la animación sin parar).
+ */
+private enum class PlanBody { Loading, Problem, Ready }
+
+/**
+ * Cambio de bloque del cuerpo. Solo se desvanece el que **no** se anuncia por
+ * TalkBack (la semana con comidas); lo que se va se apaga en el acto (`snap`), de modo
+ * que nunca hay dos regiones vivas a la vez (la semana y el fallo) ni un error
+ * esperando 120 ms para contarse.
+ */
+private fun planBodyFade(animate: Boolean): ContentTransform =
+    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
+        fadeOut(animationSpec = snap())
+
 @Composable
 private fun MealPlanBody(
     state: MealPlanUiState,
@@ -243,29 +270,65 @@ private fun MealPlanBody(
     modifier: Modifier = Modifier,
 ) {
     val plan = state.plan
-    val week = plan.week
-    val problem = plan.loadProblem
-    when {
-        week == null && problem != null && !plan.isLoading -> LoadProblemBlock(
-            problem = problem,
-            onRetry = actions.onRetry,
-            onToday = actions.onToday,
-            onOpenSettings = actions.onOpenSettings,
-            modifier = modifier,
-        )
-
+    val animations = rememberAnimationsEnabled()
+    val target = when {
+        plan.week == null && plan.loadProblem != null && !plan.isLoading -> PlanBody.Problem
         // También antes de la primera carga: la pantalla nunca se queda en blanco.
-        week == null -> LoadingBlock(text = stringResource(R.string.plan_loading), modifier = modifier)
+        plan.week == null -> PlanBody.Loading
+        else -> PlanBody.Ready
+    }
+    // El cambio de bloque solo ocurre cuando el estado cambia de verdad (cargando →
+    // semana → fallo), y con las animaciones del sistema quitadas no hay fundido: snap.
+    // Cada bloque lee del estado actual: el que se va ya no tiene datos y no dibuja
+    // nada inventado.
+    AnimatedContent(
+        targetState = target,
+        modifier = modifier,
+        transitionSpec = { planBodyFade(animate = animations && targetState == PlanBody.Ready) },
+        sizeTransform = null,
+        label = "plan-body",
+    ) { body ->
+        val week = plan.week
+        val problem = plan.loadProblem
+        when (body) {
+            PlanBody.Loading -> LoadingBlock(
+                text = stringResource(R.string.plan_loading),
+                modifier = Modifier.fillMaxSize(),
+            )
 
-        else -> WeekContent(
-            plan = plan,
-            week = week,
-            addToShopping = state.addToShopping,
-            // Con una hoja abierta, el fallo de esa escritura se enseña dentro de ella.
-            showActionFailure = state.dialog is MealPlanDialog.None,
-            actions = actions,
-            modifier = modifier,
-        )
+            PlanBody.Problem -> if (problem != null) {
+                LoadProblemBlock(
+                    problem = problem,
+                    onRetry = actions.onRetry,
+                    onToday = actions.onToday,
+                    onOpenSettings = actions.onOpenSettings,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                LoadingBlock(
+                    text = stringResource(R.string.plan_loading),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            PlanBody.Ready -> if (week != null) {
+                WeekContent(
+                    plan = plan,
+                    week = week,
+                    addToShopping = state.addToShopping,
+                    // Con una hoja abierta, el fallo de esa escritura se enseña dentro de ella.
+                    showActionFailure = state.dialog is MealPlanDialog.None,
+                    animations = animations,
+                    actions = actions,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                LoadingBlock(
+                    text = stringResource(R.string.plan_loading),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 }
 
@@ -275,6 +338,7 @@ private fun WeekContent(
     week: MealPlanWeekView,
     addToShopping: AddToShoppingUi,
     showActionFailure: Boolean,
+    animations: Boolean,
     actions: MealPlanActions,
     modifier: Modifier = Modifier,
 ) {
@@ -366,9 +430,18 @@ private fun WeekContent(
                     DayCard(
                         day = day,
                         busy = plan.isBusy,
+                        animations = animations,
                         onAdd = { actions.onAddClick(day.date) },
                         onEdit = actions.onEditClick,
                         onDelete = actions.onDeleteClick,
+                        // Al cambiar de semana los días son otros: entran y salen con un
+                        // fundido corto y las posiciones se recolocan en 200 ms. Es la
+                        // confirmación de que la semana cargada es la nueva.
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = motionTween(animations, Motion.ShortMillis),
+                            placementSpec = motionTween(animations, Motion.MediumMillis),
+                            fadeOutSpec = motionTween(animations, Motion.ShortMillis),
+                        ),
                     )
                 }
             }
@@ -443,9 +516,16 @@ private fun DayCard(
     onEdit: (MealPlanMealView) -> Unit,
     onDelete: (MealPlanMealView) -> Unit,
     modifier: Modifier = Modifier,
+    /** Animaciones del sistema encendidas; en falso, la tarjeta cambia de alto de golpe. */
+    animations: Boolean = false,
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        // Añadir o quitar una comida cambia el alto del día: se abre o se cierra en
+        // 120 ms en vez de dar un salto, y el resto de la lista se recoloca con su
+        // propia animación de posición.
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(motionTween(animations, Motion.ShortMillis)),
         // La misma tarjeta que la lista de recetas: esquina grande del tema y borde de 1 dp.
         // El tono solo no la separa del fondo (1,06:1 en claro y 1,07:1 en oscuro).
         shape = MaterialTheme.shapes.large,

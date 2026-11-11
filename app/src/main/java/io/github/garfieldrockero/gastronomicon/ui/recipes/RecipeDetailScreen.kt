@@ -1,6 +1,12 @@
 package io.github.garfieldrockero.gastronomicon.ui.recipes
 
 import android.content.res.Configuration
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -97,6 +103,41 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
 import io.github.garfieldrockero.gastronomicon.ui.theme.StepText
 import io.github.garfieldrockero.gastronomicon.ui.theme.TabularNumbers
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
+import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
+import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
+
+/**
+ * Qué bloque enseña el detalle. Es la clave (estable) de la transición: no cambia al
+ * escalar raciones ni al recargar la misma receta, así que no recrea nodos ni regiones
+ * vivas; solo cambia cuando cambia lo que se ve de verdad.
+ */
+private enum class DetailPane {
+    Loading,
+    Problem,
+    Unauthorized,
+    NotFound,
+    Ready,
+    Offline,
+}
+
+/** Lo que se pinta: la copia guardada manda sobre el estado del núcleo. */
+private fun detailPane(state: RecipeDetailState, offline: Boolean): DetailPane = when {
+    offline -> DetailPane.Offline
+    state is RecipeDetailState.Ready -> DetailPane.Ready
+    state is RecipeDetailState.Failed -> DetailPane.Problem
+    state == RecipeDetailState.Unauthorized -> DetailPane.Unauthorized
+    state == RecipeDetailState.NotFound -> DetailPane.NotFound
+    // Mientras carga (y el instante en que la ruta retira el detalle al cerrarlo).
+    else -> DetailPane.Loading
+}
+
+/**
+ * Transición entre dos bloques del detalle. Lo que se va se apaga en el acto (`snap`),
+ * así que nunca conviven dos regiones vivas ni un aviso de error espera su turno.
+ */
+private fun detailStateFade(animate: Boolean): ContentTransform =
+    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
+        fadeOut(animationSpec = snap())
 
 /**
  * Detalle de una receta. Sin lógica: las raciones, las cantidades y los textos
@@ -256,59 +297,88 @@ fun RecipeDetailScreen(
                 )
             }
             Box(modifier = Modifier.weight(1f)) {
-                if (offline != null) {
-                    RecipeDetailContent(
-                        view = offline.view,
+                val animationsEnabled = rememberAnimationsEnabled()
+                AnimatedContent(
+                    targetState = detailPane(state, offline != null),
+                    modifier = contentModifier,
+                    transitionSpec = {
+                        // La receta (o su copia guardada) entra con un fundido corto. Cargando,
+                        // el fallo, el 401 y el 404 se cambian de golpe: son regiones vivas y un
+                        // error no se queda 120 ms esperando para contarse.
+                        detailStateFade(
+                            animate = animationsEnabled &&
+                                (targetState == DetailPane.Ready || targetState == DetailPane.Offline),
+                        )
+                    },
+                    label = "detalle-receta",
+                ) { pane ->
+                    val blockModifier = Modifier.fillMaxSize()
+                    when (pane) {
                         // Sin red no se pueden pedir fotos: la copia no las guarda.
-                        imageLoader = null,
-                        onMoreServings = onMoreServings,
-                        onFewerServings = onFewerServings,
-                        onOpenSource = onOpenSource,
-                        modifier = contentModifier,
-                        offline = offline,
-                        onRetry = onRetry,
-                    )
-                } else {
-                    when (state) {
-                        // Closed no se ve nunca (la ruta enseña la lista), pero el «when» ha de ser completo.
-                        RecipeDetailState.Closed, RecipeDetailState.Loading -> LoadingBlock(
+                        DetailPane.Offline -> {
+                            val copy = offline
+                            if (copy != null) {
+                                RecipeDetailContent(
+                                    view = copy.view,
+                                    imageLoader = null,
+                                    onMoreServings = onMoreServings,
+                                    onFewerServings = onFewerServings,
+                                    onOpenSource = onOpenSource,
+                                    modifier = blockModifier,
+                                    offline = copy,
+                                    onRetry = onRetry,
+                                )
+                            }
+                        }
+
+                        DetailPane.Loading -> LoadingBlock(
                             text = stringResource(R.string.detail_loading),
-                            modifier = contentModifier,
+                            modifier = blockModifier,
                         )
 
-                        is RecipeDetailState.Failed -> ProblemBlock(
-                            problem = state.problem,
-                            defaultTitle = R.string.problem_title_recipe,
-                            onRetry = onRetry,
-                            onOpenSettings = onOpenSettings,
-                            modifier = contentModifier,
-                        )
+                        DetailPane.Problem -> {
+                            val problem = (state as? RecipeDetailState.Failed)?.problem
+                            if (problem != null) {
+                                ProblemBlock(
+                                    problem = problem,
+                                    defaultTitle = R.string.problem_title_recipe,
+                                    onRetry = onRetry,
+                                    onOpenSettings = onOpenSettings,
+                                    modifier = blockModifier,
+                                )
+                            }
+                        }
 
                         // 401 y 403: lleva a Ajustes, no a reintentar.
-                        RecipeDetailState.Unauthorized -> ProblemBlock(
+                        DetailPane.Unauthorized -> ProblemBlock(
                             problem = ConnectionProblem.Unauthorized,
                             defaultTitle = R.string.problem_title_recipe,
                             onRetry = onRetry,
                             onOpenSettings = onOpenSettings,
-                            modifier = contentModifier,
+                            modifier = blockModifier,
                         )
 
-                        RecipeDetailState.NotFound -> MessageBlock(
+                        DetailPane.NotFound -> MessageBlock(
                             title = stringResource(R.string.detail_not_found_title),
                             text = stringResource(R.string.detail_not_found_text),
                             primaryLabel = stringResource(R.string.detail_not_found_action),
                             onPrimary = onBack,
-                            modifier = contentModifier,
+                            modifier = blockModifier,
                         )
 
-                        is RecipeDetailState.Ready -> RecipeDetailContent(
-                            view = state.view,
-                            imageLoader = imageLoader,
-                            onMoreServings = onMoreServings,
-                            onFewerServings = onFewerServings,
-                            onOpenSource = onOpenSource,
-                            modifier = contentModifier,
-                        )
+                        DetailPane.Ready -> {
+                            val ready = state as? RecipeDetailState.Ready
+                            if (ready != null) {
+                                RecipeDetailContent(
+                                    view = ready.view,
+                                    imageLoader = imageLoader,
+                                    onMoreServings = onMoreServings,
+                                    onFewerServings = onFewerServings,
+                                    onOpenSource = onOpenSource,
+                                    modifier = blockModifier,
+                                )
+                            }
+                        }
                     }
                 }
             }

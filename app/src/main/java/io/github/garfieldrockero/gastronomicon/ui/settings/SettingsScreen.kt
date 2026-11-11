@@ -2,6 +2,13 @@ package io.github.garfieldrockero.gastronomicon.ui.settings
 
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -72,6 +79,8 @@ import io.github.garfieldrockero.gastronomicon.ui.theme.LocalExtendedColors
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
+import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
+import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
 
 /**
  * Ajustes con su [SettingsViewModel]. Es lo único que se conecta al ViewModel;
@@ -177,6 +186,14 @@ fun SettingsScreen(
             )
         },
     ) { innerPadding ->
+        val animations = rememberAnimationsEnabled()
+        // Cargando / el almacén no contesta / todo listo: tres estados excluyentes. La
+        // clave es este valor y no el estado entero, que cambia en cada recomposición.
+        val serverBlock = when {
+            state.loading -> ServerBlock.Loading
+            state.loadFailed -> ServerBlock.LoadFailed
+            else -> ServerBlock.Ready
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -185,23 +202,40 @@ fun SettingsScreen(
                 .padding(Spacing.large),
             verticalArrangement = Arrangement.spacedBy(Spacing.extraLarge),
         ) {
-            when {
-                state.loading -> SettingsLoadingRow()
-                state.loadFailed -> LoadFailedBlock(onRetry = onRetryLoad)
-                else -> ServerSection(
-                    state = state,
-                    onServerChange = onServerChange,
-                    onPortChange = onPortChange,
-                    onAllowLocalHttpChange = onAllowLocalHttpChange,
-                    onTokenChange = onTokenChange,
-                    onTestConnection = onTestConnection,
-                    onSave = onSave,
-                )
+            AnimatedContent(
+                targetState = serverBlock,
+                // Sin animación de tamaño: el formulario es mucho más alto que la fila
+                // de «Cargando» y un alto a medias dejaría la página saltando.
+                sizeTransform = null,
+                transitionSpec = {
+                    serverBlockFade(animate = animations && targetState == ServerBlock.Ready)
+                },
+                label = "settings-server",
+            ) { block ->
+                when (block) {
+                    ServerBlock.Loading -> SettingsLoadingRow()
+                    ServerBlock.LoadFailed -> LoadFailedBlock(onRetry = onRetryLoad)
+                    ServerBlock.Ready -> ServerSection(
+                        state = state,
+                        onServerChange = onServerChange,
+                        onPortChange = onPortChange,
+                        onAllowLocalHttpChange = onAllowLocalHttpChange,
+                        onTokenChange = onTokenChange,
+                        onTestConnection = onTestConnection,
+                        onSave = onSave,
+                    )
+                }
             }
 
             AppearanceSection(selected = state.themeMode, onThemeChange = onThemeChange)
 
-            if (!state.loading) {
+            // El recordatorio aparece al terminar de leer la sesión: entra con un
+            // fundido corto en vez de empujar la página de golpe.
+            AnimatedVisibility(
+                visible = !state.loading,
+                enter = fadeIn(motionTween(animations)),
+                exit = fadeOut(motionTween(animations)),
+            ) {
                 ReminderSection(
                     reminder = state.reminder,
                     available = !state.loadFailed && state.hasSavedToken,
@@ -230,6 +264,22 @@ fun SettingsScreen(
         ClearSessionDialog(onConfirm = onClearSessionConfirm, onDismiss = onClearSessionDismiss)
     }
 }
+
+/**
+ * Qué ocupa la primera sección de Ajustes: los tres estados excluyentes de la
+ * lectura de la sesión. Es la clave del cambio de bloque (cardinalidad fija, no los datos).
+ */
+private enum class ServerBlock { Loading, LoadFailed, Ready }
+
+/**
+ * Cambio de bloque de la sección del servidor: solo se desvanece el formulario, que
+ * es lo único que no se anuncia por TalkBack. Lo que se va se apaga en el acto
+ * (`snap`): el aviso de «no se pudo leer la sesión» no espera 120 ms y nunca hay dos
+ * regiones vivas a la vez (la de «Cargando» y la del aviso).
+ */
+private fun serverBlockFade(animate: Boolean): ContentTransform =
+    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
+        fadeOut(animationSpec = snap())
 
 /**
  * Título y contenido de una sección de Ajustes. Existe para que las cinco

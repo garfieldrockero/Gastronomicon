@@ -1,6 +1,13 @@
 package io.github.garfieldrockero.gastronomicon.ui.shopping
 
 import android.content.res.Configuration
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,10 +108,13 @@ import io.github.garfieldrockero.gastronomicon.ui.components.problemTextRes
 import io.github.garfieldrockero.gastronomicon.ui.components.problemTitleRes
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.LocalExtendedColors
+import io.github.garfieldrockero.gastronomicon.ui.theme.Motion
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
 import io.github.garfieldrockero.gastronomicon.ui.theme.TabularNumbers
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
+import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
+import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
 
 /**
  * Lista de la compra. Sin lógica: pinta el estado del núcleo ([ShoppingUiState]) y
@@ -288,6 +298,7 @@ private fun ShoppingBody(
     val picker = state.picker
     val listProblem = list.problem
     val pickerProblem = picker.problem
+    val animations = rememberAnimationsEnabled()
 
     // El aviso de arriba nunca pasa de la mitad del hueco: con el texto al 2× y
     // 360 dp de ancho no se come la lista, y sus botones quedan siempre a la vista
@@ -297,7 +308,8 @@ private fun ShoppingBody(
         Column(modifier = Modifier.fillMaxSize()) {
             // «Puede que la lista se haya creado» se queda a la vista en cualquier
             // estado, también cuando la relectura no encuentra ninguna lista: es justo
-            // ahí donde es más fácil crearla otra vez sin querer.
+            // ahí donde es más fácil crearla otra vez sin querer. Va FUERA del fundido:
+            // su región viva no puede nacer ni morir al cambiar de estado.
             if (state.maybeCreated) {
                 MaybeCreatedNotice(
                     onReload = onRetry,
@@ -307,100 +319,132 @@ private fun ShoppingBody(
                 )
             }
 
-            when {
-                // Nunca se ha leído la página de listas y lo último fue un fallo: pantalla completa.
-                !picker.loadedOnce && pickerProblem != null -> ListsProblemBlock(
-                    problem = pickerProblem,
-                    onRetry = onRetry,
-                    onOpenSettings = onOpenSettings,
-                    modifier = Modifier.weight(1f),
-                )
-
+            // Solo cuatro estados posibles: la clave del fundido es este valor y no
+            // los datos, que cambian sin parar. Con las animaciones del sistema
+            // quitadas (`animations` en falso) el cambio es inmediato: un fallo o un
+            // 401 se ven sin esperar.
+            val body = when {
+                !picker.loadedOnce && pickerProblem != null -> ShoppingScreenBody.ListsProblem
                 // Primera lectura de la página: la pantalla nunca se queda en blanco.
-                !picker.loadedOnce -> LoadingBlock(
-                    text = stringResource(R.string.shopping_lists_loading),
-                    modifier = Modifier.weight(1f),
-                )
-
+                !picker.loadedOnce -> ShoppingScreenBody.ListsLoading
                 // Mealie respondió y no hay ninguna lista: se puede crear desde aquí.
-                picker.lists.isEmpty() -> MessageBlock(
-                    title = stringResource(R.string.shopping_no_list_title),
-                    text = stringResource(R.string.shopping_no_list_text),
-                    // Con el aviso de «puede que se haya creado» a la vista no se
-                    // ofrece crear otra: el propio aviso ya pide mirar antes.
-                    primaryLabel = if (state.maybeCreated) null else stringResource(R.string.shopping_no_list_create),
-                    onPrimary = onCreateList,
-                    secondaryLabel = stringResource(R.string.shopping_no_list_action),
-                    onSecondary = onRetry,
-                    modifier = Modifier.weight(1f),
-                )
-
-                else -> Column(modifier = Modifier.weight(1f)) {
-                    if (list.phase == ShoppingPhase.Refreshing) {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                        )
-                    }
-                    // Un solo aviso a la vista: primero las listas y luego la lista abierta.
-                    val noticeModifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small)
-                    when {
-                        // «Pudo crearse» ya tiene su propio aviso arriba: no se repite.
-                        pickerProblem != null && pickerProblem !is ShoppingListPickerProblem.MaybeCreated ->
-                            PickerNotice(
-                                problem = pickerProblem,
+                picker.lists.isEmpty() -> ShoppingScreenBody.NoLists
+                else -> ShoppingScreenBody.Content
+            }
+            AnimatedContent(
+                targetState = body,
+                modifier = Modifier.weight(1f),
+                transitionSpec = {
+                    shoppingBodyFade(animate = animations && targetState == ShoppingScreenBody.Content)
+                },
+                sizeTransform = null,
+                label = "shopping-body",
+            ) { target ->
+                // Lo que se va lee del estado actual: si ya no tiene datos, se apaga
+                // sin dibujar nada en vez de quedarse con el fallo de antes.
+                when (target) {
+                    ShoppingScreenBody.ListsProblem -> {
+                        val current = picker.problem
+                        if (current != null) {
+                            ListsProblemBlock(
+                                problem = current,
                                 onRetry = onRetry,
                                 onOpenSettings = onOpenSettings,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            LoadingBlock(
+                                text = stringResource(R.string.shopping_lists_loading),
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+
+                    ShoppingScreenBody.ListsLoading -> LoadingBlock(
+                        text = stringResource(R.string.shopping_lists_loading),
+                        modifier = Modifier.fillMaxSize(),
+                    )
+
+                    ShoppingScreenBody.NoLists -> MessageBlock(
+                        title = stringResource(R.string.shopping_no_list_title),
+                        text = stringResource(R.string.shopping_no_list_text),
+                        // Con el aviso de «puede que se haya creado» a la vista no se
+                        // ofrece crear otra: el propio aviso ya pide mirar antes.
+                        primaryLabel = if (state.maybeCreated) null else stringResource(R.string.shopping_no_list_create),
+                        onPrimary = onCreateList,
+                        secondaryLabel = stringResource(R.string.shopping_no_list_action),
+                        onSecondary = onRetry,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+
+                    ShoppingScreenBody.Content -> Column(modifier = Modifier.fillMaxSize()) {
+                        if (list.phase == ShoppingPhase.Refreshing) {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            )
+                        }
+                        // Un solo aviso a la vista: primero las listas y luego la lista abierta.
+                        val noticeModifier = Modifier.padding(horizontal = Spacing.medium, vertical = Spacing.small)
+                        when {
+                            // «Pudo crearse» ya tiene su propio aviso arriba: no se repite.
+                            pickerProblem != null && pickerProblem !is ShoppingListPickerProblem.MaybeCreated ->
+                                PickerNotice(
+                                    problem = pickerProblem,
+                                    onRetry = onRetry,
+                                    onOpenSettings = onOpenSettings,
+                                    maxHeight = noticeMaxHeight,
+                                    modifier = noticeModifier,
+                                )
+                            listProblem != null && list.loadedOnce -> ProblemNotice(
+                                problem = listProblem,
+                                onRetry = onRetry,
+                                onOpenSettings = onOpenSettings,
+                                onDismiss = onDismissProblem,
                                 maxHeight = noticeMaxHeight,
                                 modifier = noticeModifier,
                             )
-                        listProblem != null && list.loadedOnce -> ProblemNotice(
-                            problem = listProblem,
-                            onRetry = onRetry,
-                            onOpenSettings = onOpenSettings,
-                            onDismiss = onDismissProblem,
-                            maxHeight = noticeMaxHeight,
-                            modifier = noticeModifier,
-                        )
-                    }
-                    when {
-                        // Fallo sin nada que enseñar todavía: pantalla completa con su acción.
-                        !list.loadedOnce && listProblem != null && !list.isLoading -> {
-                            val connection = listProblem.asConnectionProblem()
-                            if (connection != null) {
-                                ShoppingProblemBlock(connection, onRetry, onOpenSettings, Modifier.weight(1f))
-                            } else {
-                                MessageBlock(
-                                    title = stringResource(R.string.shopping_problem_title),
-                                    text = stringResource(listProblem.messageRes()),
-                                    primaryLabel = stringResource(R.string.problem_retry),
-                                    onPrimary = onRetry,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
                         }
+                        when {
+                            // Fallo sin nada que enseñar todavía: pantalla completa con su acción.
+                            !list.loadedOnce && listProblem != null && !list.isLoading -> {
+                                val connection = listProblem.asConnectionProblem()
+                                if (connection != null) {
+                                    ShoppingProblemBlock(connection, onRetry, onOpenSettings, Modifier.weight(1f))
+                                } else {
+                                    MessageBlock(
+                                        title = stringResource(R.string.shopping_problem_title),
+                                        text = stringResource(listProblem.messageRes()),
+                                        primaryLabel = stringResource(R.string.problem_retry),
+                                        onPrimary = onRetry,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
 
-                        !list.loadedOnce -> LoadingBlock(
-                            text = stringResource(R.string.shopping_loading),
-                            modifier = Modifier.weight(1f),
-                        )
+                            !list.loadedOnce -> LoadingBlock(
+                                text = stringResource(R.string.shopping_loading),
+                                modifier = Modifier.weight(1f),
+                            )
 
-                        list.view.isEmpty -> MessageBlock(
-                            title = stringResource(R.string.shopping_empty_title),
-                            text = stringResource(R.string.shopping_empty_text),
-                            primaryLabel = stringResource(R.string.shopping_empty_action),
-                            onPrimary = onFocusAdd,
-                            modifier = Modifier.weight(1f),
-                        )
+                            list.view.isEmpty -> MessageBlock(
+                                title = stringResource(R.string.shopping_empty_title),
+                                text = stringResource(R.string.shopping_empty_text),
+                                primaryLabel = stringResource(R.string.shopping_empty_action),
+                                onPrimary = onFocusAdd,
+                                modifier = Modifier.weight(1f),
+                            )
 
-                        else -> ShoppingLines(
-                            list = list,
-                            onToggle = onToggle,
-                            onEdit = onEdit,
-                            onClearChecked = onClearChecked,
-                            modifier = Modifier.weight(1f),
-                        )
+                            else -> ShoppingLines(
+                                list = list,
+                                animations = animations,
+                                onToggle = onToggle,
+                                onEdit = onEdit,
+                                onClearChecked = onClearChecked,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }
@@ -408,9 +452,25 @@ private fun ShoppingBody(
     }
 }
 
+/**
+ * Qué ocupa el cuerpo de la compra: cuatro estados excluyentes y de cardinalidad fija.
+ * Es la clave del cambio de bloque; los datos cambian demasiado como para usarlos de clave.
+ */
+private enum class ShoppingScreenBody { ListsProblem, ListsLoading, NoLists, Content }
+
+/**
+ * Cambio de bloque del cuerpo: solo se desvanece la lista, que es lo único que no se
+ * anuncia por TalkBack. Lo que se va se apaga en el acto (`snap`, nunca dos regiones
+ * vivas a la vez) y un fallo o un 401 se leen al instante, sin esperar 120 ms.
+ */
+private fun shoppingBodyFade(animate: Boolean): ContentTransform =
+    fadeIn(animationSpec = motionTween(enabled = animate)) togetherWith
+        fadeOut(animationSpec = snap())
+
 @Composable
 private fun ShoppingLines(
     list: ShoppingListState,
+    animations: Boolean,
     onToggle: (String) -> Unit,
     onEdit: (String) -> Unit,
     onClearChecked: () -> Unit,
@@ -435,12 +495,22 @@ private fun ShoppingLines(
         }
         if (view.hasChecked) {
             item(key = "clear") {
-                ClearCheckedButton(
-                    count = view.checkedCount,
-                    clearing = list.clearingChecked,
-                    enabled = !list.isBusy && !list.isLoading,
-                    onClick = onClearChecked,
-                )
+                // Aparece y desaparece con un fundido corto al marcar la primera cosa
+                // (y al desmarcarla, va con la lista).
+                Box(
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = motionTween(animations, Motion.ShortMillis),
+                        placementSpec = motionTween(animations, Motion.MediumMillis),
+                        fadeOutSpec = motionTween(animations, Motion.ShortMillis),
+                    ),
+                ) {
+                    ClearCheckedButton(
+                        count = view.checkedCount,
+                        clearing = list.clearingChecked,
+                        enabled = !list.isBusy && !list.isLoading,
+                        onClick = onClearChecked,
+                    )
+                }
             }
         }
         for ((index, section) in view.sections.withIndex()) {
@@ -464,8 +534,17 @@ private fun ShoppingLines(
                 ShoppingRow(
                     line = line,
                     busy = line.itemId in list.busyItemIds,
+                    animations = animations,
                     onToggle = { onToggle(line.itemId) },
                     onEdit = { onEdit(line.itemId) },
+                    // Al marcar, la línea baja al final de su sección (lo ordena el
+                    // núcleo): se ve cómo se recoloca, que es la confirmación de que el
+                    // toque ha entrado, en vez de desaparecer de donde estaba.
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = motionTween(animations, Motion.ShortMillis),
+                        placementSpec = motionTween(animations, Motion.MediumMillis),
+                        fadeOutSpec = motionTween(animations, Motion.ShortMillis),
+                    ),
                 )
             }
         }
@@ -533,10 +612,24 @@ private fun ShoppingRow(
     busy: Boolean,
     onToggle: () -> Unit,
     onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Animaciones del sistema encendidas; en falso, el color cambia de golpe. */
+    animations: Boolean = false,
 ) {
     val checkedState = stringResource(R.string.shopping_item_checked_state)
     val uncheckedState = stringResource(R.string.shopping_item_unchecked_state)
-    Column {
+    // Marcar apaga el texto: el cambio de color se ve venir en 120 ms en vez de
+    // parpadear, y la casilla y el tachado siguen siendo la señal de verdad.
+    val textColor by animateColorAsState(
+        targetValue = if (line.checked) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = motionTween(animations, Motion.ShortMillis),
+        label = "shopping-line-color",
+    )
+    Column(modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -566,11 +659,7 @@ private fun ShoppingRow(
                     // El mismo tamaño que un renglón de ingrediente del detalle: es la
                     // misma cosa (texto con casilla) y se lee igual de lejos, de pie.
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (line.checked) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
+                    color = textColor,
                     textDecoration = if (line.checked) TextDecoration.LineThrough else null,
                     modifier = Modifier
                         .weight(1f)

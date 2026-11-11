@@ -1,6 +1,7 @@
 package io.github.garfieldrockero.gastronomicon.ui.setup
 
 import android.content.res.Configuration
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
@@ -40,9 +42,12 @@ import io.github.garfieldrockero.gastronomicon.ui.components.fieldError
 import io.github.garfieldrockero.gastronomicon.ui.components.maskedServer
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.LocalExtendedColors
+import io.github.garfieldrockero.gastronomicon.ui.theme.Motion
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
 import io.github.garfieldrockero.gastronomicon.ui.theme.ThemeMode
+import io.github.garfieldrockero.gastronomicon.ui.theme.motionTween
+import io.github.garfieldrockero.gastronomicon.ui.theme.rememberAnimationsEnabled
 
 /**
  * Estado que pinta la primera configuración. No lleva lógica de validación:
@@ -358,11 +363,19 @@ private fun StatusMessage(status: SetupStatus, canSave: Boolean) {
         // Ya guardado: quien navega se lleva a la persona a la pantalla siguiente.
         SetupStatus.Saved -> ""
     }
-    val color = when (status) {
-        SetupStatus.Success -> LocalExtendedColors.current.success
-        is SetupStatus.Error, is SetupStatus.SaveFailed, SetupStatus.StorageError -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val animations = rememberAnimationsEnabled()
+    val color by animateColorAsState(
+        targetValue = when (status) {
+            SetupStatus.Success -> LocalExtendedColors.current.success
+            is SetupStatus.Error, is SetupStatus.SaveFailed, SetupStatus.StorageError -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        // El aviso cambia de texto y de color a la vez: el color llega en 120 ms para
+        // que el ojo lo registre sin un salto, y con las animaciones del sistema
+        // quitadas cambia de golpe. El nodo vivo de [StatusText] no se toca.
+        animationSpec = motionTween(animations, Motion.ShortMillis),
+        label = "setup-status-color",
+    )
     StatusText(text = text, color = color)
 }
 

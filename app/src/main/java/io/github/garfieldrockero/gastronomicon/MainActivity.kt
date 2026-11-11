@@ -317,8 +317,8 @@ private fun AppRoot(
                 selected = tab,
                 showBar = showBar,
                 onSelect = appViewModel::onTabSelected,
-            ) { contentModifier ->
-                when (tab) {
+            ) { currentTab, contentModifier ->
+                when (currentTab) {
                     MainTab.Recipes -> RecipesRoute(
                         listViewModel = recipeListViewModel,
                         detailViewModel = recipeDetailViewModel,
