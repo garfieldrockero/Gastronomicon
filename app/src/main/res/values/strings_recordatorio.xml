@@ -22,7 +22,7 @@
     <string name="reminder_open_notification_settings">Abrir ajustes de notificaciones</string>
 
     <string name="reminder_reason_no_session">Configura tu servidor primero: el aviso se lee de la copia del plan guardada en el móvil.</string>
-    <string name="reminder_reason_load_failed">No se ha podido leer tu sesión ahora mismo. Vuelve a intentarlo.</string>
+    <string name="reminder_reason_load_failed">Sin la sesión no se puede preparar el aviso.</string>
 
     <!-- Canal y aviso. El título dice algo por sí solo porque TalkBack lo lee
          al llegar la notificación. -->

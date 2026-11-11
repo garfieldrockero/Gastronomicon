@@ -2,8 +2,10 @@ package io.github.garfieldrockero.gastronomicon.ui.settings
 
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
@@ -48,6 +50,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,6 +61,7 @@ import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
 import io.github.garfieldrockero.gastronomicon.ui.components.ClearSessionDialog
 import io.github.garfieldrockero.gastronomicon.ui.components.GastronomiconTopBar
 import io.github.garfieldrockero.gastronomicon.ui.components.LocalHttpSwitch
+import io.github.garfieldrockero.gastronomicon.ui.components.NoticeCard
 import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.SecureWindowEffect
 import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
@@ -226,6 +231,35 @@ fun SettingsScreen(
     }
 }
 
+/**
+ * Título y contenido de una sección de Ajustes. Existe para que las cinco
+ * secciones se agrupen igual —el título de [SectionTitle] pegado a lo suyo y el
+ * contenido con su propio hueco— sin repetir la columna en cada una. [spacing]
+ * es el hueco de dentro: las secciones que son listas de filas (aspecto, acerca
+ * de) van más juntas que las de formulario.
+ */
+@Composable
+private fun SettingsSection(
+    title: String,
+    modifier: Modifier = Modifier,
+    spacing: Dp = Spacing.medium,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        // El hueco corto es lo que dice qué va con qué: el título pertenece a lo
+        // que viene debajo, no al bloque anterior.
+        verticalArrangement = Arrangement.spacedBy(Spacing.small),
+    ) {
+        SectionTitle(text = title)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(spacing),
+            content = content,
+        )
+    }
+}
+
 @Composable
 private fun SettingsLoadingRow() {
     // Un solo nodo para TalkBack: el texto se anuncia al aparecer.
@@ -245,16 +279,19 @@ private fun SettingsLoadingRow() {
     }
 }
 
-/** El Keystore no contestó: se dice qué pasa, que no se ha perdido nada y cómo seguir. */
+/**
+ * El Keystore no contestó: se dice qué pasa y cómo seguir, con el mismo aviso
+ * que el resto de la app. La región viva sigue en el título (la pone
+ * [NoticeCard]), así que TalkBack lo anuncia una vez al aparecer.
+ */
 @Composable
 private fun LoadFailedBlock(onRetry: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.medium)) {
-        Text(
-            text = stringResource(R.string.settings_load_failed),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        )
+    NoticeCard(
+        title = stringResource(R.string.settings_load_failed),
+        detail = stringResource(R.string.settings_load_failed_detail),
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
         Button(
             onClick = onRetry,
             modifier = Modifier
@@ -296,9 +333,7 @@ private fun ServerSection(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.medium)) {
-        SectionTitle(stringResource(R.string.settings_section_server))
-
+    SettingsSection(title = stringResource(R.string.settings_section_server)) {
         OutlinedTextField(
             value = state.server,
             onValueChange = onServerChange,
@@ -463,8 +498,10 @@ private fun StatusMessage(status: SettingsStatus, canSave: Boolean) {
 
 @Composable
 private fun AppearanceSection(selected: ThemeMode, onThemeChange: (ThemeMode) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
-        SectionTitle(stringResource(R.string.settings_section_theme))
+    SettingsSection(
+        title = stringResource(R.string.settings_section_theme),
+        spacing = Spacing.small,
+    ) {
         // selectableGroup: TalkBack dice «1 de 3» y trata las opciones como un grupo.
         Column(modifier = Modifier.selectableGroup()) {
             ThemeMode.entries.forEach { mode ->
@@ -503,8 +540,7 @@ private fun themeLabelRes(mode: ThemeMode): Int = when (mode) {
 
 @Composable
 private fun SessionSection(enabled: Boolean, status: SessionStatus, onClick: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.medium)) {
-        SectionTitle(stringResource(R.string.settings_section_session))
+    SettingsSection(title = stringResource(R.string.settings_section_session)) {
         Text(
             text = stringResource(R.string.settings_clear_description),
             style = MaterialTheme.typography.bodyMedium,
@@ -544,12 +580,18 @@ private fun SessionSection(enabled: Boolean, status: SessionStatus, onClick: () 
 
 @Composable
 private fun AboutSection(version: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
-        SectionTitle(stringResource(R.string.settings_section_about))
+    SettingsSection(
+        title = stringResource(R.string.settings_section_about),
+        spacing = Spacing.small,
+    ) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            // La misma tarjeta rellena que en la lista de recetas y en el planificador:
+            // el tono solo no la separa del fondo (1,06:1 en claro y 1,07:1 en oscuro),
+            // así que el límite lo marca el borde de 1 dp con `outline` (4,28:1 / 5,28:1).
+            color = MaterialTheme.colorScheme.surfaceContainer,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            shape = MaterialTheme.shapes.medium,
+            shape = MaterialTheme.shapes.large,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
@@ -647,6 +689,14 @@ private fun SettingsScreenPreviewLoading() {
 @Preview(showBackground = true)
 @Composable
 private fun SettingsScreenPreviewLoadFailed() {
+    ExampleSettingsScreen(ExampleState.copy(loadFailed = true, canSave = false))
+}
+
+// El mismo fallo de lectura con el texto del sistema al 2× y en 360 dp: el aviso
+// de arriba no puede empujar fuera de la pantalla el resto de las secciones.
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun SettingsScreenPreviewLoadFailedLargeText() {
     ExampleSettingsScreen(ExampleState.copy(loadFailed = true, canSave = false))
 }
 

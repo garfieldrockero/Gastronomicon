@@ -48,12 +48,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.app.NotificationManagerCompat
 import io.github.garfieldrockero.gastronomicon.R
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.theme.GastronomiconTheme
 import io.github.garfieldrockero.gastronomicon.ui.theme.Sizes
 import io.github.garfieldrockero.gastronomicon.ui.theme.Spacing
@@ -125,12 +125,10 @@ fun ReminderSection(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.small),
     ) {
-        Text(
-            text = stringResource(R.string.reminder_section_title),
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.semantics { heading() },
-        )
+        // El mismo título de sección que el resto de Ajustes (marcado como encabezado
+        // dentro del componente): antes se pintaba aquí a mano y se distinguía del
+        // resto de la pantalla.
+        SectionTitle(text = stringResource(R.string.reminder_section_title))
 
         // Fila del interruptor: un solo nodo para TalkBack. El estado lo anuncia el
         // Switch (Role.Switch en `toggleable`): repetirlo con `stateDescription`

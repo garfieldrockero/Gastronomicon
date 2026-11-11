@@ -24,8 +24,6 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -34,6 +32,7 @@ import io.github.garfieldrockero.gastronomicon.R
 import io.github.garfieldrockero.gastronomicon.core.network.ConnectionProblem
 import io.github.garfieldrockero.gastronomicon.ui.components.BusyIndicator
 import io.github.garfieldrockero.gastronomicon.ui.components.LocalHttpSwitch
+import io.github.garfieldrockero.gastronomicon.ui.components.SectionTitle
 import io.github.garfieldrockero.gastronomicon.ui.components.SecureWindowEffect
 import io.github.garfieldrockero.gastronomicon.ui.components.StatusText
 import io.github.garfieldrockero.gastronomicon.ui.components.errorTextRes
@@ -179,17 +178,22 @@ fun SetupScreen(
                 .padding(Spacing.large),
             verticalArrangement = Arrangement.spacedBy(Spacing.medium),
         ) {
-            Text(
-                text = stringResource(R.string.setup_title),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.semantics { heading() },
-            )
-            Text(
-                text = stringResource(R.string.setup_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // Título y explicación juntos (8 dp): se leen como una sola entrada a la
+            // pantalla, y lo que viene después es el formulario. El título sale del
+            // mismo componente que los de Ajustes (con su tamaño propio) y el orden
+            // —título, campos, interruptor, probar, aviso, guardar— es el mismo que
+            // en Ajustes → «Servidor»: si uno cambia, el otro se mira.
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.small)) {
+                SectionTitle(
+                    text = stringResource(R.string.setup_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+                Text(
+                    text = stringResource(R.string.setup_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             OutlinedTextField(
                 value = state.server,
@@ -559,6 +563,36 @@ private fun SetupScreenPreviewEmpty() {
                 canSave = false,
                 status = SetupStatus.Idle,
             )
+        )
+    }
+}
+
+// La primera pantalla que se ve, con el texto del sistema al 2×: el aviso de
+// qué falta tiene que seguir leyéndose y «Guardar» seguir al alcance.
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun SetupScreenPreviewEmptyLargeText() {
+    GastronomiconTheme {
+        ExampleSetupScreen(
+            SetupUiState(
+                server = "",
+                port = "443",
+                token = "",
+                allowLocalHttp = false,
+                canSave = false,
+                status = SetupStatus.Idle,
+            )
+        )
+    }
+}
+
+// Sin cobertura y con el texto grande: el aviso crece y los botones no se pierden.
+@Preview(showBackground = true, widthDp = 360, fontScale = 2f)
+@Composable
+private fun SetupScreenPreviewNoNetworkLargeText() {
+    GastronomiconTheme {
+        ExampleSetupScreen(
+            ExampleState.copy(status = SetupStatus.Error(ConnectionProblem.NoNetwork))
         )
     }
 }

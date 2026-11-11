@@ -56,9 +56,10 @@
     <!-- Ajustes. Los motivos de fallo y el estado de «probando» se reutilizan de
          setup_*; aquí solo lo propio de esta pantalla. -->
     <string name="settings_title">Ajustes</string>
-    <string name="settings_section_server">Servidor</string>
+    <string name="settings_section_server">Tu servidor</string>
     <string name="settings_loading">Cargando tus ajustes…</string>
-    <string name="settings_load_failed">No se ha podido leer tu sesión ahora mismo. Vuelve a intentarlo.</string>
+    <string name="settings_load_failed">No se ha podido leer tu sesión</string>
+    <string name="settings_load_failed_detail">Vuelve a intentarlo.</string>
     <string name="settings_retry">Reintentar</string>
     <string name="settings_token_supporting_saved">Hay un token guardado en este móvil. Déjalo vacío para conservarlo o pega uno nuevo.</string>
     <string name="settings_save">Guardar cambios</string>
