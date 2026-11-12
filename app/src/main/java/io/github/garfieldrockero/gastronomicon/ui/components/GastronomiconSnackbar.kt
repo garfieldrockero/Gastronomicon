@@ -21,7 +21,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -84,15 +83,31 @@ data class SnackbarNotice(
  * Con el teclado abierto el aviso sube por encima del campo: el `Scaffold` de las
  * pestañas no reparte el inset del teclado (`contentWindowInsets = WindowInsets(0)`
  * y `tabInsets` sin borde inferior), así que el hueco lo pone el propio host con
- * `imePadding()` y no un `navigationBarsPadding()` que ya está consumido.
+ * `imePadding()` y no un `navigationBarsPadding()` que ya está consumido. Se apaga
+ * con [imePadding] `false` en **cualquier pantalla cuya barra inferior ya sume el
+ * teclado** (`safeDrawing`, que incluye el IME: el buscador de la lista de recetas,
+ * la barra de la semana del planificador, la barra de añadir de la compra y el
+ * «Guardar» del formulario). Ahí el `Scaffold` ya coloca el aviso por encima de esa
+ * barra medida; sumar el teclado otra vez lo subiría dos teclados, a media pantalla.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun GastronomiconSnackbarHost(
     notice: SnackbarNotice?,
-    onShown: () -> Unit,
+    /**
+     * El aviso ya se ha visto: llega con su [SnackbarNotice.id]. Quien lo recibe
+     * tiene que **ignorar los ids que no sean el suyo**: este callback puede llegar
+     * tarde (un aviso nuevo emitido justo al cerrarse el anterior) y, sin esa
+     * comprobación, se comería la confirmación que nadie ha llegado a ver.
+     */
+    onShown: (Long) -> Unit,
     onAction: () -> Unit = {},
     modifier: Modifier = Modifier,
+    /**
+     * Hueco para el teclado. Por defecto sí (`true`); se pasa `false` cuando la
+     * pantalla ya mete el teclado en su barra inferior.
+     */
+    imePadding: Boolean = true,
 ) {
     val hostState = remember { SnackbarHostState() }
     val noticeTitle = stringResource(R.string.a11y_notice)
@@ -116,14 +131,17 @@ fun GastronomiconSnackbarHost(
             },
         )
         if (result == SnackbarResult.ActionPerformed) onAction()
-        onShown()
+        // Con su id: el receptor lo compara con el aviso que tiene delante y, si no
+        // coincide, no toca nada (llegó tarde y ya hay otro aviso esperando).
+        onShown(shown.id)
     }
 
     SnackbarHost(
         hostState = hostState,
         // Sin hueco propio: el `Scaffold` ya lo sube por encima de su barra y su botón.
+        // El del teclado solo si la pantalla no lo ha metido ya en su barra inferior.
         modifier = modifier
-            .imePadding()
+            .then(if (imePadding) Modifier.imePadding() else Modifier)
             .semantics { paneTitle = noticeTitle },
         snackbar = { data -> GastronomiconSnackbarVisual(data) },
     )
@@ -149,6 +167,11 @@ private fun GastronomiconSnackbarVisual(data: SnackbarData) {
 // Se pinta la misma pieza que en producción ([GastronomiconSnackbarVisual]) para no
 // enseñar un aviso que luego no sea igual. No se usa el host real porque `showSnackbar`
 // suspende 4 s y en la vista previa no llegaría a verse nunca.
+//
+// El par mensaje/acción de las vistas previas con acción es uno que **sí existe** en
+// producción (el éxito de «añadir a la compra» del detalle de una receta): una acción
+// de otra pantalla con un mensaje de la compra enseñaría una combinación que nadie va
+// a ver y, además, ocultaría el caso real del 2× (frase larga + acción en línea aparte).
 
 @Preview(showBackground = true, widthDp = 360, heightDp = 720)
 @Composable
@@ -166,7 +189,7 @@ private fun SnackbarNoticePreview() {
 private fun SnackbarNoticeActionPreview() {
     GastronomiconTheme {
         SnackbarPreviewFrame(
-            message = pluralStringResource(R.plurals.shopping_cleared_notice, 3, 3),
+            message = previewAddedText(2),
             actionLabel = stringResource(R.string.extras_compra_notice_open),
         )
     }
@@ -177,7 +200,7 @@ private fun SnackbarNoticeActionPreview() {
 private fun SnackbarNoticeActionLargeTextPreview() {
     GastronomiconTheme {
         SnackbarPreviewFrame(
-            message = pluralStringResource(R.plurals.shopping_cleared_notice, 12, 12),
+            message = previewAddedText(12),
             actionLabel = stringResource(R.string.extras_compra_notice_open),
         )
     }
@@ -193,11 +216,21 @@ private fun SnackbarNoticeActionLargeTextPreview() {
 private fun SnackbarNoticeActionDarkPreview() {
     GastronomiconTheme(mode = ThemeMode.DARK) {
         SnackbarPreviewFrame(
-            message = pluralStringResource(R.plurals.shopping_cleared_notice, 1, 1),
+            message = previewAddedText(1),
             actionLabel = stringResource(R.string.extras_compra_notice_open),
         )
     }
 }
+
+/**
+ * Texto de ejemplo del éxito de «añadir a la compra». Usa el **mismo** texto que
+ * producción ([addToShoppingAddedText], en `AddToShopping.kt`, mismo paquete), con un
+ * nombre de lista inventado: así la vista previa no puede enseñar una frase que la
+ * app no dice.
+ */
+@Composable
+private fun previewAddedText(recipes: Int): String =
+    addToShoppingAddedText(AddToShoppingOutcome.Added(listName = "Compra", recipes = recipes))
 
 @Composable
 private fun SnackbarPreviewFrame(message: String, actionLabel: String?) {

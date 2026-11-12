@@ -382,5 +382,4 @@
         <item quantity="one">%d cosa quitada de la lista</item>
         <item quantity="other">%d cosas quitadas de la lista</item>
     </plurals>
-    <string name="shopping_item_deleted_notice">Cosa quitada de la lista</string>
 </resources>

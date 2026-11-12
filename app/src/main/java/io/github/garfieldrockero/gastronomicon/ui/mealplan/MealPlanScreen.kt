@@ -99,7 +99,8 @@ class MealPlanActions(
     val onEditClick: (MealPlanMealView) -> Unit = {},
     val onDeleteClick: (MealPlanMealView) -> Unit = {},
     val onDismissActionFailure: () -> Unit = {},
-    val onNoticeShown: () -> Unit = {},
+    /** El aviso ya se ha visto, con su id; el ViewModel ignora los que no sean el suyo. */
+    val onNoticeShown: (Long) -> Unit = {},
     /** «Ver esa semana» del aviso: la comida se guardó en otra semana. */
     val onShowNoticeWeek: () -> Unit = {},
     // «Añadir la semana a la compra» (fase 9, extra 1).
@@ -207,11 +208,15 @@ fun MealPlanScreen(
         },
         snackbarHost = {
             // Un host por Scaffold: así el aviso se coloca por encima de la barra de la
-            // semana y del botón «Añadir», y sube con el teclado.
+            // semana y del botón «Añadir». Sin hueco propio para el teclado (`imePadding =
+            // false`): la barra de la semana ya suma `safeDrawing` (que incluye el teclado) y
+            // el Scaffold pone el aviso por encima de ella medida; sumarlo otra vez lo
+            // subiría dos teclados.
             GastronomiconSnackbarHost(
                 notice = snackbarNotice,
                 onShown = actions.onNoticeShown,
                 onAction = onSnackbarAction,
+                imePadding = false,
             )
         },
         floatingActionButton = {

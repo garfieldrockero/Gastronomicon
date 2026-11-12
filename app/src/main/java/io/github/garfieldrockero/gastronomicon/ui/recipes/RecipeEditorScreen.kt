@@ -186,12 +186,19 @@ class RecipeEditorActions(
  *   ([ValidationDetail]); se pintan junto al campo y TalkBack los anuncia.
  * - «Guardar» abajo, al alcance del pulgar, y apagado mientras se guarda.
  * - Salir con cambios pide confirmación; guardar con éxito lo resuelve la ruta.
+ * - La foto subida se confirma con un aviso corto; su estado y su contador
+ *   vienen del ViewModel ([notice]) y se consumen al terminar ([onNoticeShown]).
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun RecipeEditorScreen(
     state: RecipeEditorState,
     actions: RecipeEditorActions,
+    // Confirmación de un solo uso (ver `RecipeEditorNoticeUi`): null = no hay nada que
+    // confirmar. El ViewModel la emite al subir una foto y la consume `onNoticeShown`.
+    notice: RecipeEditorNoticeUi = RecipeEditorNoticeUi(),
+    // Se llama al terminar de verse el aviso, con su id, para que no se repita.
+    onNoticeShown: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { actions.onRequestClose() }
@@ -218,22 +225,15 @@ fun RecipeEditorScreen(
     val editing = state as? RecipeEditorState.Editing
 
     // «Foto subida» (fase 16h): lo que ya está hecho y no deja nada pendiente se dice en
-    // un aviso corto abajo, no en una línea fija dentro de la sección. El id es el
-    // contador de subidas del estado —uno por foto, sube con cada subida buena y
-    // sobrevive al giro—, y el último aviso enseñado se recuerda aquí con
-    // `rememberSaveable`: así no se repite al recomponer ni al girar, y si el aviso se
-    // corta a medias se vuelve a ver entero. Los **fallos** de subida no pasan por aquí:
-    // siguen en su tarjeta, con «Reintentar».
-    var shownPhotoNoticeId by rememberSaveable { mutableStateOf(0L) }
-    val uploadedPhoto = editing?.photo
-    val photoNoticeId = when {
-        uploadedPhoto == null -> 0L
-        !uploadedPhoto.done -> 0L
-        else -> uploadedPhoto.uploadedCount.toLong()
-    }
-    val notice = if (photoNoticeId != 0L && photoNoticeId != shownPhotoNoticeId) {
+    // un aviso corto abajo, no en una línea fija dentro de la sección. El aviso y su
+    // contador vienen del ViewModel ([RecipeEditorNoticeUi]): así no se repite al
+    // recomponer ni al girar, no se pierde si la pantalla se va a medio aviso y no aparece
+    // al abrir una receta que ya tenía foto. Al terminar de verse se consume con
+    // [onNoticeShown] (el ViewModel ignora los ids que no sean el suyo). Los **fallos** de
+    // subida no pasan por aquí: siguen en su tarjeta, con «Reintentar».
+    val photoNotice = if (notice.notice != null) {
         SnackbarNotice(
-            id = photoNoticeId,
+            id = notice.noticeId,
             message = stringResource(R.string.editor_photo_done),
         )
     } else {
@@ -244,11 +244,14 @@ fun RecipeEditorScreen(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
         // Un host por `Scaffold`: el aviso se coloca solo por encima de la barra de
-        // guardar y del teclado, sin tapar el botón. Nada de Deshacer (fase 16h).
+        // guardar, sin tapar el botón. Nada de Deshacer (fase 16h). El inset del teclado
+        // lo suma ya la barra (`SaveBar`, `safeDrawing`), así que el host no lo repite:
+        // si no, con el teclado abierto el aviso subiría de más y taparía campos.
         snackbarHost = {
             GastronomiconSnackbarHost(
-                notice = notice,
-                onShown = { notice?.let { shownPhotoNoticeId = it.id } },
+                notice = photoNotice,
+                onShown = onNoticeShown,
+                imePadding = false,
             )
         },
         topBar = {

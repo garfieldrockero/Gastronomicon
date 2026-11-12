@@ -65,7 +65,7 @@ enum class RecipeNotice {
  * [noticeId] es un contador que **cambia** con cada aviso; la pantalla lo usa como
  * clave para no perderlo ni repetirlo al girar el móvil ni al recomponer. Un booleano
  * (`deleted = true`) volvería a dispararse en cada giro, y como aviso se oiría
- * repetido. `onNoticeShown()` **consume** el aviso: deja [notice] en `null` y mantiene
+ * repetido. `onNoticeShown(id)` **consume** el aviso: deja [notice] en `null` y mantiene
  * el id.
  */
 data class RecipeNoticeUi(
@@ -439,9 +439,15 @@ class RecipeDetailViewModel(
      * Da por visto el aviso de la lista al terminar de verse (`GastronomiconSnackbarHost`).
      * Se deja `notice` en `null` y se **mantiene** el id: si el contador subiera aquí, el
      * aviso se reproduciría en bucle.
+     *
+     * Se ignoran los ids que no sean el del aviso vigente: la llamada puede llegar tarde,
+     * cuando ya hay otro aviso esperando, y comérselo dejaría sin confirmar una receta que
+     * sí se borró.
      */
-    fun onNoticeShown() {
-        _notice.update { it.copy(notice = null) }
+    fun onNoticeShown(id: Long) {
+        _notice.update { current ->
+            if (current.noticeId == id) current.copy(notice = null) else current
+        }
     }
 
     private fun delete(slug: String): DeleteResult {

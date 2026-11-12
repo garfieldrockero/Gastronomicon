@@ -248,8 +248,13 @@ fun RecipeDetailScreen(
         snackbarHost = {
             GastronomiconSnackbarHost(
                 notice = snackbarNotice,
-                // Al terminar, el aviso se consume en el ViewModel (uno por id, nunca dos veces).
-                onShown = shoppingActions.onNoticeDismiss,
+                // Al terminar, el aviso se consume en el ViewModel (uno por id, nunca dos
+                // veces). Se compara el id con el del aviso que está a la vista: si la
+                // llamada llegara tarde, cuando ya hay otro aviso esperando, no se come el
+                // nuevo (el contrato de `GastronomiconSnackbarHost`).
+                onShown = { id ->
+                    if (id == snackbarNotice?.id) shoppingActions.onNoticeDismiss()
+                },
                 onAction = { openShopping?.invoke() },
             )
         },

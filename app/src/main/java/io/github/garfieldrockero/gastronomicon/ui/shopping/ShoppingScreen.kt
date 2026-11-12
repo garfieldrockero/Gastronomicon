@@ -151,7 +151,8 @@ fun ShoppingScreen(
     onDismissCreateList: () -> Unit,
     onCreateList: (String) -> Unit,
     onDismissCreateNotice: () -> Unit,
-    onNoticeShown: () -> Unit,
+    /** El aviso ya se ha visto, con su id; el ViewModel ignora los que no sean el suyo. */
+    onNoticeShown: (Long) -> Unit,
     modifier: Modifier = Modifier,
     // Con la barra de pestañas debajo, quien la pinta quita el inset inferior (ya lo
     // consume la barra). Suelto, el valor por defecto es el de siempre.
@@ -178,6 +179,8 @@ fun ShoppingScreen(
     // texto se resuelve aquí: el ViewModel no conoce ni los recursos ni el contexto.
     // Errores, 401, sin cobertura y «puede que se haya creado» no llegan aquí: siguen en
     // su tarjeta, con su acción, y no desaparecen solos.
+    // Un solo aviso con recuento: quitar una cosa desde su diálogo y vaciar lo marcado
+    // cuentan lo mismo («1 cosa quitada de la lista», «3 cosas quitadas de la lista»).
     val snackbarNotice = state.notice?.let { notice ->
         SnackbarNotice(
             id = state.noticeId,
@@ -187,7 +190,6 @@ fun ShoppingScreen(
                     notice.count,
                     notice.count,
                 )
-                ShoppingNotice.ItemDeleted -> stringResource(R.string.shopping_item_deleted_notice)
             },
         )
     }
@@ -242,11 +244,15 @@ fun ShoppingScreen(
         },
         snackbarHost = {
             // Un host por Scaffold (fase 16h): así el aviso se coloca por encima de la
-            // barra de añadir y sube con el teclado, sin medir nada a mano. Sin acción:
-            // esta fase no tiene «Deshacer» y el aviso no puede quedarse indefinido.
+            // barra de añadir, sin medir nada a mano. Sin acción: esta fase no tiene
+            // «Deshacer» y el aviso no puede quedarse indefinido.
+            // El teclado no lo mete el host: la barra de añadir ya lo suma en su
+            // `safeDrawing` (es su `bottomBar`), y si lo sumara también aquí el aviso
+            // subiría un teclado de más y saldría a media pantalla.
             GastronomiconSnackbarHost(
                 notice = snackbarNotice,
                 onShown = onNoticeShown,
+                imePadding = false,
             )
         },
     ) { innerPadding ->

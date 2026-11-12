@@ -138,8 +138,9 @@ fun RecipeListScreen(
     onImportRecipe: () -> Unit,
     // Confirmación de un solo uso (ver el KDoc). Null = no hay nada que confirmar.
     notice: SnackbarNotice? = null,
-    // Se llama al terminar de verse el aviso, para que no se repita en cada recomposición.
-    onNoticeShown: () -> Unit = {},
+    // Se llama al terminar de verse el aviso, con su id, para que no se repita en cada
+    // recomposición ni se coma la confirmación que venga después.
+    onNoticeShown: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
     // Con la barra de pestañas debajo, quien la pinta quita aquí el inset inferior
     // (ya lo consume la barra). Suelto, el valor por defecto es el de siempre.
@@ -211,11 +212,16 @@ fun RecipeListScreen(
             }
         },
         // Un host por `Scaffold` (fase 16h): así el aviso se coloca por encima del buscador
-        // y del «+» sin medir nada a mano, y sube con el teclado (`imePadding` del host).
+        // y del «+» sin medir nada a mano. Sin hueco propio para el teclado (`imePadding =
+        // false`): el buscador ya suma `safeDrawing` (que incluye el teclado) y el `Scaffold`
+        // pone el aviso por encima de él medido; sumarlo otra vez lo subiría dos teclados.
         snackbarHost = {
             GastronomiconSnackbarHost(
                 notice = notice,
+                // Con su id: el receptor ignora los avisos que no sean el vigente, así una
+                // llamada que llega tarde no se come la confirmación siguiente.
                 onShown = onNoticeShown,
+                imePadding = false,
             )
         },
     ) { innerPadding ->

@@ -346,6 +346,32 @@ enum class DraftLookup {
     Failed,
 }
 
+/** Lo que el formulario confirma con un aviso corto de un solo uso. */
+enum class RecipeEditorNotice {
+    /**
+     * La foto ya está en el servidor. **Solo** se emite al subir una foto en este
+     * formulario: abrir una receta que ya tenía foto no avisa de nada.
+     */
+    PhotoUploaded,
+}
+
+/**
+ * Aviso de un solo uso del formulario, con el contador que lo identifica.
+ *
+ * Vive **fuera** de [RecipeEditorState] a propósito: el formulario cambia de estado con
+ * cada tecla y el aviso tiene que sobrevivir a esas recomposiciones sin repetirse.
+ *
+ * [noticeId] **cambia** con cada aviso; la pantalla lo usa como clave para no perderlo
+ * ni repetirlo al recomponer ni al girar el móvil. Un booleano (`uploaded = true`)
+ * volvería a dispararse en cada giro, y como aviso se oiría repetido. Una vez visto,
+ * [RecipeEditorViewModel.onNoticeShown] deja [notice] en `null` y **mantiene** el id:
+ * subirlo ahí lanzaría otra vez el mismo aviso.
+ */
+data class RecipeEditorNoticeUi(
+    val notice: RecipeEditorNotice? = null,
+    val noticeId: Long = 0L,
+)
+
 /** Estado del formulario. La interfaz solo lo pinta y avisa de lo que toca la persona. */
 sealed interface RecipeEditorState {
     data object Closed : RecipeEditorState
@@ -442,6 +468,10 @@ sealed interface RecipeEditorState {
  * - La foto ([ImageRecoder] + `uploadImage`) solo existe en modo edición. Se
  *   prepara fuera del hilo principal, se puede cancelar y no guarda ni el Uri,
  *   ni la ruta, ni los bytes en el estado.
+ * - El «ya está» de la foto es un aviso de un solo uso ([notice], con su
+ *   [RecipeEditorNoticeUi]): lo emite aquí la rama buena de la subida, no la
+ *   pantalla, para que no se repita al recomponer ni al girar y para que abrir
+ *   una receta que ya tenía foto no avise de nada.
  * - Sin token, sin URL del servidor ni mensajes de excepción en el estado.
  *
  * Fase 8 (borradores): lo escrito se guarda en [offline] al salir del
@@ -463,6 +493,19 @@ class RecipeEditorViewModel(
 
     private val _state = MutableStateFlow<RecipeEditorState>(RecipeEditorState.Closed)
     val state: StateFlow<RecipeEditorState> = _state.asStateFlow()
+
+    private val _notice = MutableStateFlow(RecipeEditorNoticeUi())
+
+    /**
+     * Aviso de un solo uso que pinta el propio formulario (ver [RecipeEditorNoticeUi]).
+     * Hoy solo hay uno: «Foto subida». Es una confirmación de **esta** pantalla, así que
+     * se vacía al abrir y al cerrar el formulario ([start]): el siguiente formulario no
+     * hereda el aviso del anterior.
+     */
+    val notice: StateFlow<RecipeEditorNoticeUi> = _notice.asStateFlow()
+
+    /** Contador de avisos: cambia con cada uno; su valor concreto da igual. */
+    private var noticeSeq = 0L
 
     private var generation = 0
     private var loadJob: Job? = null
@@ -1377,6 +1420,20 @@ class RecipeEditorViewModel(
         photoJob = viewModelScope.launch { submitPhoto(mode.slug, bytes, gen) }
     }
 
+    /**
+     * El aviso del formulario ya se ha visto (lo llama la pantalla al terminar su tiempo).
+     * Se deja `notice` en `null` y se **mantiene** el id.
+     *
+     * Se ignoran los ids que no sean el del aviso vigente: el callback puede llegar tarde,
+     * cuando ya hay otro aviso esperando, y comérselo dejaría sin confirmar una foto que
+     * sí se subió.
+     */
+    fun onNoticeShown(id: Long) {
+        _notice.update { current ->
+            if (current.noticeId == id) current.copy(notice = null) else current
+        }
+    }
+
     private suspend fun uploadPending(slug: String, gen: Int) {
         val bytes = pendingPhoto ?: return
         if (gen != generation) return
@@ -1421,6 +1478,18 @@ class RecipeEditorViewModel(
                     }
                 }
             }
+        }
+        // «Foto subida» se emite aquí, una vez por subida y desde el ViewModel: así no se
+        // repite al recomponer ni al girar, no se pierde si la pantalla se va a medio aviso y
+        // no depende de que el formulario se vuelva a componer con `done = true` (eso haría
+        // saltar el aviso al abrir una receta que ya tenía foto). Fuera del `update` para que
+        // un reintento del `MutableStateFlow` no emita dos veces. Sin formulario abierto (se
+        // cerró a mitad) no se avisa de nada: `submitPhoto` ya corta por generación.
+        if (result is PhotoUploadResult.Done && _state.value is RecipeEditorState.Editing) {
+            _notice.value = RecipeEditorNoticeUi(
+                notice = RecipeEditorNotice.PhotoUploaded,
+                noticeId = ++noticeSeq,
+            )
         }
     }
 
@@ -1816,6 +1885,9 @@ class RecipeEditorViewModel(
         pickerJob = null
         createJob = null
         pendingPhoto = null
+        // El aviso del formulario es de la pantalla que se cierra o se abre ahora: el
+        // siguiente formulario no hereda la confirmación del anterior.
+        _notice.value = RecipeEditorNoticeUi()
         return ++generation
     }
 

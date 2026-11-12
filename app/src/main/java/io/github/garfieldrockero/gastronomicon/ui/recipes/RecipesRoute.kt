@@ -73,6 +73,10 @@ fun RecipesRoute(
     val deleteNotice by detailViewModel.notice.collectAsStateWithLifecycle()
     val shoppingState by detailViewModel.shopping.collectAsStateWithLifecycle()
     val editorState by editorViewModel.state.collectAsStateWithLifecycle()
+    // «Foto subida» (fase 16h): confirmación de un solo uso del formulario. El texto lo
+    // resuelve la propia pantalla (el ViewModel no conoce los recursos) y el contador lo
+    // lleva el ViewModel, así que ni se repite al girar ni se pierde si se corta a medias.
+    val editorNotice by editorViewModel.notice.collectAsStateWithLifecycle()
     val importState by importViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // Lector del archivo que se elija para importar: solo lee lo que devuelve el
@@ -215,6 +219,8 @@ fun RecipesRoute(
                 onDismissDiscardRecoveredDraft = editorViewModel::dismissDiscardRecoveredDraft,
                 onEnterBackground = editorViewModel::saveDraftNow,
             ),
+            notice = editorNotice,
+            onNoticeShown = editorViewModel::onNoticeShown,
             modifier = modifier,
         )
 

@@ -174,7 +174,14 @@ class MealPlanViewModel(
         publish()
     }
 
-    fun onNoticeShown() {
+    /**
+     * El aviso corto ya se ha visto: se consume (queda en `null`, el contador no cambia).
+     * [id] dice cuál ha terminado; si no es el que está a la vista, no se toca nada: un
+     * final que llega tarde (otro aviso emitido justo al cerrarse el anterior) no puede
+     * comerse la confirmación que aún no se ha visto.
+     */
+    fun onNoticeShown(id: Long) {
+        if (notice == null || id != noticeSeq) return
         notice = null
         publish()
     }

@@ -43,11 +43,13 @@ import kotlinx.coroutines.withContext
  */
 sealed interface ShoppingNotice {
 
-    /** Se quitaron [count] cosas que estaban marcadas («2 cosas quitadas»). */
+    /**
+     * Se quitaron [count] cosas («2 cosas quitadas»): vaciando lo marcado o
+     * quitando una sola desde su diálogo (entonces `count` es 1). Un único aviso
+     * con recuento para los dos caminos: el mismo hecho se cuenta igual siempre y
+     * no hay dos textos que puedan acabar diciendo cosas distintas.
+     */
     data class Cleared(val count: Int) : ShoppingNotice
-
-    /** Se quitó una cosa desde su diálogo de edición. */
-    data object ItemDeleted : ShoppingNotice
 }
 
 /**
@@ -407,9 +409,9 @@ class ShoppingViewModel(
         launchOperation { it.editNote(itemId, note, quantity) }
 
     /**
-     * Quita una cosa desde su diálogo. Si de verdad se fue, se confirma con un
-     * aviso corto («Cosa quitada de la lista»); si falla, el aviso de error sigue
-     * en su tarjeta y no se confirma nada.
+     * Quita una cosa desde su diálogo. Si de verdad se fue, se confirma con el
+     * mismo aviso que al vaciar lo marcado, con recuento 1 («1 cosa quitada de la
+     * lista»); si falla, el aviso de error sigue en su tarjeta y no se confirma nada.
      *
      * Se mira el estado resultante y no solo que no haya fallo: el núcleo no
      * empieza si hay otra escritura en vuelo, y entonces devuelve el estado tal
@@ -425,7 +427,7 @@ class ShoppingViewModel(
                     result.listId == openListId &&
                     result.items.none { it.id == itemId }
                 ) {
-                    emitNotice(ShoppingNotice.ItemDeleted)
+                    emitNotice(ShoppingNotice.Cleared(1))
                 }
             },
         ) { it.delete(itemId) }
@@ -460,9 +462,13 @@ class ShoppingViewModel(
      * El aviso corto ya se ha visto: se consume (queda en `null`) y el contador
      * **no** cambia. Se llama al terminar el aviso, no al empezarlo: si la pantalla
      * se va a medias, al volver se ve otra vez en vez de perderse.
+     *
+     * [id] es el aviso que acaba de terminar. Si no es el que está a la vista, no se
+     * toca nada: un final que llega tarde (el aviso nuevo se emitió justo al cerrarse
+     * el anterior) no puede comerse la confirmación que aún no se ha visto.
      */
-    fun onNoticeShown() {
-        if (notice == null) return
+    fun onNoticeShown(id: Long) {
+        if (notice == null || id != noticeId) return
         notice = null
         publish()
     }
